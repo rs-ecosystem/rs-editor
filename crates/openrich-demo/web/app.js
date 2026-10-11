@@ -405,7 +405,7 @@ function action(command, options = {}) {
   const value = { command, ...options };
   // Capture at input time, not after older queued requests have changed the DOM.
   if (!options.noSelection && !options.selection) value.selection = readSelection();
-  delete value.noSelection; delete value.keepDom; delete value.message;
+  delete value.noSelection; delete value.keepDom; delete value.message; delete value.preserveSelection;
   const epoch = selectionEpoch;
   const generation = actionGeneration;
   const mutation = ['insert_text','delete_backward','delete_forward','split_block','set_block_format','toggle_mark','undo','redo','composition_commit','composition_replace'].includes(command);
@@ -415,7 +415,7 @@ function action(command, options = {}) {
       if (generation !== actionGeneration) return;
       value.expected_document = currentState.document;
       const state = await post('/api/action', value);
-      await updateState(state, options.keepDom !== true, epoch !== selectionEpoch || options.keepDom === true);
+      await updateState(state, options.keepDom !== true, options.preserveSelection === true || epoch !== selectionEpoch || options.keepDom === true);
       if (options.message) status.textContent = options.message;
     } catch (error) {
       if (error.status === 409) {
@@ -470,7 +470,7 @@ function selectionchange() {
   const selection = readNativeSelection();
   const nativeRange = selection && comparePositions(selection.anchor, selection.focus) !== 0;
   if (nativeRange && touchMode) { nativeSelectionActive = true; scheduleOverlay(); }
-  if (composing || (pointerSession && !nativeRange) || mutationPending) return;
+  if (composing || (pointerSession && !nativeRange)) return;
   if (selection && (comparePositions(selection.anchor, currentState.selection.anchor) !== 0 || comparePositions(selection.focus, currentState.selection.focus) !== 0)) {
     nativeSelectionActive = touchMode && comparePositions(selection.anchor, selection.focus) !== 0;
     setLocalSelection(selection);
@@ -508,6 +508,7 @@ let ignoreMouseClicksUntil = 0;
 surface.addEventListener('pointerdown', event => {
   if (event.target.closest('.selection-handle')) return;
   if (event.button !== 0) return;
+  nativeSelectionGuard = 0;
   // Let Android move the native caret/commit IME without dismissing keyboard.
   if (composing && event.pointerType === "touch") return;
   touchMode = event.pointerType === 'touch';
@@ -749,7 +750,12 @@ editor.addEventListener('compositionend', event => {
     const edit = replacementDiff(compositionSnapshot[index], element.textContent || '', index);
     if (edit) edits.push(edit);
   }
+  const finalNativeSelection = readNativeSelection();
   composing = false;
+  nativeSelectionGuard = 0;
+  // The keyboard can end an unchanged reconversion because the user moved
+  // the caret. That destination must survive cancel/commit responses.
+  if (edits.length <= 1 && finalNativeSelection) setLocalSelection(finalNativeSelection);
   const tail = { text: event.data || '', until: performance.now() + 100 };
   compositionTail = tail;
   // Only suppress the browser's trailing insertion in this event turn. A real
@@ -763,13 +769,15 @@ editor.addEventListener('compositionend', event => {
   preview.textContent = '';
   // The native IME operates within one block. Preserve its captured typing
   // marks in one engine command instead of clearing them via set_selection.
-  if (edits.length === 1) action('composition_replace', edits[0]);
+  if (edits.length === 1) action('composition_replace', { ...edits[0], preserveSelection: true });
   else {
-    action('composition_cancel', { noSelection: true });
-    if (edits.length > 1) status.textContent = 'Komposisi lintas paragraf belum didukung; perubahan dibatalkan.';
-    renderSemanticDocument();
+    action('composition_cancel', { noSelection: true, keepDom: edits.length === 0, preserveSelection: edits.length === 0 });
+    if (edits.length > 1) {
+      status.textContent = 'Komposisi lintas paragraf belum didukung; perubahan dibatalkan.';
+      renderSemanticDocument();
+    }
   }
-  if (!edits.length) { renderSemanticDocument(); scheduleOverlay(); }
+  if (!edits.length) scheduleOverlay();
   const waiters = compositionWaiters; compositionWaiters = [];
   actionQueue.then(() => { renderCanvas(true); for (const resolve of waiters) resolve(); });
 });

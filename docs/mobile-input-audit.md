@@ -113,3 +113,11 @@ OPENRICH_ANDROID_CDP=http://127.0.0.1:9222 OPENRICH_ANDROID_URL=http://192.168.1
 ```
 
 Verifikasi akhir: 37 tes Rust, 21 tes kebijakan JavaScript, 2 tes integrasi API/scene, dan 1 tes geometri browser Android lulus. Pemeriksaan manual dragging pegangan setelah font berubah tetap perlu dikonfirmasi pengguna; endpoint geometri sudah diverifikasi di HP.
+
+### Caret kembali ke kata sebelumnya
+
+Kasus pengguna: dari `Selamat` offset 3 pindah ke `datang` offset 10, tetapi caret kembali. Urutan adapter dapat direproduksi di Chrome HP: compositionstart, perubahan caret native, compositionend tanpa perubahan teks. Handler lama mengganti DOM lalu memulihkan selection awal; selectionchange selama mutationPending juga dibuang.
+
+Perbaikan mempertahankan final native selection, tidak mengganti DOM pada no-op composition, mempertahankan selection saat balasan cancel/replace tiba, dan menerima perpindahan native saat mutation request berjalan. Touch baru mereset guard seleksi programatik.
+
+Tes `android-caret.test.mjs` memakai tab dan dokumen uji terpisah pada HP. Event komposisi disusun secara deterministik (bukan klaim mengetik langsung melalui keyboard), request action ditunda 80 ms. Caret no-op tetap offset 10 sebelum/sesudah balasan; caret setelah commit dan perpindahan berikutnya tetap offset 11. Tes lulus; 21 tes JS dan 2 integrasi API/scene juga lulus. Validasi ulang gesture keyboard nyata oleh pengguna masih diperlukan.
