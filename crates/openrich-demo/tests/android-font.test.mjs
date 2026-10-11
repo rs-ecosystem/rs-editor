@@ -24,7 +24,7 @@ test('Android native Latin endpoints match Skia with shared regular/bold fonts',
         const rect=range.getBoundingClientRect();const before=document.createRange();before.selectNodeContents(block);before.setEnd(node,match.index+match[0].length);
         const offset=[...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(before.toString())].length;
         const caret=caretRect(scene,{block_index:Number(block.dataset.block),offset,affinity:'upstream'});
-        if(caret)results.push({weight:getComputedStyle(node.parentElement).fontWeight,dx:rect.right-canvas.left-caret.x,dy:rect.bottom-canvas.top-caret.y-caret.h});
+        if(caret)results.push({word:match[0],weight:getComputedStyle(node.parentElement).fontWeight,dx:rect.right-canvas.left-caret.x,dy:rect.bottom-canvas.top-caret.y-caret.h});
       }
     }return results;
   })()`;

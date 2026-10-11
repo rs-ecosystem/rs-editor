@@ -40,6 +40,30 @@ test('Android adapter keeps latest caret through no-op composition and delayed c
       } finally {window.fetch=originalFetch;}
     })()`);
     assert.deepEqual(result,{immediateNoop:10,settledNoop:10,immediateCommit:11,settledCommit:11,text:'Selxamat datang'});
+    const mixed={schema_version:2,blocks:[
+      {type:'heading',id:'98002',level:1,content:[{type:'text',text:'Selamat datang test',marks:[{type:'bold'}]}]},
+      {type:'paragraph',id:'98003',content:[{type:'text',text:'List text',marks:[]}]}
+    ]};
+    await fetch(`${testUrl}api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(mixed)});
+    await send('Page.reload',{ignoreCache:true});
+    for(let attempt=0;attempt<100;attempt++){if(await evaluate('document.querySelector("#editor")?.textContent === "Selamat datang testList text"'))break;await new Promise(resolve=>setTimeout(resolve,50));}
+    const styles=await evaluate(`(async()=>{
+      await document.fonts.ready;
+      const editor=document.querySelector('#editor');editor.focus({preventScroll:true});
+      const heading=editor.querySelector('[data-block="0"] .text-run'),list=editor.querySelector('[data-block="1"] .text-run');
+      const move=(element,offset)=>{getSelection().setBaseAndExtent(element.firstChild,offset,element.firstChild,offset);document.dispatchEvent(new Event('selectionchange'));};
+      const before={heading:heading.style.cssText,list:list.style.cssText,size:getComputedStyle(heading).fontSize};
+      move(list,3);editor.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true,data:''}));
+      move(heading,3);editor.dispatchEvent(new CompositionEvent('compositionupdate',{bubbles:true,data:''}));
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      const during={heading:heading.style.cssText,size:getComputedStyle(heading).fontSize};
+      editor.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:''}));
+      return {before,during,after:{heading:heading.style.cssText,list:list.style.cssText}};
+    })()`);
+    assert.equal(styles.during.heading,styles.before.heading,'moving from IME paragraph must not restyle heading');
+    assert.equal(styles.during.size,styles.before.size,'heading geometry must remain stable');
+    assert.equal(styles.after.heading,styles.before.heading);
+    assert.equal(styles.after.list,styles.before.list,'temporary IME style must be restored');
   } finally {
     await fetch(`${testUrl}api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(original.document)});
     socket.close();

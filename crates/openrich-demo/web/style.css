@@ -45,3 +45,6 @@
 
 .semantic-editor{font-family:"OpenRich Sans",sans-serif}
 .semantic-editor code{font-family:"OpenRich Mono",monospace}
+
+/* Native Android text gestures need browser panning and selection defaults. */
+.surface{touch-action:pan-y}

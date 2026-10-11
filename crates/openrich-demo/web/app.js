@@ -21,6 +21,7 @@ let nativeSelectionActive = false;
 let selectionRetryTimer = 0;
 let compositionMarks = [];
 let compositionStyleFrame = 0;
+const compositionStyles = new Map();
 let compositionDirty = false;
 let compositionWaiters = [];
 let nativeSelectionGuard = 0;
@@ -510,7 +511,11 @@ surface.addEventListener('pointerdown', event => {
   if (event.button !== 0) return;
   nativeSelectionGuard = 0;
   // Let Android move the native caret/commit IME without dismissing keyboard.
-  if (composing && event.pointerType === "touch") return;
+  if (composing && event.pointerType === "touch") {
+    touchMode = true; nativeSelectionActive = true;
+    ignoreMouseClicksUntil = 0; lastTouchTap = null;
+    return;
+  }
   touchMode = event.pointerType === 'touch';
   nativeSelectionActive = false;
   if (!composing && sceneMatches(layoutSnapshot, documentKey) && !mutationPending) {
@@ -525,6 +530,16 @@ surface.addEventListener('pointerdown', event => {
       action('set_block_format', {format:{...format, checked:!format.checked}, selection:{anchor:position, focus:position}});
       return;
     }
+  }
+  if (event.pointerType === 'touch' && editor.contains(event.target)) {
+    // The browser owns touch caret placement, double tap, long press and its
+    // editing menu together. Programmatic word selection cannot open that menu.
+    touchMode = true;
+    nativeSelectionActive = true;
+    lastTouchTap = null;
+    ignoreMouseClicksUntil = 0;
+    flushPendingInsert();
+    return;
   }
   if (event.pointerType === 'touch') {
     event.preventDefault();
@@ -621,10 +636,12 @@ function selectPointerUnit(wholeBlock = false) {
   });
 }
 surface.addEventListener('dblclick', event => {
+  if (touchMode && nativeSelectionActive) return;
   event.preventDefault();
   if (performance.now() >= ignoreMouseClicksUntil) selectPointerUnit();
 });
 surface.addEventListener('click', event => {
+  if (touchMode && nativeSelectionActive) return;
   if (performance.now() < ignoreMouseClicksUntil) { event.preventDefault(); return; }
   if (event.detail >= 3) { event.preventDefault(); selectPointerUnit(true); }
 });
@@ -752,6 +769,8 @@ editor.addEventListener('compositionend', event => {
   }
   const finalNativeSelection = readNativeSelection();
   composing = false;
+  for (const [element, cssText] of compositionStyles) element.style.cssText = cssText;
+  compositionStyles.clear();
   nativeSelectionGuard = 0;
   // The keyboard can end an unchanged reconversion because the user moved
   // the caret. That destination must survive cancel/commit responses.
@@ -936,9 +955,13 @@ function applyCompositionStyle() {
   const native = window.getSelection();
   const node = native?.focusNode;
   const host = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
-  if (host && editor.contains(host)) {
+  const nativeBlock = host?.closest?.('[data-block]');
+  if (host && editor.contains(host) && nativeBlock && Number(nativeBlock.dataset.block) === compositionSelection?.focus?.block_index) {
     // Style the IME's actual insertion host; do not replace its live text nodes.
-    for (const element of [host, ...host.querySelectorAll('*')]) {
+    // A moved caret can arrive before compositionend. Never apply the old
+    // block's marks/size to its new destination, or to unrelated descendants.
+    for (const element of [host]) {
+      if (!compositionStyles.has(element)) compositionStyles.set(element, element.style.cssText);
       for (const [property, value] of Object.entries(style)) {
         const cssProperty = property.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`);
         element.style.setProperty(cssProperty, value, 'important');
