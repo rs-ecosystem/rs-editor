@@ -5,3 +5,5 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+openrich-document = { path = "../openrich-document" }
+openrich-layout = { path = "../openrich-layout" }

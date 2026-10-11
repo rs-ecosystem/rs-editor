@@ -1,0 +1,16 @@
+[package]
+name = "openrich-render-skia"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openrich-document = { path = "../openrich-document" }
+openrich-layout = { path = "../openrich-layout" }
+openrich-render = { path = "../openrich-render" }
+skia-safe = {
+    version = "=0.153.3",
+    default-features = false,
+    features = ["binary-cache", "embed-icudtl", "textlayout"],
+}
+thiserror.workspace = true

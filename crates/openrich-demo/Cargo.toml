@@ -1,0 +1,14 @@
+[package]
+name = "openrich-demo"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openrich-document = { path = "../openrich-document" }
+openrich-editor = { path = "../openrich-editor" }
+openrich-layout = { path = "../openrich-layout" }
+openrich-render-skia = { path = "../openrich-render-skia" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+skia-safe = { version = "=0.153.3", default-features = false, features = ["binary-cache", "embed-icudtl", "textlayout"] }

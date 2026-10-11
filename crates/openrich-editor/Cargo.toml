@@ -6,4 +6,6 @@ rust-version.workspace = true
 
 [dependencies]
 openrich-document = { path = "../openrich-document" }
+openrich-transaction = { path = "../openrich-transaction" }
 thiserror.workspace = true
+unicode-segmentation.workspace = true

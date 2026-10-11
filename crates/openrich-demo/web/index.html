@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>OpenRich · editor demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">O</span><div><strong>OpenRich</strong><small>interactive engine demo</small></div></div>
+      <div class="top-actions">
+        <button id="openButton" class="quiet-button" type="button">Buka JSON</button>
+        <button id="saveButton" class="primary-button" type="button">Simpan JSON</button>
+        <input id="fileInput" type="file" accept="application/json,.json" hidden>
+      </div>
+    </header>
+    <section class="intro">
+      <div><p class="eyebrow">Rust core · Skia renderer</p><h1>Editor yang bisa dicoba langsung</h1><p class="lead">Ketik dan format teks di bawah. Perubahan masuk ke engine Rust, dirender oleh Skia, dan bisa disimpan sebagai JSON.</p></div>
+      <div class="engine-badge"><span class="pulse"></span> Local demo <code>127.0.0.1</code></div>
+    </section>
+    <section class="workspace" aria-label="Rich text editor">
+      <div class="toolbar" role="toolbar" aria-label="Format teks">
+        <button type="button" data-mark="bold" aria-label="Tebal" title="Tebal (⌘/Ctrl+B)"><strong>B</strong></button>
+        <button type="button" data-mark="italic" aria-label="Miring" title="Miring (⌘/Ctrl+I)"><em>I</em></button>
+        <button type="button" data-mark="underline" aria-label="Garis bawah" title="Garis bawah (⌘/Ctrl+U)"><u>U</u></button>
+        <button type="button" data-mark="strike" aria-label="Coret" title="Coret"><s>S</s></button>
+        <button type="button" data-mark="code" aria-label="Kode" title="Kode"><code>&lt;/&gt;</code></button>
+        <span class="toolbar-divider"></span>
+        <button id="undoButton" type="button" aria-label="Undo" title="Undo (⌘/Ctrl+Z)">↶</button>
+        <button id="redoButton" type="button" aria-label="Redo" title="Redo (⌘/Ctrl+Shift+Z)">↷</button>
+        <span class="toolbar-spacer"></span>
+        <span class="toolbar-hint">Selection, IME, undo/redo aktif</span>
+      </div>
+      <div class="block-toolbar" role="toolbar" aria-label="Format paragraf">
+        <button type="button" data-list="ordered" aria-label="Daftar bernomor" title="Daftar bernomor">1. List</button>
+        <button type="button" data-list="bullet" aria-label="Daftar bullet" title="Daftar bullet">• List</button>
+        <button type="button" data-list="checkbox" aria-label="Checklist" title="Checklist">☐ List</button>
+        <button type="button" id="checkItem" aria-label="Centang item" title="Centang item checklist">✓</button>
+        <select id="alignment" aria-label="Perataan teks">
+          <option value="left">Rata kiri</option><option value="center">Tengah</option><option value="right">Rata kanan</option><option value="justify">Justify</option>
+        </select>
+      </div>
+      <div id="surface" class="surface">
+        <canvas id="skiaCanvas" class="skia-canvas" width="960" height="180" aria-hidden="true"></canvas>
+        <canvas id="selectionCanvas" class="selection-canvas" aria-hidden="true"></canvas>
+        <div id="editor" class="semantic-editor" contenteditable="true" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="Dokumen OpenRich" aria-multiline="true"></div>
+        <button type="button" class="selection-handle" id="selectionStart" aria-label="Geser awal seleksi" hidden></button>
+        <button type="button" class="selection-handle" id="selectionEnd" aria-label="Geser akhir seleksi" hidden></button>
+        <div id="compositionPreview" class="composition-preview" aria-hidden="true"></div>
+        <div id="loading" class="loading">Memuat dokumen…</div>
+      </div>
+      <footer class="editor-footer"><span id="status" role="status" aria-live="polite">Terhubung ke engine lokal</span><span>Enter untuk paragraf baru · Paste mendukung teks</span></footer>
+    </section>
+    <aside class="performance-hud" aria-label="Performa rendering">
+      <span title="Frekuensi callback animasi browser; bukan FPS renderer Skia">UI <b id="uiFPS">—</b> FPS</span>
+      <span title="Frame Skia yang diterima dan ditampilkan per detik. Saat diam nilainya 0 karena render hanya saat ada perubahan.">Skia <b id="skiaFPS">0</b> FPS <small>redraw</small></span>
+      <span title="Waktu raster software Skia terakhir, diukur di proses Rust">Raster <b id="skiaMs">—</b> ms</span>
+      <span title="Waktu membangun scene terakhir di server, termasuk layout, geometri, raster, dan persiapan transfer">Scene <b id="sceneMs">—</b> ms</span>
+      <span title="P95 waktu input sampai drawing overlay dalam callback rAF (200 sampel terakhir); bukan pengukuran fisik layar">Input→draw <b id="inputMs">—</b> ms <small>p95</small></span>
+      <small>Skia merender saat isi atau ukuran berubah · caret/seleksi digambar lokal</small>
+    </aside>
+    <section class="help-row">
+      <div><span class="help-icon">⌘</span><p><strong>Pintasan</strong><br>Bold, italic, underline, undo, redo</p></div>
+      <div><span class="help-icon">文</span><p><strong>Unicode & IME</strong><br>Emoji, aksara RTL, dan komposisi input</p></div>
+      <div><span class="help-icon">JSON</span><p><strong>Portabel</strong><br>Buka atau unduh dokumen OpenRich</p></div>
+    </section>
+    <p class="disclaimer">Demo berjalan lokal di komputer ini. Dokumen tidak dikirim ke layanan eksternal.</p>
+  </main>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
