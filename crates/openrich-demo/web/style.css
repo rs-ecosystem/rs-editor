@@ -48,3 +48,8 @@
 
 /* Native Android text gestures need browser panning and selection defaults. */
 .surface{touch-action:pan-y}
+/* Precision handles share Skia geometry; native IME retains the DOM range. */
+.selection-menu{position:absolute;z-index:7;display:flex;max-width:calc(100% - 8px);padding:3px;background:#fff;border:1px solid #dce2e9;border-radius:10px;box-shadow:0 3px 14px #18222f25;touch-action:none}
+.selection-menu[hidden]{display:none}.selection-menu button{min-height:38px;border:0;border-radius:7px;padding:0 11px;background:transparent;color:#24344b;font:500 12px system-ui;white-space:nowrap}.selection-menu button:active{background:#edf0fc}
+.selection-handle{width:44px;height:44px;transform:translate(-50%,-3px)}.selection-handle::after{width:18px;height:18px;border:0;border-radius:0 50% 50% 50%;margin:3px auto;transform:rotate(45deg);box-shadow:none}
+.selection-menu{position:fixed}

@@ -49,6 +49,11 @@
         <div id="editor" class="semantic-editor" contenteditable="true" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="Dokumen OpenRich" aria-multiline="true"></div>
         <button type="button" class="selection-handle" id="selectionStart" aria-label="Geser awal seleksi" hidden></button>
         <button type="button" class="selection-handle" id="selectionEnd" aria-label="Geser akhir seleksi" hidden></button>
+        <div id="selectionMenu" class="selection-menu" role="toolbar" aria-label="Aksi seleksi" hidden>
+          <button type="button" data-selection-action="cut">Potong</button>
+          <button type="button" data-selection-action="copy">Salin</button>
+          <button type="button" data-selection-action="all">Pilih semua</button>
+        </div>
         <div id="compositionPreview" class="composition-preview" aria-hidden="true"></div>
         <div id="loading" class="loading">Memuat dokumen…</div>
       </div>

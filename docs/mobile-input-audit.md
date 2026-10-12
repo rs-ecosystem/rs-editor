@@ -121,3 +121,17 @@ Kasus pengguna: dari `Selamat` offset 3 pindah ke `datang` offset 10, tetapi car
 Perbaikan mempertahankan final native selection, tidak mengganti DOM pada no-op composition, mempertahankan selection saat balasan cancel/replace tiba, dan menerima perpindahan native saat mutation request berjalan. Touch baru mereset guard seleksi programatik.
 
 Tes `android-caret.test.mjs` memakai tab dan dokumen uji terpisah pada HP. Event komposisi disusun secara deterministik (bukan klaim mengetik langsung melalui keyboard), request action ditunda 80 ms. Caret no-op tetap offset 10 sebelum/sesudah balasan; caret setelah commit dan perpindahan berikutnya tetap offset 11. Tes lulus; 21 tes JS dan 2 integrasi API/scene juga lulus. Validasi ulang gesture keyboard nyata oleh pengguna masih diperlukan.
+
+### Seleksi presisi lintas heading dan list — 12 Oktober 2026
+
+Kasus pengguna adalah drag pegangan dari angka `729391` ke tengah teks list tanpa spasi, bukan tap caret. Screenshot memperlihatkan magnifier berada di tengah list tetapi native extent tetap offset 0. Chromium DirectionGranularityStrategy dapat memperluas seleksi mengikuti batas kata; pemilihan per karakter memerlukan pengendalian pegangan oleh editor. Pengguna menyetujui penggantian pegangan/menu native untuk seleksi rentang.
+
+Double tap/hold native tetap menentukan pilihan awal. Adapter membatalkan context menu, membersihkan pegangan Chrome dengan reset range, lalu mempertahankan range DOM programatik untuk IME, aksesibilitas, dan copy. Dua pegangan editor memakai caret/hit testing Skia per grapheme. Offset sentuhan terhadap caret disimpan saat pointerdown; pointer capture menjaga drag lintas blok. Native selectionchange diserap tanpa menulis range kembali. Menu editor menyediakan Potong, Salin, Pilih semua. Tempel tetap tersedia melalui keyboard/platform; Clipboard API read tidak tersedia pada origin HTTP LAN. Cut hanya menghapus sesudah copy berhasil.
+
+Tes `android-precision.test.mjs` memakai fixture heading + ordered list di server/tab terpisah. Range awal disiapkan secara programatik; drag pegangan memakai trusted touch Chrome CDP. Focus bergerak langsung ke offset 1, 3, 6 pada list, tanpa menuju akhir kata. Range tetap dimulai pada angka, kedua pegangan/menu terlihat, dan dokumen engine tidak berubah. Screenshot hasil tersimpan sebagai `openrich-precision-heading-to-list.png`. Tes double tap trusted (`android-touch.test.mjs`), komposisi/caret deterministik (`android-caret.test.mjs`), dan 21 tes JS juga lulus. Pengujian manual keyboard nyata/drag pengguna pada versi ini tetap diperlukan.
+
+```sh
+OPENRICH_ANDROID_CDP=http://127.0.0.1:9222 OPENRICH_ANDROID_TEST_URL=http://192.168.100.20:4174/ node --test crates/openrich-demo/tests/android-precision.test.mjs
+```
+
+Styling IME sementara juga dibatasi ke blok komposisi dan dipulihkan saat compositionend. Ini mencegah perpindahan caret dari list menerapkan font 16px ke heading transparan yang digambar Skia 26.4px. Tes caret mencakup kestabilan style heading, pemulihan style paragraf, dan tidak adanya write-back range saat melewati batas blok.

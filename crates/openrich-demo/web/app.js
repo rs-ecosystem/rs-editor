@@ -18,6 +18,8 @@ let previewDocument = null;
 let compositionEpoch = 0;
 let previewRenderQueued = false;
 let nativeSelectionActive = false;
+let preciseSelection = false;
+const selectionMenu = document.querySelector('#selectionMenu');
 let selectionRetryTimer = 0;
 let compositionMarks = [];
 let compositionStyleFrame = 0;
@@ -304,6 +306,7 @@ function paintOverlay() {
   overlayContext.setTransform(1, 0, 0, 1, 0, 0);
   overlayContext.clearRect(0, 0, overlay.width, overlay.height);
   for (const handle of selectionHandles) handle.hidden = true;
+  selectionMenu.hidden = true;
   if (!layoutSnapshot || !currentState) return;
   // Skia owns text and highlight in both committed and preedit frames.
   surface.dataset.selectionOwner = selectionOwner(composing);
@@ -332,6 +335,18 @@ function paintOverlay() {
         handle.style.left = `${rect.x * scale}px`;
         handle.style.top = `${(rect.y + rect.h) * scale}px`;
       });
+      if (preciseSelection && !handleDrag) {
+        const start = comparePositions(selection.anchor, selection.focus) <= 0 ? selection.anchor : selection.focus;
+        const rect = caretRect(layoutSnapshot, start);
+        if (rect) {
+          selectionMenu.hidden = false;
+          const bounds = canvas.getBoundingClientRect();
+          const viewport = window.visualViewport;
+          const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
+          selectionMenu.style.top = `${Math.max(top + 4, bounds.top + rect.y * scale - 48)}px`;
+          selectionMenu.style.left = `${Math.max(left + 4, Math.min(bounds.left + rect.x * scale, left + (viewport?.width || innerWidth) - selectionMenu.offsetWidth - 4))}px`;
+        }
+      }
     }
   }
 }
@@ -349,14 +364,14 @@ function navigateLocal(key, extend, started) {
   setLocalSelection(navigate(layoutSnapshot, currentState.selection, key, extend, preferredCaretX), started);
 }
 
-function setLocalSelection(selection, inputTime = performance.now()) {
+function setLocalSelection(selection, inputTime = performance.now(), restoreNative = true) {
   if (!selection || !currentState) return;
   selectionEpoch += 1;
   pendingCaret = null;
   if (comparePositions(currentState.selection.anchor, selection.anchor) !== 0 || comparePositions(currentState.selection.focus, selection.focus) !== 0) currentState.active_marks = null;
   currentState.selection = selection;
   updateBlockToolbar();
-  restoreSelection(selection);
+  if (restoreNative) restoreSelection(selection);
   scheduleOverlay(inputTime);
 }
 
@@ -470,11 +485,13 @@ function selectionchange() {
   if (handleDrag) return;
   const selection = readNativeSelection();
   const nativeRange = selection && comparePositions(selection.anchor, selection.focus) !== 0;
-  if (nativeRange && touchMode) { nativeSelectionActive = true; scheduleOverlay(); }
+  if (nativeRange && touchMode) { nativeSelectionActive = !preciseSelection; scheduleOverlay(); }
   if (composing || (pointerSession && !nativeRange)) return;
   if (selection && (comparePositions(selection.anchor, currentState.selection.anchor) !== 0 || comparePositions(selection.focus, currentState.selection.focus) !== 0)) {
-    nativeSelectionActive = touchMode && comparePositions(selection.anchor, selection.focus) !== 0;
-    setLocalSelection(selection);
+    nativeSelectionActive = !preciseSelection && touchMode && comparePositions(selection.anchor, selection.focus) !== 0;
+    // Android owns an active handle drag. Writing its range back with
+    // setBaseAndExtent can reset that gesture at a run or paragraph boundary.
+    setLocalSelection(selection, performance.now(), false);
   }
 }
 
@@ -507,7 +524,8 @@ function queuePointer(session, event) {
 let lastTouchTap = null;
 let ignoreMouseClicksUntil = 0;
 surface.addEventListener('pointerdown', event => {
-  if (event.target.closest('.selection-handle')) return;
+  if (event.target.closest('.selection-handle, .selection-menu')) return;
+  preciseSelection = false;
   if (event.button !== 0) return;
   nativeSelectionGuard = 0;
   // Let Android move the native caret/commit IME without dismissing keyboard.
@@ -636,11 +654,13 @@ function selectPointerUnit(wholeBlock = false) {
   });
 }
 surface.addEventListener('dblclick', event => {
+  if (preciseSelection) { event.preventDefault(); return; }
   if (touchMode && nativeSelectionActive) return;
   event.preventDefault();
   if (performance.now() >= ignoreMouseClicksUntil) selectPointerUnit();
 });
 surface.addEventListener('click', event => {
+  if (preciseSelection) return;
   if (touchMode && nativeSelectionActive) return;
   if (performance.now() < ignoreMouseClicksUntil) { event.preventDefault(); return; }
   if (event.detail >= 3) { event.preventDefault(); selectPointerUnit(true); }
@@ -649,7 +669,21 @@ surface.addEventListener('click', event => {
 editor.addEventListener('focus', () => scheduleOverlay());
 editor.addEventListener('blur', () => scheduleOverlay());
 document.addEventListener('selectionchange', selectionchange);
-editor.addEventListener('contextmenu', () => { nativeSelectionActive = true; scheduleOverlay(); });
+editor.addEventListener('contextmenu', event => {
+  if (!touchMode) { nativeSelectionActive = true; scheduleOverlay(); return; }
+  event.preventDefault();
+  const selection = readNativeSelection();
+  if (!selection || comparePositions(selection.anchor, selection.focus) === 0) return;
+  preciseSelection = true;
+  nativeSelectionActive = false;
+  setLocalSelection(selection, performance.now(), false);
+  // Clear Chrome's native handles/menu, then keep the logical range available
+  // to IME, copy and accessibility as a programmatic selection.
+  const native = window.getSelection();
+  native.removeAllRanges();
+  restoreSelection(selection);
+  scheduleOverlay();
+});
 editor.addEventListener('beforeinput', event => {
   if (composing || event.isComposing) return;
   // Some mobile IMEs emit a final insertion after compositionend. The commit
@@ -848,6 +882,9 @@ async function start() {
   }
 }
 window.addEventListener('resize', () => renderCanvas());
+window.addEventListener('scroll', () => scheduleOverlay(), {passive:true});
+window.visualViewport?.addEventListener('scroll', () => scheduleOverlay(), {passive:true});
+window.visualViewport?.addEventListener('resize', () => scheduleOverlay(), {passive:true});
 start();
 
 function currentBlockFormat() {
@@ -907,23 +944,55 @@ for (const [index, handle] of selectionHandles.entries()) {
     event.preventDefault(); event.stopPropagation();
     if (composing || mutationPending || !sceneMatches(layoutSnapshot, documentKey)) return;
     touchMode = true;
-    handleDrag = { id: event.pointerId, index, selection: structuredClone(currentState.selection) };
+    preciseSelection = true; nativeSelectionActive = false;
+    const bounds = canvas.getBoundingClientRect(), scale = bounds.width / layoutSnapshot.width;
+    const endpoint = index === 0 ? currentState.selection.anchor : currentState.selection.focus;
+    const caret = caretRect(layoutSnapshot, endpoint);
+    if (!caret) return;
+    handleDrag = { id: event.pointerId, index, selection: structuredClone(currentState.selection),
+      dx: event.clientX - bounds.left - caret.x * scale,
+      dy: event.clientY - bounds.top - (caret.y + caret.h / 2) * scale };
     handle.setPointerCapture(event.pointerId);
+    scheduleOverlay();
   });
   handle.addEventListener('pointermove', event => {
     if (!handleDrag || handleDrag.id !== event.pointerId) return;
     event.preventDefault(); event.stopPropagation();
     const bounds = canvas.getBoundingClientRect(), scale = layoutSnapshot.width / bounds.width;
-    const position = hitTest(layoutSnapshot, (event.clientX - bounds.left) * scale, (event.clientY - bounds.top - 12) * scale);
+    const position = hitTest(layoutSnapshot, (event.clientX - bounds.left - handleDrag.dx) * scale, (event.clientY - bounds.top - handleDrag.dy) * scale);
     if (position) setLocalSelection(index === 0 ? {anchor: position, focus: handleDrag.selection.focus} : {anchor: handleDrag.selection.anchor, focus: position});
   });
   const release = event => {
     event.stopPropagation();
     if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
     handleDrag = null;
+    scheduleOverlay();
   };
   handle.addEventListener('pointerup', release);
   handle.addEventListener('pointercancel', release);
+}
+
+for (const button of selectionMenu.querySelectorAll('button')) {
+  button.addEventListener('pointerdown', event => { event.preventDefault(); event.stopPropagation(); });
+  button.addEventListener('click', async () => {
+    const command = button.dataset.selectionAction;
+    if (command === 'all') {
+      const last = currentState.document.blocks.length - 1;
+      const offset = graphemeOffset((currentState.document.blocks[last].content || []).map(run => run.text || '').join(''));
+      setLocalSelection({anchor:{block_index:0,offset:0,affinity:'downstream'},focus:{block_index:last,offset,affinity:'upstream'}});
+      return;
+    }
+    await finishComposition();
+    const selection = structuredClone(currentState.selection);
+    restoreSelection(selection);
+    // execCommand also works on the HTTP LAN demo where Clipboard API is
+    // unavailable. Copy first; only delete when copying actually succeeded.
+    const copied = document.execCommand('copy');
+    if (!copied) { status.textContent = 'Tidak bisa menyalin. Gunakan tombol salin di keyboard.'; return; }
+    if (command === 'cut') { preciseSelection = false; action('insert_text', {text:'',selection}); }
+    else status.textContent = 'Teks disalin';
+    scheduleOverlay();
+  });
 }
 
 // IMEs may replace their insertion node after compositionupdate/input. Observe

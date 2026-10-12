@@ -64,6 +64,23 @@ test('Android adapter keeps latest caret through no-op composition and delayed c
     assert.equal(styles.during.size,styles.before.size,'heading geometry must remain stable');
     assert.equal(styles.after.heading,styles.before.heading);
     assert.equal(styles.after.list,styles.before.list,'temporary IME style must be restored');
+    await evaluate('new Promise(resolve=>setTimeout(resolve,400))');
+    const drag=await evaluate(`(async()=>{
+      const editor=document.querySelector('#editor'),heading=editor.querySelector('[data-block="0"] .text-run').firstChild,list=editor.querySelector('[data-block="1"] .text-run').firstChild;
+      const native=getSelection(),original=native.setBaseAndExtent;
+      let writes=0;native.setBaseAndExtent=function(...args){writes++;return original.apply(this,args);};
+      try {
+        original.call(native,heading,8,heading,18);
+        document.dispatchEvent(new Event('selectionchange'));
+        for(const offset of [0,2,5]){
+          original.call(native,heading,8,offset===0?list.parentElement:list,offset);
+          document.dispatchEvent(new Event('selectionchange'));
+        }
+        await new Promise(resolve=>setTimeout(resolve,120));
+        return {writes,block:native.focusNode.parentElement.closest('[data-block]').dataset.block,offset:native.focusOffset};
+      }finally{native.setBaseAndExtent=original;}
+    })()`);
+    assert.deepEqual(drag,{writes:0,block:'1',offset:5},'native handle range must not be rewritten while crossing into a paragraph');
   } finally {
     await fetch(`${testUrl}api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(original.document)});
     socket.close();

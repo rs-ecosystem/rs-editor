@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 const endpoint=process.env.OPENRICH_ANDROID_CDP, pageUrl=process.env.OPENRICH_ANDROID_TEST_URL;
-test('Android touch double tap uses native selection without cancelling browser defaults', {skip:!endpoint||!pageUrl}, async()=>{
+test('Android touch double tap opens editor precision handles and menu', {skip:!endpoint||!pageUrl}, async()=>{
   const pages=await(await fetch(`${endpoint}/json`)).json(),target=pages.find(page=>page.url===pageUrl);
   assert.ok(target,'isolated test page must be open');
   const socket=new WebSocket(target.webSocketDebuggerUrl);await new Promise(resolve=>socket.addEventListener('open',resolve,{once:true}));
@@ -21,9 +21,10 @@ test('Android touch double tap uses native selection without cancelling browser 
     const location=await point();await tap(location);await delay(70);await tap(location);await delay(600);
     const result=await evaluate(`({selection:getSelection().toString(),trace:window.__openrichTouchTest,customHandles:[...document.querySelectorAll('.selection-handle')].some(handle=>!handle.hidden)})`);
     assert.ok(result.selection.length>0,JSON.stringify(result));
-    assert.equal(result.customHandles,false,JSON.stringify(result));
+    assert.equal(result.customHandles,true,JSON.stringify(result));
     assert.ok(result.trace.some(event=>event.type==='pointerdown'&&event.trusted),JSON.stringify(result));
     assert.ok(result.trace.some(event=>event.type==='contextmenu'&&event.trusted),JSON.stringify(result));
-    assert.ok(result.trace.every(event=>!event.prevented),JSON.stringify(result));
+    assert.ok(result.trace.filter(event=>event.type === "pointerdown" || event.type === "pointerup").every(event=>!event.prevented),JSON.stringify(result));
+    assert.ok(result.trace.some(event=>event.type === "contextmenu" && event.prevented),JSON.stringify(result));
   } finally {socket.close();}
 });
