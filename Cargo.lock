@@ -460,6 +460,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "openrich-view"
+version = "0.1.0"
+dependencies = [
+ "openrich-commands",
+ "openrich-extensions",
+ "openrich-history",
+ "openrich-layout",
+ "openrich-model",
+ "openrich-state",
+ "openrich-text",
+ "openrich-theme",
+ "openrich-transform",
+ "serde_json",
+ "skia-safe",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"

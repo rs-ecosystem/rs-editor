@@ -259,6 +259,33 @@ impl LayoutEngine {
         )
     }
 
+    /// Placeholder text for the empty textblock `node`, in the block's
+    /// style and the muted foreground color.
+    pub fn placeholder(&self, node: &Node, text: &str, width: f32) -> TextLayout {
+        let theme = &self.theme;
+        let mut block: BlockStyle = block_style(theme, node, false);
+        block.color = theme.palette.muted_foreground;
+        let style = base_text_style(theme, &block);
+        let mut paragraph_style = ParagraphStyle::new();
+        paragraph_style.set_text_style(&style);
+        paragraph_style.set_strut_style(strut(theme, &block));
+        paragraph_style.set_text_align(block.align);
+        paragraph_style.turn_hinting_off();
+        let mut builder = ParagraphBuilder::new(&paragraph_style, self.fonts.clone());
+        builder.push_style(&style);
+        builder.add_text(text);
+        let mut paragraph = builder.build();
+        paragraph.layout(width.max(1.0));
+        TextLayout::new(
+            paragraph,
+            text.to_owned(),
+            width,
+            block.align,
+            block.line_height,
+            block.size * 1.3,
+        )
+    }
+
     /// A one-line label (list numbers) in the paragraph style.
     fn label(&self, text: &str) -> TextLayout {
         let theme = &self.theme;

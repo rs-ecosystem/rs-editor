@@ -1,0 +1,357 @@
+use std::sync::Arc;
+
+use openrich_commands::KeyPlatform;
+use openrich_extensions::EditorOptions;
+use openrich_state::{ManualClock, Selection};
+use serde_json::{Value, json};
+
+use crate::*;
+
+fn view_with(content: Value, platform: KeyPlatform) -> (EditorView, Arc<ManualClock>) {
+    let clock = ManualClock::new(10_000);
+    let view = EditorView::new(ViewOptions {
+        editor: EditorOptions {
+            content: Some(content),
+            platform,
+            clock: Some(clock.clone()),
+            ..Default::default()
+        },
+        width: 640.0,
+        height: 400.0,
+        system_fonts: false,
+        ..Default::default()
+    })
+    .unwrap();
+    (view, clock)
+}
+
+fn p(text: &str) -> Value {
+    if text.is_empty() {
+        json!({"type": "paragraph"})
+    } else {
+        json!({"type": "paragraph", "content": [{"type": "text", "text": text}]})
+    }
+}
+
+fn doc(blocks: Vec<Value>) -> Value {
+    json!({"type": "doc", "content": blocks})
+}
+
+fn key(view: &mut EditorView, name: &str, modifiers: Modifiers) -> bool {
+    view.key_down(&KeyEvent::new(name, modifiers))
+}
+
+fn plain() -> Modifiers {
+    Modifiers::default()
+}
+
+fn shift() -> Modifiers {
+    Modifiers {
+        shift: true,
+        ..Default::default()
+    }
+}
+
+fn alt() -> Modifiers {
+    Modifiers {
+        alt: true,
+        ..Default::default()
+    }
+}
+
+fn cmd() -> Modifiers {
+    Modifiers {
+        meta: true,
+        ..Default::default()
+    }
+}
+
+fn text_of(view: &EditorView) -> String {
+    view.editor().get_text("\n")
+}
+
+fn head(view: &EditorView) -> usize {
+    view.editor().selection().head()
+}
+
+#[test]
+fn typing_moves_the_caret_and_reports_the_ime_area() {
+    let (mut view, _) = view_with(doc(vec![p("")]), KeyPlatform::Other);
+    view.set_focused(true);
+    let before = view.caret_rect().unwrap();
+    assert!(view.insert_text("Halo"));
+    let after = view.caret_rect().unwrap();
+    assert!(after.x > before.x);
+    let effects = view.take_effects();
+    assert!(effects.contains(&Effect::Redraw));
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::ImeCursorArea(_)))
+    );
+}
+
+#[test]
+fn arrows_step_over_whole_graphemes_and_shift_extends() {
+    let (mut view, _) = view_with(doc(vec![p("a👩‍💻b")]), KeyPlatform::Other);
+    view.select_text(1, 1, Affinity::Downstream);
+    assert!(key(&mut view, "ArrowRight", plain()));
+    assert_eq!(head(&view), 2);
+    assert!(key(&mut view, "ArrowRight", plain()));
+    assert_eq!(head(&view), 7, "the ZWJ sequence is one step");
+    assert!(key(&mut view, "ArrowLeft", shift()));
+    let selection = view.editor().selection().clone();
+    assert_eq!((selection.anchor(), selection.head()), (7, 2));
+    assert!(key(&mut view, "ArrowLeft", plain()));
+    assert_eq!(
+        (
+            view.editor().selection().from(),
+            view.editor().selection().to()
+        ),
+        (2, 2),
+        "an arrow collapses a range"
+    );
+}
+
+#[test]
+fn up_and_down_keep_the_column_across_blocks() {
+    let (mut view, _) = view_with(
+        doc(vec![p("abcdefghij"), p("x"), p("ABCDEFGHIJ")]),
+        KeyPlatform::Other,
+    );
+    view.select_text(7, 7, Affinity::Downstream);
+    assert!(key(&mut view, "ArrowDown", plain()));
+    assert_eq!(head(&view), 14, "a short line clamps to its end");
+    assert!(key(&mut view, "ArrowDown", plain()));
+    let third = head(&view);
+    assert!(
+        (20..=24).contains(&third),
+        "the goal column is kept: {third}"
+    );
+    assert!(key(&mut view, "ArrowUp", plain()));
+    assert!(key(&mut view, "ArrowUp", plain()));
+    assert_eq!(head(&view), 7);
+    assert!(key(&mut view, "ArrowUp", plain()));
+    assert_eq!(head(&view), 1, "up on the first line goes to the start");
+}
+
+#[test]
+fn backspace_deletes_graphemes_words_and_lines() {
+    let (mut view, _) = view_with(doc(vec![p("satu dua 👩‍💻")]), KeyPlatform::Apple);
+    let end = view.editor().doc().content().size() - 1;
+    view.select_text(end, end, Affinity::Downstream);
+    assert!(key(&mut view, "Backspace", plain()));
+    assert_eq!(text_of(&view), "satu dua ");
+    assert!(key(&mut view, "Backspace", alt()));
+    assert_eq!(text_of(&view), "satu ");
+    assert!(key(&mut view, "Backspace", cmd()));
+    assert_eq!(text_of(&view), "");
+}
+
+#[test]
+fn enter_and_backspace_use_the_extension_keymap() {
+    let (mut view, _) = view_with(doc(vec![p("abcd")]), KeyPlatform::Other);
+    view.select_text(3, 3, Affinity::Downstream);
+    assert!(key(&mut view, "Enter", plain()));
+    assert_eq!(text_of(&view), "ab\ncd");
+    assert!(key(&mut view, "Backspace", plain()));
+    assert_eq!(text_of(&view), "abcd");
+}
+
+#[test]
+fn clicks_select_positions_words_and_blocks() {
+    let (mut view, _) = view_with(doc(vec![p("halo dunia indah")]), KeyPlatform::Other);
+    let caret = {
+        view.select_text(8, 8, Affinity::Downstream);
+        view.caret_rect().unwrap()
+    };
+    view.select_text(1, 1, Affinity::Downstream);
+    let y = caret.center_y();
+    assert!(view.pointer_down(PointerEvent::at(caret.x, y)));
+    view.pointer_up(PointerEvent::at(caret.x, y));
+    assert_eq!(head(&view), 8);
+    let double = PointerEvent {
+        click_count: 2,
+        ..PointerEvent::at(caret.x, y)
+    };
+    view.pointer_down(double);
+    let selection = view.editor().selection().clone();
+    assert_eq!(
+        (selection.from(), selection.to()),
+        (6, 11),
+        "double click selects `dunia`"
+    );
+    view.pointer_up(double);
+    let triple = PointerEvent {
+        click_count: 3,
+        ..PointerEvent::at(caret.x, y)
+    };
+    view.pointer_down(triple);
+    let selection = view.editor().selection().clone();
+    assert_eq!((selection.from(), selection.to()), (1, 17));
+}
+
+#[test]
+fn dragging_extends_the_selection() {
+    let (mut view, _) = view_with(doc(vec![p("satu"), p("dua")]), KeyPlatform::Other);
+    view.select_text(2, 2, Affinity::Downstream);
+    let start = view.caret_rect().unwrap();
+    view.select_text(8, 8, Affinity::Downstream);
+    let end = view.caret_rect().unwrap();
+    view.pointer_down(PointerEvent::at(start.x, start.center_y()));
+    assert!(view.pointer_move(PointerEvent::at(end.x, end.center_y())));
+    view.pointer_up(PointerEvent::at(end.x, end.center_y()));
+    let selection = view.editor().selection().clone();
+    assert_eq!((selection.anchor(), selection.head()), (2, 8));
+}
+
+#[test]
+fn clicking_a_checkbox_toggles_the_task() {
+    let content = doc(vec![json!({"type": "taskList", "content": [
+        {"type": "taskItem", "attrs": {"checked": false}, "content": [p("tugas")]}
+    ]})]);
+    let (mut view, _) = view_with(content, KeyPlatform::Other);
+    let rect = view
+        .layout()
+        .decorations
+        .iter()
+        .find_map(|d| match d {
+            openrich_layout::Decoration::Checkbox { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .unwrap();
+    let rect = view.to_view(rect);
+    assert!(view.pointer_down(PointerEvent::at(rect.x + 8.0, rect.y + 8.0)));
+    assert_eq!(
+        view.editor().get_json()["content"][0]["content"][0]["attrs"]["checked"],
+        true
+    );
+}
+
+#[test]
+fn ime_composition_is_one_undo_step_separate_from_later_typing() {
+    let (mut view, clock) = view_with(doc(vec![p("Halo ")]), KeyPlatform::Other);
+    view.select_text(6, 6, Affinity::Downstream);
+    clock.advance(1_000);
+    view.insert_text("d");
+    assert!(view.set_composition("あ"));
+    assert!(view.set_composition("あい"));
+    assert_eq!(view.composition_range(), Some((7, 9)));
+    assert!(view.commit_composition("愛"));
+    assert_eq!(view.composition_range(), None);
+    view.insert_text("!");
+    assert_eq!(text_of(&view), "Halo d愛!");
+    assert_eq!(head(&view), 9);
+    view.run("undo", &Value::Null).unwrap();
+    assert_eq!(
+        text_of(&view),
+        "Halo d愛",
+        "typing after the composition is its own step"
+    );
+    view.run("undo", &Value::Null).unwrap();
+    assert_eq!(text_of(&view), "Halo d", "the composition is one step");
+}
+
+#[test]
+fn cancelling_a_composition_restores_the_text() {
+    let (mut view, _) = view_with(doc(vec![p("ab")]), KeyPlatform::Other);
+    view.select_text(2, 2, Affinity::Downstream);
+    view.set_composition("x");
+    assert!(view.cancel_composition());
+    assert_eq!(text_of(&view), "ab");
+}
+
+#[test]
+fn arrows_select_a_horizontal_rule_between_paragraphs() {
+    let content = doc(vec![p("a"), json!({"type": "horizontalRule"}), p("b")]);
+    let (mut view, _) = view_with(content, KeyPlatform::Other);
+    view.select_text(2, 2, Affinity::Downstream);
+    assert!(key(&mut view, "ArrowRight", plain()));
+    assert!(view.has_node_selection());
+    assert!(key(&mut view, "Backspace", plain()));
+    assert_eq!(
+        view.editor().get_json()["content"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn paste_text_splits_lines_and_json_round_trips() {
+    let (mut view, _) = view_with(doc(vec![p("ab")]), KeyPlatform::Other);
+    view.select_text(2, 2, Affinity::Downstream);
+    assert!(view.paste_text("1\n2\n3"));
+    assert_eq!(text_of(&view), "a1\n2\n3b");
+    view.select_text(1, 5, Affinity::Downstream);
+    let (text, json) = view.copy().unwrap();
+    assert_eq!(text, "a1\n");
+    let end = view.editor().doc().content().size() - 1;
+    view.select_text(end, end, Affinity::Downstream);
+    assert!(view.paste_json(&json));
+    assert!(text_of(&view).ends_with("3ba1\n"), "{}", text_of(&view));
+}
+
+#[test]
+fn typing_at_the_bottom_scrolls_the_caret_into_view() {
+    let blocks: Vec<Value> = (0..40).map(|i| p(&format!("baris {i}"))).collect();
+    let (mut view, _) = view_with(doc(blocks), KeyPlatform::Other);
+    view.set_focused(true);
+    let end = view.editor().doc().content().size() - 1;
+    view.select_text(end, end, Affinity::Downstream);
+    assert!(view.insert_text("!"));
+    assert!(view.scroll_y() > 0.0);
+    let caret = view.caret_rect().unwrap();
+    assert!(caret.bottom() <= view.size().1);
+}
+
+#[test]
+fn caret_blinks_only_while_focused() {
+    let (mut view, clock) = view_with(doc(vec![p("x")]), KeyPlatform::Other);
+    assert_eq!(view.next_frame_in(), None);
+    view.set_focused(true);
+    assert!(view.caret_visible());
+    clock.advance(BLINK_MS);
+    assert!(!view.caret_visible());
+    assert_eq!(view.next_frame_in(), Some(BLINK_MS));
+    view.insert_text("y");
+    assert!(view.caret_visible(), "typing resets the blink");
+}
+
+#[test]
+fn paints_a_frame_with_selection_and_caret() {
+    use skia_safe::surfaces;
+    let content = doc(vec![
+        json!({"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": "Catatan"}]}),
+        p("Pilih teks untuk memformatnya."),
+        json!({"type": "bulletList", "content": [{"type": "listItem", "content": [p("satu")]}, {"type": "listItem", "content": [p("dua")]}]}),
+        json!({"type": "codeBlock", "content": [{"type": "text", "text": "let x = 1;"}]}),
+        p(""),
+    ]);
+    let (mut view, _) = view_with(content, KeyPlatform::Other);
+    view.resize(560.0, 420.0, 2.0);
+    view.set_focused(true);
+    view.select_text(11, 18, Affinity::Downstream);
+    let mut surface = surfaces::raster_n32_premul((1120, 840)).unwrap();
+    view.paint(surface.canvas());
+    if let Ok(dir) = std::env::var("OPENRICH_SNAPSHOT_DIR") {
+        let image = surface.image_snapshot();
+        let data = image
+            .encode(None, skia_safe::EncodedImageFormat::PNG, None)
+            .unwrap();
+        std::fs::write(format!("{dir}/view.png"), data.as_bytes()).unwrap();
+    }
+    let empty = view.editor().doc().content().size() - 1;
+    view.select_text(empty, empty, Affinity::Downstream);
+    let mut surface = surfaces::raster_n32_premul((1120, 840)).unwrap();
+    view.paint(surface.canvas());
+    if let Ok(dir) = std::env::var("OPENRICH_SNAPSHOT_DIR") {
+        let image = surface.image_snapshot();
+        let data = image
+            .encode(None, skia_safe::EncodedImageFormat::PNG, None)
+            .unwrap();
+        std::fs::write(format!("{dir}/view-placeholder.png"), data.as_bytes()).unwrap();
+    }
+    assert!(matches!(view.editor().selection(), Selection::Text(_)));
+}
