@@ -12,6 +12,7 @@ mod geometry;
 pub mod render;
 mod style;
 mod text;
+mod tops;
 
 pub use document::{
     BlockBox, BulletStyle, Decoration, DocumentLayout, Hit, LayoutEngine, TextBox, VisualDirection,
@@ -19,6 +20,7 @@ pub use document::{
 pub use geometry::Rect;
 pub use openrich_text::Affinity;
 pub use text::{Caret, CaretStop, Line, TextLayout};
+pub use tops::{TopBlock, Tops};
 
 #[cfg(test)]
 mod tests;

@@ -10,6 +10,8 @@ use skia_safe::surfaces;
 #[path = "../src/sample.rs"]
 mod sample;
 
+const PERF_ITERS: usize = 50;
+
 fn main() {
     let n: usize = std::env::args()
         .nth(1)
@@ -39,7 +41,7 @@ fn main() {
         view.scroll_into_view();
         view.paint(surface.canvas());
         let mut samples = Vec::new();
-        for _ in 0..50 {
+        for _ in 0..PERF_ITERS {
             let t = Instant::now();
             view.insert_text("a");
             view.paint(surface.canvas());

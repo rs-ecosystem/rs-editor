@@ -1,5 +1,5 @@
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::error::{ModelError, Result};
 use crate::node::{Node, NodeVisitor};
@@ -9,7 +9,13 @@ use crate::node::{Node, NodeVisitor};
 pub struct Fragment {
     nodes: Arc<[Node]>,
     size: usize,
+    /// End offset of every child, built on first use in large fragments
+    /// so that resolving positions in long documents is a binary search.
+    ends: Arc<OnceLock<Box<[usize]>>>,
 }
+
+/// Fragments with at least this many children index their offsets.
+const INDEXED_CHILDREN: usize = 32;
 
 impl Default for Fragment {
     fn default() -> Self {
@@ -57,6 +63,7 @@ impl Fragment {
     pub fn empty() -> Self {
         Self {
             nodes: Arc::from([]),
+            ends: Default::default(),
             size: 0,
         }
     }
@@ -66,6 +73,7 @@ impl Fragment {
         let size = nodes.iter().map(Node::node_size).sum();
         Self {
             nodes: Arc::from(nodes),
+            ends: Default::default(),
             size,
         }
     }
@@ -74,6 +82,7 @@ impl Fragment {
         let size = node.node_size();
         Self {
             nodes: Arc::from([node]),
+            ends: Default::default(),
             size,
         }
     }
@@ -242,6 +251,7 @@ impl Fragment {
         content.extend(rest.cloned());
         Fragment {
             nodes: Arc::from(content),
+            ends: Default::default(),
             size: self.size + other.size,
         }
     }
@@ -304,6 +314,7 @@ impl Fragment {
         copy[index] = node;
         Fragment {
             nodes: Arc::from(copy),
+            ends: Default::default(),
             size,
         }
     }
@@ -315,6 +326,7 @@ impl Fragment {
         copy.extend(self.nodes.iter().cloned());
         Fragment {
             nodes: Arc::from(copy),
+            ends: Default::default(),
             size,
         }
     }
@@ -325,6 +337,7 @@ impl Fragment {
         copy.push(node);
         Fragment {
             nodes: Arc::from(copy),
+            ends: Default::default(),
             size,
         }
     }
@@ -348,6 +361,32 @@ impl Fragment {
             return Err(ModelError::PositionOutOfRange {
                 pos,
                 size: self.size,
+            });
+        }
+        if self.nodes.len() >= INDEXED_CHILDREN {
+            let ends = self.ends.get_or_init(|| {
+                let mut end = 0;
+                self.nodes
+                    .iter()
+                    .map(|child| {
+                        end += child.node_size();
+                        end
+                    })
+                    .collect()
+            });
+            let index = ends.partition_point(|&end| end < pos);
+            let end = ends[index];
+            let start = end - self.nodes[index].node_size();
+            return Ok(if end == pos || round > 0 {
+                IndexOffset {
+                    index: index + 1,
+                    offset: end,
+                }
+            } else {
+                IndexOffset {
+                    index,
+                    offset: start,
+                }
             });
         }
         let mut current = 0;

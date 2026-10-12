@@ -11,6 +11,7 @@ mod paint;
 mod pointer;
 
 use std::fmt;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use openrich_commands::KeyPlatform;
@@ -19,6 +20,7 @@ use openrich_layout::{DocumentLayout, LayoutEngine, Rect};
 use openrich_model::Node;
 use openrich_state::{Clock, EditorState, SystemClock, TextDirection, Transaction, ViewContext};
 use openrich_theme::Theme;
+use openrich_transform::{Assoc, Mappable};
 
 pub use input::Granularity;
 pub use openrich_commands::{KeyEvent, Modifiers};
@@ -121,7 +123,10 @@ pub(crate) struct Composition {
 pub struct EditorView {
     pub(crate) editor: Editor,
     pub(crate) engine: LayoutEngine,
-    layout: Option<(Node, f32, DocumentLayout)>,
+    layout: Option<LaidOut>,
+    /// Top-level block (position) and offset to keep at the top of the
+    /// view across the next relayout.
+    pending_anchor: Option<(usize, f32)>,
     pub(crate) width: f32,
     pub(crate) height: f32,
     pub(crate) scale: f32,
@@ -152,6 +157,13 @@ impl fmt::Debug for EditorView {
     }
 }
 
+/// A layout and what it was computed for.
+struct LaidOut {
+    doc: Node,
+    width: f32,
+    layout: Rc<DocumentLayout>,
+}
+
 /// Caret blink half-period in milliseconds.
 pub const BLINK_MS: u64 = 530;
 
@@ -170,6 +182,7 @@ impl EditorView {
             editor,
             engine: LayoutEngine::new(options.theme, options.system_fonts),
             layout: None,
+            pending_anchor: None,
             width: options.width,
             height: options.height,
             scale: options.scale,
@@ -249,19 +262,66 @@ impl EditorView {
         (self.width - self.padding.left - self.padding.right).max(40.0)
     }
 
-    /// The current layout, recomputed when the document or width changed.
-    pub fn layout(&mut self) -> &DocumentLayout {
-        let width = self.content_width();
-        let doc = self.editor.doc().clone();
-        let stale = match &self.layout {
-            Some((laid_out, laid_width, _)) => !laid_out.ptr_eq(&doc) || *laid_width != width,
-            None => true,
-        };
-        if stale {
-            let layout = self.engine.layout(&doc, width);
-            self.layout = Some((doc, width, layout));
+    /// The current layout. It is recomputed when the document or width
+    /// changed, or when the viewport or selection moved past the laid-out
+    /// window; the block at the top of the view keeps its place on screen
+    /// while heights above it change (scroll anchoring).
+    pub fn layout(&mut self) -> Rc<DocumentLayout> {
+        // Anchoring moves the viewport, which may need one more pass.
+        for _ in 0..4 {
+            let width = self.content_width();
+            let doc = self.editor.doc().clone();
+            let (anchor_pos, head) = {
+                let selection = self.editor.selection();
+                (selection.anchor(), selection.head())
+            };
+            let top = self.scroll_y - self.padding.top;
+            if let Some(current) = &self.layout
+                && current.doc.ptr_eq(&doc)
+                && current.width == width
+                && current
+                    .layout
+                    .covers(top - self.height / 2.0, top + self.height * 1.5)
+                && current.layout.shows(head)
+                && current.layout.shows(anchor_pos)
+            {
+                return current.layout.clone();
+            }
+            let anchor = self.pending_anchor.take().or_else(|| {
+                self.layout
+                    .as_ref()
+                    .filter(|current| current.doc.ptr_eq(&doc))
+                    .and_then(|current| self.anchor_in(&current.layout))
+            });
+            let window = (top - self.height, top + self.height * 2.0);
+            let layout =
+                Rc::new(
+                    self.engine
+                        .layout_window(&doc, width, Some(window), &[head, anchor_pos]),
+                );
+            if let Some((pos, offset)) = anchor
+                && let Some(top) = layout
+                    .top_at_pos(pos)
+                    .and_then(|index| layout.tops.get(index))
+            {
+                let max =
+                    (layout.height + self.padding.top + self.padding.bottom - self.height).max(0.0);
+                self.scroll_y = (top.y + offset + self.padding.top).clamp(0.0, max);
+            }
+            self.layout = Some(LaidOut { doc, width, layout });
         }
-        &self.layout.as_ref().expect("layout was just computed").2
+        self.layout
+            .as_ref()
+            .map(|current| current.layout.clone())
+            .expect("layout was just computed")
+    }
+
+    /// The top-level block at the top of the view and how far into it the
+    /// view starts.
+    fn anchor_in(&self, layout: &DocumentLayout) -> Option<(usize, f32)> {
+        let top = self.scroll_y - self.padding.top;
+        let block = layout.tops.get(layout.top_at_y(top)?)?;
+        Some((block.pos, top - block.y))
     }
 
     /// Height of the scrollable content.
@@ -349,9 +409,23 @@ impl EditorView {
 
     /// Applies `tr` and keeps the view in sync (scrolling, blink, IME).
     pub fn dispatch(&mut self, tr: Transaction) -> bool {
+        let before = self.editor.doc().clone();
+        let anchor = self.pending_anchor.take().or_else(|| {
+            self.layout
+                .as_ref()
+                .filter(|current| current.doc.ptr_eq(&before))
+                .and_then(|current| self.anchor_in(&current.layout))
+        });
+        let mapped = anchor.map(|(pos, offset)| (tr.mapping.map(pos, Assoc::After), offset));
         if self.editor.dispatch(tr).is_err() {
+            self.pending_anchor = anchor;
             return false;
         }
+        self.pending_anchor = if self.editor.doc().ptr_eq(&before) {
+            anchor.filter(|_| self.layout.as_ref().is_some_and(|l| !l.doc.ptr_eq(&before)))
+        } else {
+            mapped
+        };
         self.after_change();
         true
     }
@@ -418,13 +492,13 @@ impl EditorView {
 
 /// Answers [`ViewContext`] questions from the current layout.
 pub(crate) struct ViewQuery {
-    layout: DocumentLayout,
+    layout: Rc<DocumentLayout>,
 }
 
 impl ViewQuery {
     pub(crate) fn new(view: &mut EditorView) -> Self {
         Self {
-            layout: view.layout().clone(),
+            layout: view.layout(),
         }
     }
 }

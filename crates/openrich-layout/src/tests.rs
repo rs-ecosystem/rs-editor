@@ -367,3 +367,119 @@ fn builder_documents_from_the_test_schema_lay_out() {
     let layout = engine().layout(&doc, 300.0);
     assert_eq!(layout.texts.len(), 2);
 }
+
+fn long_doc(n: usize) -> Node {
+    let blocks: Vec<serde_json::Value> = (0..n)
+        .map(|i| {
+            if i % 10 == 0 {
+                json!({"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": format!("Bagian {i}")}]})
+            } else {
+                para(&"kata ".repeat(i % 37 + 1))
+            }
+        })
+        .collect();
+    tiptap(json!({"type": "doc", "content": blocks}))
+}
+
+fn places(layout: &DocumentLayout) -> Vec<(usize, usize, f32, f32)> {
+    layout
+        .tops
+        .iter()
+        .map(|t| (t.pos, t.size, t.y, t.height))
+        .collect()
+}
+
+fn check_tops(layout: &DocumentLayout) {
+    let tops: Vec<TopBlock> = layout.tops.iter().collect();
+    assert_eq!(tops.len(), layout.tops.len());
+    for (index, top) in tops.iter().enumerate() {
+        assert_eq!(layout.tops.get(index), Some(*top));
+        assert_eq!(layout.top_at_pos(top.pos), Some(index));
+        assert_eq!(layout.top_at_pos(top.end() - 1), Some(index));
+        if top.height > 0.0 {
+            assert_eq!(layout.top_at_y(top.y + top.height / 2.0), Some(index));
+        }
+    }
+}
+
+#[test]
+fn incremental_layout_matches_a_fresh_one_across_edits() {
+    let mut doc = long_doc(300);
+    let mut incremental = engine();
+    incremental.layout(&doc, 420.0);
+    // Edits around chunk boundaries (64 blocks), at both ends, and ones
+    // that change the number of blocks.
+    let targets = [0usize, 63, 64, 65, 127, 128, 150, 299];
+    for (step, &target) in targets.iter().enumerate() {
+        let layout = incremental.layout(&doc, 420.0);
+        let index = target.min(layout.tops.len() - 1);
+        let top = layout.tops.get(index).unwrap();
+        doc = match step % 3 {
+            0 => {
+                let text = doc
+                    .node_type()
+                    .schema()
+                    .text("x", Default::default())
+                    .unwrap();
+                doc.replace(
+                    top.pos + 1,
+                    top.pos + 1,
+                    &openrich_model::Slice::new(openrich_model::Fragment::from_node(text), 0, 0),
+                )
+                .unwrap()
+            }
+            1 => {
+                let copy = doc.child(1).clone();
+                doc.replace(
+                    top.pos,
+                    top.pos,
+                    &openrich_model::Slice::new(openrich_model::Fragment::from_node(copy), 0, 0),
+                )
+                .unwrap()
+            }
+            _ => doc
+                .replace(top.pos, top.end(), &openrich_model::Slice::empty())
+                .unwrap(),
+        };
+        let updated = incremental.layout(&doc, 420.0);
+        let fresh = engine().layout(&doc, 420.0);
+        assert_eq!(
+            places(&updated),
+            places(&fresh),
+            "after edit {step} at block {index}"
+        );
+        assert_eq!(updated.height, fresh.height);
+        check_tops(&updated);
+    }
+}
+
+#[test]
+fn windowed_layout_measures_only_what_is_near() {
+    let doc = long_doc(2_000);
+    let mut engine = engine();
+    let layout = engine.layout_window(&doc, 420.0, Some((0.0, 800.0)), &[]);
+    let measured = engine.cached_blocks();
+    assert!(measured > 5 && measured < 60, "measured {measured}");
+    assert!(layout.covers(0.0, 800.0));
+    assert!(layout.texts.iter().all(|t| t.rect.y <= 800.0));
+    assert!(
+        layout.height > 2_000.0 * 20.0,
+        "estimated height {}",
+        layout.height
+    );
+    check_tops(&layout);
+
+    // Blocks in the window sit where a full layout puts them.
+    let full = super::LayoutEngine::new(Theme::light(), false).layout(&doc, 420.0);
+    for text in &layout.texts {
+        let same = full.text_at(text.pos).unwrap();
+        assert_eq!(same.rect, text.rect);
+    }
+
+    // Asking for a far position lays out its block and neighbours.
+    let far = full.tops.get(1_500).unwrap().pos + 1;
+    let layout = engine.layout_window(&doc, 420.0, Some((0.0, 800.0)), &[far]);
+    assert!(layout.shows(far));
+    assert!(layout.caret_rect(far, Affinity::Downstream, 1.0).is_some());
+    assert!(layout.text_at(far + 1).is_some());
+}

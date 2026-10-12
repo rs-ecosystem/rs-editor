@@ -728,3 +728,50 @@ fn can_replace_checks_the_content_expression() {
     let text = schema().text("x", MarkSet::none()).unwrap();
     assert!(!d.can_replace_with(0, 0, text.node_type(), None));
 }
+
+#[test]
+fn indexed_fragments_find_the_same_children_as_a_scan() {
+    // Paragraphs of varying sizes, enough to use the offset index.
+    let blocks: Vec<Item> = (0..80)
+        .map(|i| {
+            if i % 3 == 0 {
+                p(v![]).into()
+            } else {
+                p(v!["x".repeat(i % 7 + 1).as_str()]).into()
+            }
+        })
+        .collect();
+    let test_doc = doc(blocks).node;
+    let content = test_doc.content();
+    let small: Vec<Node> = content.iter().cloned().collect();
+    for pos in 0..=content.size() {
+        for round in [-1, 1] {
+            let indexed = content.find_index(pos, round).unwrap();
+            // Linear reference.
+            let mut start = 0;
+            let mut expected = (small.len(), pos);
+            for (index, child) in small.iter().enumerate() {
+                let end = start + child.node_size();
+                if pos == 0 {
+                    expected = (0, 0);
+                    break;
+                }
+                if end >= pos {
+                    expected = if end == pos || round > 0 {
+                        (index + 1, end)
+                    } else {
+                        (index, start)
+                    };
+                    break;
+                }
+                start = end;
+            }
+            assert_eq!(
+                (indexed.index, indexed.offset),
+                expected,
+                "pos {pos} round {round}"
+            );
+        }
+    }
+    assert!(test_doc.resolve(content.size() / 2).is_ok());
+}

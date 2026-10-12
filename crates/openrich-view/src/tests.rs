@@ -410,3 +410,77 @@ fn selection_shows_over_code_blocks_and_inline_backgrounds() {
         }
     }
 }
+
+fn long_view(n: usize) -> EditorView {
+    let blocks: Vec<Value> = (0..n)
+        .map(|i| p(&format!("Paragraf {i}. {}", "isi ".repeat(i % 29 + 1))))
+        .collect();
+    let (view, _) = view_with(doc(blocks), KeyPlatform::Other);
+    view
+}
+
+/// The view y of the text block at the vertical middle of the view.
+fn middle_block(view: &mut EditorView) -> (usize, f32) {
+    let (_, height, _) = view.size();
+    let (_, y) = view.to_document(0.0, height / 2.0);
+    let layout = view.layout();
+    let text = layout
+        .texts
+        .iter()
+        .find(|t| t.rect.bottom() >= y)
+        .unwrap()
+        .clone();
+    (text.pos, view.to_view(text.rect).y)
+}
+
+fn view_y_of(view: &mut EditorView, pos: usize) -> f32 {
+    let rect = view.layout().text_at(pos).unwrap().rect;
+    view.to_view(rect).y
+}
+
+#[test]
+fn scrolling_up_from_the_end_keeps_content_steady_while_measuring() {
+    let mut view = long_view(3_000);
+    assert!(key(
+        &mut view,
+        "End",
+        Modifiers {
+            ctrl: true,
+            ..Default::default()
+        }
+    ));
+    let bottom = view.scroll_y();
+    assert!(bottom > 10_000.0);
+    for _ in 0..20 {
+        let (pos, before) = middle_block(&mut view);
+        view.scroll_by(-250.0);
+        let after = view_y_of(&mut view, pos);
+        assert!(
+            (after - (before + 250.0)).abs() < 0.5,
+            "block {pos} moved from {before} to {after}"
+        );
+    }
+}
+
+#[test]
+fn edits_above_the_viewport_do_not_move_it() {
+    let mut view = long_view(3_000);
+    view.scroll_to(30_000.0);
+    let (pos, before) = middle_block(&mut view);
+    // Insert a paragraph at the very start of the document.
+    let inserted = {
+        let state = view.state();
+        let mut tr = state.tr();
+        let paragraph = state.doc().child(0).clone();
+        tr.insert(0, openrich_model::Fragment::from_node(paragraph))
+            .unwrap();
+        tr
+    };
+    let shift = view.editor().doc().child(0).node_size();
+    assert!(view.dispatch(inserted));
+    let after = view_y_of(&mut view, pos + shift);
+    assert!(
+        (after - before).abs() < 0.5,
+        "moved from {before} to {after}"
+    );
+}

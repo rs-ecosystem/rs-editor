@@ -1,5 +1,12 @@
-//! Lays out a whole document: block structure, list markers, and
-//! position ↔ geometry queries across blocks.
+//! Lays out a document: block structure, list markers, and position ↔
+//! geometry queries across blocks.
+//!
+//! Layout is lazy per top-level block. A measured block keeps a
+//! [`Fragment`] of boxes relative to its own origin, reused while the
+//! block's node is unchanged; blocks far from the viewport only carry an
+//! estimated height until they come close. Editing one block therefore
+//! shapes only that block, and opening a long document shapes only what
+//! is visible.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -17,6 +24,7 @@ use crate::fonts::font_collection;
 use crate::geometry::Rect;
 use crate::style::{BlockStyle, base_text_style, block_style, run_style, strut};
 use crate::text::{CaretStop, TextLayout};
+use crate::tops::{CHUNK, Chunk, Slot, Tops};
 
 /// A laid-out textblock in document coordinates.
 #[derive(Debug, Clone)]
@@ -35,6 +43,16 @@ impl TextBox {
     /// Last content position.
     pub fn end(&self) -> usize {
         self.pos + self.layout.len()
+    }
+
+    fn shifted(&self, dp: usize, dy: f32) -> Self {
+        Self {
+            node_pos: self.node_pos + dp,
+            pos: self.pos + dp,
+            node: self.node.clone(),
+            rect: self.rect.translate(0.0, dy),
+            layout: self.layout.clone(),
+        }
     }
 }
 
@@ -83,6 +101,25 @@ pub enum Decoration {
     },
 }
 
+impl Decoration {
+    fn shifted(&self, dp: usize, dy: f32) -> Self {
+        let mut out = self.clone();
+        match &mut out {
+            Decoration::Bullet { cy, .. } => *cy += dy,
+            Decoration::Number { y, .. } => *y += dy,
+            Decoration::Checkbox { rect, pos, .. } => {
+                rect.y += dy;
+                *pos += dp;
+            }
+            Decoration::QuoteBar { rect }
+            | Decoration::CodeBackground { rect }
+            | Decoration::Rule { rect }
+            | Decoration::Image { rect, .. } => rect.y += dy,
+        }
+        out
+    }
+}
+
 /// Every block node with its rectangle (for node selection and handles).
 #[derive(Debug, Clone)]
 pub struct BlockBox {
@@ -90,6 +127,17 @@ pub struct BlockBox {
     pub node: Node,
     pub rect: Rect,
     pub depth: usize,
+}
+
+impl BlockBox {
+    fn shifted(&self, dp: usize, dy: f32) -> Self {
+        Self {
+            pos: self.pos + dp,
+            node: self.node.clone(),
+            rect: self.rect.translate(0.0, dy),
+            depth: self.depth,
+        }
+    }
 }
 
 /// What a point hits.
@@ -108,33 +156,81 @@ pub enum VisualDirection {
     Right,
 }
 
-/// The result of laying out a document at one width.
+/// A document laid out at one width.
+///
+/// `texts`, `decorations` and `blocks` hold the boxes of the measured
+/// window only (in document order and coordinates); `tops` places every
+/// top-level block.
 #[derive(Debug, Clone)]
 pub struct DocumentLayout {
     pub width: f32,
+    /// Total height, partly estimated when not every block is measured.
     pub height: f32,
     pub texts: Vec<TextBox>,
     pub decorations: Vec<Decoration>,
     pub blocks: Vec<BlockBox>,
+    pub tops: Tops,
+    /// The vertical range (document coordinates) whose blocks are all in
+    /// `texts`/`decorations`/`blocks`.
+    pub covered: (f32, f32),
+    /// Indices into `tops` of the blocks whose boxes are present.
+    shown: Vec<usize>,
 }
+
+type TextKey = (usize, u32, bool);
 
 #[derive(Debug, Clone)]
 struct CacheEntry {
     node: Node,
     layout: Rc<TextLayout>,
+    /// Layout pass that last used this entry.
+    used: u64,
 }
 
-/// Lays out documents, reusing paragraphs of unchanged blocks.
-pub struct LayoutEngine {
+/// The boxes of one top-level block, relative to position 0 and y 0.
+#[derive(Debug, Default)]
+struct Fragment {
+    height: f32,
+    texts: Vec<TextBox>,
+    decorations: Vec<Decoration>,
+    blocks: Vec<BlockBox>,
+    keys: Vec<TextKey>,
+}
+
+#[derive(Debug, Clone)]
+struct Entry {
+    node: Node,
+    heading: bool,
+    leaf: bool,
+    height: f32,
+    fragment: Option<Rc<Fragment>>,
+}
+
+/// Builds paragraphs with the theme's fonts and styles.
+struct Shaper {
     fonts: FontCollection,
     theme: Theme,
-    cache: HashMap<(usize, u32, bool), CacheEntry>,
+}
+
+/// Lays out documents, reusing unchanged blocks.
+pub struct LayoutEngine {
+    shaper: Shaper,
+    texts: HashMap<TextKey, CacheEntry>,
+    generation: u64,
+    entries: Vec<Entry>,
+    width: f32,
+    chunks: Vec<Chunk>,
+    /// Chunks to rebuild from their entries.
+    dirty: Vec<usize>,
+    /// Rebuild every chunk from this one on (block count changed).
+    rebuild_from: Option<usize>,
 }
 
 impl fmt::Debug for LayoutEngine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LayoutEngine")
-            .field("cached_blocks", &self.cache.len())
+            .field("blocks", &self.entries.len())
+            .field("measured", &self.cached_blocks())
             .finish()
     }
 }
@@ -147,65 +243,342 @@ struct Ctx {
 }
 
 struct Builder<'a> {
-    engine: &'a mut LayoutEngine,
-    next_cache: HashMap<(usize, u32, bool), CacheEntry>,
-    out: DocumentLayout,
+    shaper: &'a Shaper,
+    cache: &'a mut HashMap<TextKey, CacheEntry>,
+    generation: u64,
+    out: Fragment,
 }
+
+/// Blocks measured beyond the edges of the view's window when the caller
+/// asks for a position, so that moving across blocks finds its neighbor.
+const NEIGHBOR_LIMIT: usize = 16;
 
 impl LayoutEngine {
     /// `system_fallback` lets the platform's fonts cover emoji and scripts
     /// missing from the bundle; turn it off for deterministic tests.
     pub fn new(theme: Theme, system_fallback: bool) -> Self {
         Self {
-            fonts: font_collection(system_fallback),
-            theme,
-            cache: HashMap::new(),
+            shaper: Shaper {
+                fonts: font_collection(system_fallback),
+                theme,
+            },
+            texts: HashMap::new(),
+            generation: 0,
+            entries: Vec::new(),
+            width: 0.0,
+            chunks: Vec::new(),
+            dirty: Vec::new(),
+            rebuild_from: None,
         }
     }
 
+    fn reset(&mut self) {
+        self.entries.clear();
+        self.chunks.clear();
+        self.dirty.clear();
+        self.rebuild_from = Some(0);
+    }
+
     pub fn theme(&self) -> &Theme {
-        &self.theme
+        &self.shaper.theme
     }
 
     /// Changes the theme; every block is laid out again.
     pub fn set_theme(&mut self, theme: Theme) {
-        if theme != self.theme {
-            self.theme = theme;
-            self.cache.clear();
+        if theme != self.shaper.theme {
+            self.shaper.theme = theme;
+            self.texts.clear();
+            self.reset();
         }
     }
 
+    /// Number of measured top-level blocks.
     pub fn cached_blocks(&self) -> usize {
-        self.cache.len()
+        self.entries.iter().filter(|e| e.fragment.is_some()).count()
     }
 
-    /// Lays out `doc` at `width` logical pixels.
+    /// Lays out all of `doc` at `width` logical pixels.
     pub fn layout(&mut self, doc: &Node, width: f32) -> DocumentLayout {
+        self.layout_window(doc, width, None, &[])
+    }
+
+    /// Lays out the blocks of `doc` that intersect `window` (document
+    /// coordinates; `None` for everything) and the blocks around each of
+    /// `include` (positions such as the selection ends). Other blocks keep
+    /// their last measured or estimated height.
+    pub fn layout_window(
+        &mut self,
+        doc: &Node,
+        width: f32,
+        window: Option<(f32, f32)>,
+        include: &[usize],
+    ) -> DocumentLayout {
+        self.generation += 1;
+        self.sync(doc, width);
+        let mut tops = self.refresh();
+
+        let mut forced = Vec::new();
+        for &pos in include {
+            if let Some(index) = tops.at_pos(pos) {
+                forced.push(index);
+                for step in [-1isize, 1] {
+                    let mut i = index as isize;
+                    for _ in 0..NEIGHBOR_LIMIT {
+                        i += step;
+                        let Some(entry) = usize::try_from(i).ok().and_then(|i| self.entries.get(i))
+                        else {
+                            break;
+                        };
+                        forced.push(i as usize);
+                        if !entry.leaf {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        forced.sort_unstable();
+        forced.dedup();
+
+        // Measuring changes heights, which moves the window's blocks: repeat
+        // until every block in the window is measured.
+        loop {
+            let range = window_range(&tops, window);
+            let mut measured_any = false;
+            for index in range.chain(forced.iter().copied()) {
+                if self.entries[index].fragment.is_none() {
+                    self.measure(index, width);
+                    measured_any = true;
+                }
+            }
+            if !measured_any {
+                break;
+            }
+            tops = self.refresh();
+        }
+
+        let mut shown: Vec<usize> = window_range(&tops, window).chain(forced).collect();
+        shown.sort_unstable();
+        shown.dedup();
+        let height = tops.height();
+        let mut out = DocumentLayout {
+            width,
+            height,
+            texts: Vec::new(),
+            decorations: Vec::new(),
+            blocks: Vec::new(),
+            tops: tops.clone(),
+            covered: window.unwrap_or((f32::NEG_INFINITY, f32::INFINITY)),
+            shown: Vec::new(),
+        };
+        for &index in &shown {
+            let Some(top) = tops.get(index) else {
+                continue;
+            };
+            let Some(fragment) = &self.entries[index].fragment else {
+                continue;
+            };
+            for key in &fragment.keys {
+                if let Some(entry) = self.texts.get_mut(key) {
+                    entry.used = self.generation;
+                }
+            }
+            let (dp, dy) = (top.pos, top.y);
+            out.texts
+                .extend(fragment.texts.iter().map(|t| t.shifted(dp, dy)));
+            out.decorations
+                .extend(fragment.decorations.iter().map(|d| d.shifted(dp, dy)));
+            out.blocks
+                .extend(fragment.blocks.iter().map(|b| b.shifted(dp, dy)));
+        }
+        // Keep paragraphs used in this pass or the last one, so editing a
+        // block that was just on screen reshapes only what changed.
+        let generation = self.generation;
+        self.texts.retain(|_, entry| entry.used + 1 >= generation);
+        out.shown = shown;
+        out
+    }
+
+    /// Matches the document's top-level blocks with the previous pass,
+    /// keeping fragments of unchanged nodes.
+    fn sync(&mut self, doc: &Node, width: f32) {
+        if width != self.width {
+            self.reset();
+            self.width = width;
+        }
+        let children: Vec<&Node> = doc.children().collect();
+        let old_len = self.entries.len();
+        let common = old_len.min(children.len());
+        let prefix = (0..common)
+            .take_while(|&i| self.entries[i].node.ptr_eq(children[i]))
+            .count();
+        let suffix = (0..common - prefix)
+            .take_while(|&i| {
+                self.entries[old_len - 1 - i]
+                    .node
+                    .ptr_eq(children[children.len() - 1 - i])
+            })
+            .count();
+        let old_middle = prefix..old_len - suffix;
+        let new_middle = &children[prefix..children.len() - suffix];
+        if old_middle.is_empty() && new_middle.is_empty() {
+            return;
+        }
+        let entries = {
+            let pool: HashMap<usize, &Entry> = self.entries[old_middle.clone()]
+                .iter()
+                .map(|entry| (entry.node.identity(), entry))
+                .collect();
+            new_middle
+                .iter()
+                .map(|child| match pool.get(&child.identity()) {
+                    Some(entry) if entry.node.ptr_eq(child) => (*entry).clone(),
+                    _ => Entry {
+                        node: (*child).clone(),
+                        heading: child.type_name() == "heading",
+                        leaf: child.is_leaf(),
+                        height: self.shaper.estimate(child, width),
+                        fragment: None,
+                    },
+                })
+                .collect::<Vec<_>>()
+        };
+        let resized = old_middle.len() != entries.len();
+        let changed = entries.len();
+        self.entries.splice(old_middle, entries);
+        if resized {
+            let from = prefix / CHUNK;
+            self.rebuild_from = Some(self.rebuild_from.map_or(from, |current| current.min(from)));
+        } else {
+            // The block after the change may get a different gap.
+            self.dirty
+                .extend(prefix / CHUNK..=(prefix + changed) / CHUNK);
+        }
+    }
+
+    fn slot(&self, index: usize) -> Slot {
+        let spacing = &self.shaper.theme.spacing;
+        let entry = &self.entries[index];
+        let gap = match index {
+            0 => 0.0,
+            _ if entry.heading => spacing.block_gap + spacing.heading_gap,
+            _ => spacing.block_gap,
+        };
+        Slot {
+            size: entry.node.node_size(),
+            gap,
+            height: entry.height,
+            measured: entry.fragment.is_some(),
+        }
+    }
+
+    /// Rebuilds changed chunks and snapshots the block places.
+    fn refresh(&mut self) -> Tops {
+        let count = self.entries.len().div_ceil(CHUNK);
+        let chunk = |engine: &Self, k: usize| {
+            let end = ((k + 1) * CHUNK).min(engine.entries.len());
+            Chunk::new((k * CHUNK..end).map(|i| engine.slot(i)).collect())
+        };
+        if let Some(from) = self.rebuild_from.take() {
+            let from = from.min(self.chunks.len());
+            self.chunks.truncate(from);
+            for k in from..count {
+                let rebuilt = chunk(self, k);
+                self.chunks.push(rebuilt);
+            }
+        }
+        self.chunks.truncate(count);
+        let mut dirty = std::mem::take(&mut self.dirty);
+        dirty.sort_unstable();
+        dirty.dedup();
+        for k in dirty {
+            if k < self.chunks.len() {
+                self.chunks[k] = chunk(self, k);
+            }
+        }
+        Tops::new(&self.chunks)
+    }
+
+    fn measure(&mut self, index: usize, width: f32) {
+        let node = self.entries[index].node.clone();
         let mut builder = Builder {
-            engine: self,
-            next_cache: HashMap::new(),
-            out: DocumentLayout {
-                width,
-                height: 0.0,
-                texts: Vec::new(),
-                decorations: Vec::new(),
-                blocks: Vec::new(),
-            },
+            shaper: &self.shaper,
+            cache: &mut self.texts,
+            generation: self.generation,
+            out: Fragment::default(),
         };
         let ctx = Ctx {
             italic: false,
             list_depth: 0,
             depth: 0,
         };
-        let height = builder.stack(doc, 0, 0.0, 0.0, width, ctx, false);
-        let Builder {
-            engine,
-            next_cache,
-            mut out,
-        } = builder;
-        engine.cache = next_cache;
-        out.height = height;
-        out
+        let height = builder.block(&node, 0, 0.0, 0.0, width, ctx);
+        let mut fragment = builder.out;
+        fragment.height = height;
+        let entry = &mut self.entries[index];
+        entry.height = height;
+        entry.fragment = Some(Rc::new(fragment));
+        self.dirty.push(index / CHUNK);
+    }
+
+    /// Placeholder text for the empty textblock `node`, in the block's
+    /// style and the muted foreground color.
+    pub fn placeholder(&self, node: &Node, text: &str, width: f32) -> TextLayout {
+        self.shaper.placeholder(node, text, width)
+    }
+}
+
+/// Indices of the blocks intersecting `window` (all when `None`).
+fn window_range(tops: &Tops, window: Option<(f32, f32)>) -> std::ops::Range<usize> {
+    match window {
+        None => 0..tops.len(),
+        Some((from, to)) => tops.range_y(from, to),
+    }
+}
+
+impl Shaper {
+    /// A cheap height guess for a block that is not measured yet.
+    fn estimate(&self, node: &Node, width: f32) -> f32 {
+        let theme = &self.theme;
+        let spacing = &theme.spacing;
+        if node.is_textblock() {
+            let style = block_style(theme, node, false);
+            let pad = if node.node_type().spec().code {
+                spacing.code_block_padding * 2.0
+            } else {
+                0.0
+            };
+            let advance = style.size * if style.mono { 0.6 } else { 0.5 };
+            let per_line = ((width - pad) / advance).max(1.0);
+            let lines = (node.content().size() as f32 / per_line).ceil().max(1.0);
+            return lines * style.line_height + pad;
+        }
+        if node.is_leaf() {
+            return leaf_height(node, width);
+        }
+        let list = is_list(node);
+        let indent = if list {
+            spacing.list_indent
+        } else if node.type_name() == "blockquote" {
+            spacing.quote_indent
+        } else {
+            0.0
+        };
+        let in_item =
+            node.node_type().is_in_group("listItem") || node.type_name().ends_with("Item");
+        let gap = if list || in_item {
+            spacing.list_item_gap
+        } else {
+            spacing.block_gap
+        };
+        let mut height = 0.0;
+        for (index, child) in node.children().enumerate() {
+            if index > 0 {
+                height += gap;
+            }
+            height += self.estimate(child, (width - indent).max(1.0));
+        }
+        height
     }
 
     fn text_layout(&self, node: &Node, width: f32, italic: bool) -> TextLayout {
@@ -259,9 +632,7 @@ impl LayoutEngine {
         )
     }
 
-    /// Placeholder text for the empty textblock `node`, in the block's
-    /// style and the muted foreground color.
-    pub fn placeholder(&self, node: &Node, text: &str, width: f32) -> TextLayout {
+    fn placeholder(&self, node: &Node, text: &str, width: f32) -> TextLayout {
         let theme = &self.theme;
         let mut block: BlockStyle = block_style(theme, node, false);
         block.color = theme.palette.muted_foreground;
@@ -326,9 +697,28 @@ fn is_list(node: &Node) -> bool {
     node.node_type().is_in_group("list")
 }
 
+/// Height of a leaf block (rule, image) at `width`.
+fn leaf_height(node: &Node, width: f32) -> f32 {
+    match node.type_name() {
+        "image" => image_size(node, width).1,
+        _ => 24.0,
+    }
+}
+
+fn image_size(node: &Node, width: f32) -> (f32, f32) {
+    let attr = |name: &str| node.attr(name).and_then(|v| v.as_f64()).map(|v| v as f32);
+    match (attr("width"), attr("height")) {
+        (Some(w), Some(h)) if w > 0.0 && h > 0.0 => {
+            let shown = w.min(width);
+            (shown, shown * h / w)
+        }
+        _ => (width.min(640.0), width.min(640.0) * 9.0 / 16.0),
+    }
+}
+
 impl Builder<'_> {
     fn theme(&self) -> &Theme {
-        &self.engine.theme
+        &self.shaper.theme
     }
 
     fn gap(&self, previous: Option<&Node>, node: &Node, in_item: bool) -> f32 {
@@ -368,22 +758,25 @@ impl Builder<'_> {
 
     fn text(&mut self, node: &Node, pos: usize, x: f32, y: f32, width: f32, ctx: Ctx) -> f32 {
         let key = (node.identity(), width.to_bits(), ctx.italic);
-        let layout = match self
-            .engine
-            .cache
-            .get(&key)
-            .or_else(|| self.next_cache.get(&key))
-        {
-            Some(entry) if entry.node.ptr_eq(node) => entry.layout.clone(),
-            _ => Rc::new(self.engine.text_layout(node, width, ctx.italic)),
+        let layout = match self.cache.get_mut(&key) {
+            Some(entry) if entry.node.ptr_eq(node) => {
+                entry.used = self.generation;
+                entry.layout.clone()
+            }
+            _ => {
+                let layout = Rc::new(self.shaper.text_layout(node, width, ctx.italic));
+                self.cache.insert(
+                    key,
+                    CacheEntry {
+                        node: node.clone(),
+                        layout: layout.clone(),
+                        used: self.generation,
+                    },
+                );
+                layout
+            }
         };
-        self.next_cache.insert(
-            key,
-            CacheEntry {
-                node: node.clone(),
-                layout: layout.clone(),
-            },
-        );
+        self.out.keys.push(key);
         let height = layout.height();
         self.out.texts.push(TextBox {
             node_pos: pos,
@@ -508,7 +901,7 @@ impl Builder<'_> {
             };
             match list.type_name() {
                 "orderedList" => {
-                    let label = Rc::new(self.engine.label(&format!("{}.", start + index as u64)));
+                    let label = Rc::new(self.shaper.label(&format!("{}.", start + index as u64)));
                     let label_y = baseline - label.lines()[0].baseline;
                     self.out.decorations.push(Decoration::Number {
                         x: x + indent - 6.0 - label.width(),
@@ -557,14 +950,7 @@ impl Builder<'_> {
                 height
             }
             "image" => {
-                let attr = |name: &str| node.attr(name).and_then(|v| v.as_f64()).map(|v| v as f32);
-                let (w, h) = match (attr("width"), attr("height")) {
-                    (Some(w), Some(h)) if w > 0.0 && h > 0.0 => {
-                        let w = w.min(width);
-                        (w, w * h / attr("width").unwrap_or(w))
-                    }
-                    _ => (width.min(640.0), width.min(640.0) * 9.0 / 16.0),
-                };
+                let (w, h) = image_size(node, width);
                 let text = |name: &str| node.attr(name).and_then(|v| v.as_str()).map(str::to_owned);
                 self.out.decorations.push(Decoration::Image {
                     rect: Rect::new(x, y, w, h),
@@ -579,6 +965,27 @@ impl Builder<'_> {
 }
 
 impl DocumentLayout {
+    /// Index into `tops` of the top-level block containing `pos`.
+    pub fn top_at_pos(&self, pos: usize) -> Option<usize> {
+        self.tops.at_pos(pos)
+    }
+
+    /// Index into `tops` of the first block reaching below `y`.
+    pub fn top_at_y(&self, y: f32) -> Option<usize> {
+        self.tops.at_y(y)
+    }
+
+    /// Whether the boxes of the block containing `pos` are laid out.
+    pub fn shows(&self, pos: usize) -> bool {
+        self.top_at_pos(pos)
+            .is_some_and(|index| self.shown.binary_search(&index).is_ok())
+    }
+
+    /// Whether every block intersecting `from..to` (document y) is laid out.
+    pub fn covers(&self, from: f32, to: f32) -> bool {
+        self.covered.0 <= from && to <= self.covered.1
+    }
+
     /// The text box whose content range contains `pos`.
     pub fn text_at(&self, pos: usize) -> Option<&TextBox> {
         let index = self.texts.partition_point(|text| text.end() < pos);
