@@ -793,6 +793,21 @@ mod ime {
     }
 
     #[test]
+    fn a_reasserted_region_keeps_one_undo_step() {
+        // The call sequence a Xiaomi keyboard sends while typing "Hal".
+        let (mut view, _) = view_with(doc(vec![p("x ")]), KeyPlatform::Other);
+        view.select_text(3, 3, Affinity::Downstream);
+        for (text, end) in [("H", 3), ("Ha", 4), ("Hal", 5)] {
+            assert!(view.set_composition(text));
+            assert!(view.ime_set_composing_region(2, end));
+        }
+        assert!(view.commit_composition("Halo"));
+        assert_eq!(text_of(&view), "x Halo");
+        view.run("undo", &Value::Null).unwrap();
+        assert_eq!(text_of(&view), "x ");
+    }
+
+    #[test]
     fn replacing_while_composing_tracks_the_range() {
         let (mut view, _) = view_with(doc(vec![p("ab")]), KeyPlatform::Other);
         view.select_text(3, 3, Affinity::Downstream);

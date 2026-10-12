@@ -116,12 +116,21 @@ impl EditorView {
             self.finish_composition();
             return true;
         }
+        let (abs_from, abs_to) = (context.start + from, context.start + to);
+        // Keyboards re-assert the region after every keystroke; the same
+        // region keeps the composition (and its undo step).
+        if self
+            .composition
+            .is_some_and(|c| c.from == abs_from && c.to == abs_to)
+        {
+            return true;
+        }
         self.close_history_now();
         let id = self.new_composition_id();
         self.composition = Some(Composition {
             id,
-            from: context.start + from,
-            to: context.start + to,
+            from: abs_from,
+            to: abs_to,
         });
         self.request_redraw();
         true

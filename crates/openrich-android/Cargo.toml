@@ -1,0 +1,33 @@
+[package]
+name = "openrich-android"
+description = "Shell Android OpenRich: Skia GL di SurfaceView, gesture sentuh dan InputConnection lewat JNI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Only Android builds carry the shell; elsewhere the library is empty so the
+# workspace still builds everywhere.
+[target.'cfg(target_os = "android")'.dependencies]
+openrich-commands.workspace = true
+openrich-extensions.workspace = true
+openrich-theme.workspace = true
+openrich-view.workspace = true
+serde_json.workspace = true
+skia-safe = { version = "=0.153.3", features = ["gl", "textlayout"] }
+jni = "0.21"
+ndk = "0.9"
+khronos-egl = { version = "6", features = ["static", "no-pkg-config"] }
+
+[lints.rust]
+# JNI entry points need `#[no_mangle]` and raw handles.
+unsafe_code = "allow"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"

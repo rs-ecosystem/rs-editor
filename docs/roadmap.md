@@ -6,7 +6,7 @@
 
 | Fase | Lingkup | Status |
 | --- | --- | --- |
-| P0 | Kerangka workspace, CI, ADR, spike Skia (WASM, Android) | **Sebagian.** Workspace, CI dan ADR selesai. Spike Skia web dan Android belum dikerjakan. |
+| P0 | Kerangka workspace, CI, ADR, spike Skia (WASM, Android) | **Selesai.** Lihat [laporan spike](spikes/p0-web-android.md). |
 | P1 | Core headless: model, transform, state, history, command, extension, StarterKit | **Selesai** |
 | P2 | Layout inkremental, render Skia, view, tema shadcn, dev harness desktop | **Selesai** |
 | P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | Belum dimulai |
@@ -49,7 +49,7 @@ Ukuran saat ini (raster CPU, macOS, `--release`, contoh `perf`):
 
 Pada 100.000 blok, sisa biaya ada di model dokumen: setiap perubahan menyalin array anak level atas (perilaku yang sama dengan ProseMirror). Kalau dokumen sepanjang itu jadi target, anak level atas perlu disimpan dalam pohon persisten.
 
-Golden pixel test memakai `OPENRICH_UPDATE_GOLDEN=1 cargo test -p openrich-view --test golden` untuk memperbarui gambar. Kegagalan menulis gambar aktual dan diff ke `target/golden-failures/`, dan CI mengunggahnya sebagai artifact. Gambar dibuat di macOS; kecocokannya di Linux baru akan terlihat saat CI pertama kali berjalan.
+Golden pixel test memakai `OPENRICH_UPDATE_GOLDEN=1 cargo test -p openrich-view --test golden` untuk memperbarui gambar. Kegagalan menulis gambar aktual dan diff ke `target/golden-failures/`, dan CI mengunggahnya sebagai artifact. Golden disimpan per OS (`tests/golden/macos`, `tests/golden/linux`): prebuilt Skia untuk Apple merasterisasi tepi glyph dengan CoreText, sedangkan Linux memakai FreeType, jadi tepinya sedikit berbeda walaupun layout identik.
 
 Menjalankan harness:
 
@@ -67,5 +67,7 @@ Catatan yang dibawa ke fase berikutnya:
 
 ## Berikutnya
 
-1. **Spike P0:** Skia di Emscripten/WebGL dan Android `SurfaceView`, `InputConnection`, EditContext.
-2. **P3 dan P4** (web dan Android), sesuai prioritas.
+1. **P3 (web):** paket `@openrich/web`, clipboard HTML/Markdown, DOM ARIA dari pohon aksesibilitas, font emoji/CJK yang dimuat bertahap, uji di Safari, Firefox dan Chrome Android.
+2. **P4 (Android):** binding Kotlin (BoltFFI), handle dan menu seleksi, `CursorAnchorInfo`, AccessKit, uji Gboard dan Samsung Keyboard.
+
+Spike web dan Android sudah membuktikan jalurnya: [laporan spike P0](spikes/p0-web-android.md).

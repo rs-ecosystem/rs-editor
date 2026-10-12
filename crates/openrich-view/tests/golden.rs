@@ -1,5 +1,5 @@
 //! Golden pixel tests: frames rendered with the bundled fonts only, compared
-//! with PNGs in `tests/golden/` within a tolerance for anti-aliasing.
+//! with PNGs in `tests/golden/<os>/` within a tolerance for anti-aliasing.
 //!
 //! `OPENRICH_UPDATE_GOLDEN=1 cargo test -p openrich-view --test golden`
 //! rewrites the images. A mismatch writes the actual frame and a diff to
@@ -127,14 +127,29 @@ fn rgba(png: &[u8]) -> (i32, i32, Vec<u8>) {
     (image.width(), image.height(), pixels)
 }
 
-fn golden_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
+/// Goldens per OS: Skia rasterizes glyph edges with CoreText on Apple
+/// platforms and FreeType elsewhere, so edges differ slightly while the
+/// layout is identical. `None` where no goldens are kept.
+fn golden_dir() -> Option<PathBuf> {
+    let os = match std::env::consts::OS {
+        os @ ("macos" | "linux") => os,
+        _ => return None,
+    };
+    Some(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/golden")
+            .join(os),
+    )
 }
 
 fn check(name: &str, png: Vec<u8>) {
-    let path = golden_dir().join(format!("{name}.png"));
+    let Some(dir) = golden_dir() else {
+        eprintln!("{name}: no goldens for {}; skipped", std::env::consts::OS);
+        return;
+    };
+    let path = dir.join(format!("{name}.png"));
     if std::env::var_os("OPENRICH_UPDATE_GOLDEN").is_some() || !path.exists() {
-        std::fs::create_dir_all(golden_dir()).expect("golden dir");
+        std::fs::create_dir_all(&dir).expect("golden dir");
         std::fs::write(&path, &png).expect("write golden");
         if std::env::var_os("OPENRICH_UPDATE_GOLDEN").is_none() {
             panic!("{name}: no golden image; wrote {}", path.display());
