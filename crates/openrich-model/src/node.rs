@@ -67,6 +67,13 @@ impl Node {
         Arc::ptr_eq(&self.0, &other.0)
     }
 
+    /// Identity of this node's shared data. Unchanged subtrees keep their
+    /// identity across document versions, so caches can key on it (while
+    /// holding a clone, so the address cannot be reused).
+    pub fn identity(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
+
     pub fn node_type(&self) -> &NodeType {
         &self.0.ty
     }
