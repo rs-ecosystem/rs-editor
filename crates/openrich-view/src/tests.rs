@@ -355,3 +355,58 @@ fn paints_a_frame_with_selection_and_caret() {
     }
     assert!(matches!(view.editor().selection(), Selection::Text(_)));
 }
+
+/// Sum of the pixels of `rect` (view coordinates at scale 1).
+fn region_sum(view: &mut EditorView, rect: openrich_layout::Rect) -> u64 {
+    let (width, height, _) = view.size();
+    let mut surface =
+        skia_safe::surfaces::raster_n32_premul((width as i32, height as i32)).unwrap();
+    view.paint(surface.canvas());
+    let image = surface.image_snapshot();
+    let info = image.image_info();
+    let mut pixels = vec![0u8; info.compute_min_byte_size()];
+    let row_bytes = info.min_row_bytes();
+    assert!(image.read_pixels(
+        info,
+        &mut pixels,
+        row_bytes,
+        (0, 0),
+        skia_safe::image::CachingHint::Allow
+    ));
+    let mut sum = 0u64;
+    for y in rect.y as usize..rect.bottom() as usize {
+        for x in rect.x as usize..rect.right() as usize {
+            let i = y * row_bytes + x * 4;
+            sum += pixels[i..i + 3].iter().map(|&b| u64::from(b)).sum::<u64>();
+        }
+    }
+    sum
+}
+
+#[test]
+fn selection_shows_over_code_blocks_and_inline_backgrounds() {
+    for theme in [
+        openrich_theme::Theme::light(),
+        openrich_theme::Theme::dark(),
+    ] {
+        let content = doc(vec![
+            json!({"type": "codeBlock", "content": [{"type": "text", "text": "let x = 1;"}]}),
+            json!({"type": "paragraph", "content": [{"type": "text", "text": "kode", "marks": [{"type": "code"}]}]}),
+        ]);
+        let (mut view, _) = view_with(content, KeyPlatform::Other);
+        view.set_theme(theme);
+        for (from, to) in [(1, 11), (13, 17)] {
+            let rect = view.layout().selection_rects(from, to)[0];
+            let rect = view.to_view(rect);
+            view.select_text(from, from, Affinity::Downstream);
+            let plain = region_sum(&mut view, rect);
+            view.select_text(from, to, Affinity::Downstream);
+            let selected = region_sum(&mut view, rect);
+            let change = plain.abs_diff(selected) as f64 / plain.max(1) as f64;
+            assert!(
+                change > 0.03,
+                "selection {from}..{to} invisible: {plain} vs {selected}"
+            );
+        }
+    }
+}

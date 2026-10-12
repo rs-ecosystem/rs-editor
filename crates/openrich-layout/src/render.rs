@@ -1,7 +1,7 @@
 //! Paints a [`DocumentLayout`] with the theme's shadcn colors.
 
-use openrich_theme::{Color, Theme};
-use skia_safe::{Canvas, Paint, PaintCap, PaintJoin, PaintStyle, PathBuilder, RRect};
+use openrich_theme::{Color, ColorScheme, Theme};
+use skia_safe::{BlendMode, Canvas, Paint, PaintCap, PaintJoin, PaintStyle, PathBuilder, RRect};
 
 use crate::document::{BulletStyle, Decoration, DocumentLayout};
 use crate::geometry::Rect;
@@ -142,8 +142,15 @@ fn paint_decoration(canvas: &Canvas, decoration: &Decoration, theme: &Theme, vie
 }
 
 /// Fills selection highlight rectangles.
+/// Tints the selected ranges. Paint it after the document: multiply (light)
+/// or screen (dark) keeps text and code/highlight backgrounds visible under
+/// the tint, and looks the same as plain blending on the page background.
 pub fn paint_selection(canvas: &Canvas, rects: &[Rect], theme: &Theme) {
-    let paint = fill(theme.palette.selection);
+    let mut paint = fill(theme.palette.selection);
+    paint.set_blend_mode(match theme.scheme {
+        ColorScheme::Light => BlendMode::Multiply,
+        ColorScheme::Dark => BlendMode::Screen,
+    });
     for rect in rects {
         canvas.draw_rect(rect.to_skia(), &paint);
     }

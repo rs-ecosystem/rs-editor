@@ -27,6 +27,7 @@ impl EditorView {
             self.height,
         );
 
+        render::paint_document(canvas, &layout, &theme, viewport);
         let selection = self.editor.selection().clone();
         match &selection {
             Selection::Node(node) => {
@@ -45,7 +46,6 @@ impl EditorView {
             _ => {}
         }
 
-        render::paint_document(canvas, &layout, &theme, viewport);
         self.paint_placeholder(canvas, &layout, &selection);
 
         if let Some((from, to)) = self.composition_range() {
