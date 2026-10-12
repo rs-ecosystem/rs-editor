@@ -290,6 +290,14 @@ impl Transaction {
             .and_then(|value| value.downcast_ref::<T>())
     }
 
+    /// Copies every metadata entry of `other` onto this transaction.
+    pub fn copy_meta_from(&mut self, other: &Transaction) -> &mut Self {
+        for (key, value) in &other.meta {
+            self.meta.insert(key.clone(), value.clone());
+        }
+        self
+    }
+
     pub fn has_meta(&self, key: &str) -> bool {
         self.meta.contains_key(key)
     }
