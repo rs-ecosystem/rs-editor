@@ -7,6 +7,26 @@
 //! arguments (`run("toggleHeading", {"level": 2})`), content is Tiptap
 //! JSON, and toolbar state comes from [`Editor::is_active`] and
 //! [`Editor::can`].
+//!
+//! ```
+//! use openrich_extensions::{Editor, EditorOptions};
+//! use serde_json::json;
+//!
+//! # fn main() -> Result<(), openrich_extensions::ExtensionError> {
+//! let mut editor = Editor::new(EditorOptions {
+//!     content: Some(json!({"type": "doc", "content": [{"type": "paragraph"}]})),
+//!     ..Default::default()
+//! })?;
+//!
+//! editor.type_text("# ");            // markdown input rule: heading
+//! editor.type_text("Halo dunia");
+//! editor.select(1, 5);
+//! editor.run("toggleBold", &json!(null))?;
+//! assert!(editor.is_active("bold", &Default::default()));
+//! assert_eq!(editor.get_json()["content"][0]["type"], "heading");
+//! # Ok(())
+//! # }
+//! ```
 
 mod core_commands;
 mod editor;
@@ -21,5 +41,7 @@ pub use extension::{
     CommandFactory, Extension, ExtensionContext, ExtensionError, ExtensionManager, GlobalAttribute,
 };
 
+#[cfg(test)]
+mod proptests;
 #[cfg(test)]
 mod tests;

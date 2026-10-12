@@ -224,6 +224,7 @@ dependencies = [
  "openrich-model",
  "openrich-state",
  "openrich-transform",
+ "proptest",
  "regex",
  "serde_json",
  "thiserror",
@@ -257,6 +258,14 @@ dependencies = [
  "openrich-transform",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "openrich-text"
+version = "0.1.0"
+dependencies = [
+ "openrich-model",
+ "unicode-segmentation",
 ]
 
 [[package]]

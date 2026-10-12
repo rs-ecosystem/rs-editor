@@ -595,3 +595,28 @@ fn task_items_toggle_through_the_command() {
     assert!(editor.exec(&toggle_task_item(pos), None));
     assert_eq!(content(&editor)[0]["content"][0]["attrs"]["checked"], true);
 }
+
+#[test]
+fn autolink_does_not_relink_after_undo_or_block_changes() {
+    let mut editor = empty_editor();
+    type_chars(&mut editor, "go https://x.dev ");
+    assert_eq!(
+        content(&editor)[0]["content"][1]["marks"][0]["type"],
+        "link"
+    );
+    editor.select(1, 19);
+    assert!(editor.run("unsetAllMarks", &Value::Null).unwrap());
+    let unlinked = editor.get_json();
+    editor.select(18, 18);
+    assert!(editor.run("toggleHeading", &json!({"level": 1})).unwrap());
+    assert!(
+        content(&editor)[0]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|n| n.get("marks").is_none()),
+        "changing the block type must not autolink"
+    );
+    assert!(editor.run("undo", &Value::Null).unwrap());
+    assert_eq!(editor.get_json(), unlinked, "undo must not autolink either");
+}

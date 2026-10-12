@@ -140,8 +140,16 @@ fn apply(tr: &mut Transform, op: &Op, source: &Node) {
     };
 }
 
+/// Cases per run; raise with `PROPTEST_CASES` for longer bug hunts.
+fn cases(default: u32) -> u32 {
+    std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(512))]
+    #![proptest_config(ProptestConfig::with_cases(cases(512)))]
 
     #[test]
     fn transforms_stay_valid_invertible_and_serializable(

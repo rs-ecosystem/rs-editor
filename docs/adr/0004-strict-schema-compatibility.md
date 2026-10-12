@@ -1,6 +1,6 @@
 # ADR 0004: Tolak data schema yang belum dikenal
 
-- **Status:** diterima untuk schema v1 selama API masih pra-1.0
+- **Status:** digantikan oleh [ADR 0007](0007-openrich-v2-architecture.md)
 - **Tanggal:** 2026-10-11
 
 ## Konteks

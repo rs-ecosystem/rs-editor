@@ -17,6 +17,7 @@ thiserror.workspace = true
 unicode-segmentation.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 openrich-model = { workspace = true, features = ["test-util"] }
 openrich-state = { workspace = true, features = ["test-util"] }
 

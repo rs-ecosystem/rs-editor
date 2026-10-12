@@ -1,0 +1,16 @@
+[package]
+name = "openrich-text"
+description = "Batas grapheme dan kata dalam satuan UTF-16 untuk posisi dokumen OpenRich"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openrich-model.workspace = true
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+openrich-model = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

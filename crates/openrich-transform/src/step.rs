@@ -303,9 +303,10 @@ impl Step {
             }),
             Step::ReplaceAround(step) => {
                 let gap = step.gap_to - step.gap_from;
-                Step::ReplaceAround(ReplaceAroundStep {
+                let to = step.from + step.slice.size() + gap;
+                let natural = Step::ReplaceAround(ReplaceAroundStep {
                     from: step.from,
-                    to: step.from + step.slice.size() + gap,
+                    to,
                     gap_from: step.from + step.insert,
                     gap_to: step.from + step.insert + gap,
                     slice: doc
@@ -313,7 +314,22 @@ impl Step {
                         .remove_between(step.gap_from - step.from, step.gap_to - step.from)?,
                     insert: step.gap_from - step.from,
                     structure: step.structure,
-                })
+                });
+                // ProseMirror's gap inverse can be unapplicable: lifting a
+                // non-first child out of a list item reinserts it into an
+                // empty item that must start with a paragraph. A plain
+                // replace of the whole range always restores the original.
+                let after = self.apply(doc)?;
+                if natural.apply(&after).is_ok() {
+                    natural
+                } else {
+                    Step::Replace(ReplaceStep {
+                        from: step.from,
+                        to,
+                        slice: doc.slice(step.from, step.to, false)?,
+                        structure: false,
+                    })
+                }
             }
             Step::AddMark(step) => Step::RemoveMark(step.clone()),
             Step::RemoveMark(step) => Step::AddMark(step.clone()),

@@ -1,6 +1,6 @@
 # ADR 0006: Host demo interaktif dengan server Rust lokal dan WKWebView
 
-- Status: diterima untuk milestone demo
+- Status: digantikan oleh [ADR 0007](0007-openrich-v2-architecture.md)
 - Tanggal: 2026-10-11
 
 ## Konteks

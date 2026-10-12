@@ -2723,3 +2723,17 @@ fn mapping_assigns_deleted_flags() {
         );
     }
 }
+
+#[test]
+fn lifting_a_non_first_list_item_child_stays_invertible() {
+    // The gap inverse of this lift cannot apply (an empty list item must
+    // start with a paragraph); the inverse falls back to a plain replace.
+    let d = doc(v![ul(v![li(v![p(v!["i"]), "<a>", hr()])])]);
+    let from = d.node.resolve(d.tag("a")).unwrap();
+    let to = d.node.resolve(d.tag("a") + 1).unwrap();
+    let range = from.block_range(&to, None).unwrap();
+    let mut tr = Transform::new(d.node.clone());
+    tr.lift(&range, lift_target(&range).unwrap()).unwrap();
+    assert_eq!(tr.doc, doc(v![ul(v![li(v![p(v!["i"])])]), hr()]).node);
+    assert_eq!(invert(&tr).doc, d.node);
+}

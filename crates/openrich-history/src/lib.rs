@@ -25,6 +25,23 @@ pub const CLOSE_HISTORY: &str = "closeHistory$";
 pub const REBASED: &str = "rebased";
 
 const MAX_EMPTY_ITEMS: usize = 500;
+
+/// Applies an inverted step. When changes outside the history made it
+/// invalid (for example a mark that a code block does not allow), the
+/// replaced content is fitted instead, so undo restores as much as it can
+/// rather than silently dropping the event.
+fn apply_or_fit(tr: &mut Transaction, step: Step) -> bool {
+    if tr.maybe_step(step.clone()) {
+        return true;
+    }
+    match step {
+        Step::Replace(replace) => {
+            let before = tr.steps.len();
+            tr.replace(replace.from, replace.to, replace.slice).is_ok() && tr.steps.len() > before
+        }
+        _ => false,
+    }
+}
 const DEPTH_OVERFLOW: usize = 20;
 
 #[derive(Debug, Clone)]
@@ -127,7 +144,7 @@ impl Branch {
                 let mapped = step.map(&mapping.slice_from(map_from));
                 let mut applied_map = None;
                 if let Some(mapped) = mapped
-                    && tr.maybe_step(mapped)
+                    && apply_or_fit(&mut tr, mapped)
                 {
                     let map = tr.mapping.maps()[tr.mapping.maps().len() - 1].clone();
                     add_after.push(Item {
@@ -143,7 +160,7 @@ impl Branch {
                     mapping.append_map(map, Some(map_from));
                 }
             } else {
-                tr.maybe_step(step.clone());
+                apply_or_fit(&mut tr, step.clone());
             }
             if let Some(selection) = item.selection {
                 let selection = match &remap {

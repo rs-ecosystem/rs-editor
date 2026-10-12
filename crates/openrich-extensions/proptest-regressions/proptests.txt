@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 075119295501674d46890520fa746bcee176f007ec12b9d433a2647473d4d9e3 # shrinks to actions = [Command("toggleHeading", Object {"level": Number(2)}), Select(16, 19), Command("setHorizontalRule", Null), Command("selectAll", Null), Command("toggleHeading", Object {"level": Number(2)})]
+cc 4abc435e7ab6769cccbc33849d8045615d85449a2ca2374213f62102e6c00584 # shrinks to actions = [Select(12, 19), Type("https://x.dev "), Type("a"), Command("undo", Null), Type("https://x.dev "), Command("toggleCodeBlock", Null), Select(18, 0), Type("a"), Select(25, 25), Command("toggleHeading", Object {"level": Number(2)})]

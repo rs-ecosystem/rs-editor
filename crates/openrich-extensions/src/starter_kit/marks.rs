@@ -333,6 +333,19 @@ struct Autolink {
     options: Link,
 }
 
+/// Whether `tr` inserted text that ends with whitespace.
+fn typed_whitespace(tr: &Transaction) -> bool {
+    tr.steps.iter().any(|step| match step {
+        openrich_transform::Step::Replace(replace) => replace
+            .slice
+            .content
+            .last_child()
+            .and_then(|node| node.text())
+            .is_some_and(|text| text.ends_with(char::is_whitespace)),
+        _ => false,
+    })
+}
+
 /// Whether `word` looks like a web or mail address.
 pub fn detect_link(word: &str) -> Option<String> {
     let trimmed = word.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', '"', '\'']);
@@ -365,8 +378,12 @@ impl Plugin for Autolink {
         _old: &EditorState,
         new: &EditorState,
     ) -> Option<Transaction> {
-        if !trs.iter().any(|tr| tr.doc_changed())
-            || trs.iter().any(|tr| tr.has_meta(PREVENT_AUTOLINK))
+        // Only right after the user typed whitespace; never for undo/redo,
+        // pastes or programmatic changes that happen to end with a space.
+        if !trs.iter().any(typed_whitespace)
+            || trs.iter().any(|tr| {
+                tr.has_meta(PREVENT_AUTOLINK) || openrich_history::is_history_transaction(tr)
+            })
         {
             return None;
         }
