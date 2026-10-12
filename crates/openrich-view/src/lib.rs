@@ -12,6 +12,7 @@ mod input;
 mod paint;
 mod pointer;
 mod scroll;
+mod touch;
 
 use std::fmt;
 use std::rc::Rc;
@@ -33,6 +34,10 @@ pub use openrich_commands::{KeyEvent, Modifiers};
 pub use openrich_layout::Affinity;
 pub use pointer::{PointerButton, PointerEvent};
 pub use scroll::{FRAME_MS, VelocityTracker};
+pub use touch::{
+    Handle, HandleKind, HandleStyle, HapticKind, InteractionProfile, MenuItem, SelectionMenu,
+    TouchPhase,
+};
 
 /// Space between the view's edges and the document.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -77,6 +82,15 @@ pub enum Effect {
         text: String,
         json: serde_json::Value,
     },
+    /// Play haptic feedback.
+    Haptic(HapticKind),
+    /// Show (or move) the floating selection menu; `None` hides it.
+    SelectionMenu(Option<SelectionMenu>),
+    /// Show the magnifier centered on this text point (view coordinates);
+    /// `None` hides it.
+    Magnifier(Option<(f32, f32)>),
+    /// A tap on the text: bring up the soft keyboard.
+    ShowKeyboard,
 }
 
 /// Options for [`EditorView::new`].
@@ -153,6 +167,8 @@ pub struct EditorView {
     scroll_seen: u64,
     effects: Vec<Effect>,
     pub(crate) a11y: a11y::A11y,
+    pub(crate) touch: touch::TouchState,
+    pub(crate) profile: InteractionProfile,
 }
 
 impl fmt::Debug for EditorView {
@@ -209,6 +225,8 @@ impl EditorView {
             scroll_seen,
             effects: Vec::new(),
             a11y: a11y::A11y::default(),
+            touch: touch::TouchState::default(),
+            profile: InteractionProfile::default(),
         })
     }
 
@@ -416,6 +434,15 @@ impl EditorView {
         if self.is_scrolling() {
             return Some(FRAME_MS);
         }
+        let touch = self.touch_deadline();
+        let blink = self.blink_deadline();
+        match (touch, blink) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    fn blink_deadline(&self) -> Option<u64> {
         if !self.focused || !self.editor.selection().empty() {
             return None;
         }

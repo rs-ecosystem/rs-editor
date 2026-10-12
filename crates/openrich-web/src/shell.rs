@@ -440,6 +440,13 @@ pub unsafe extern "C" fn orx_take_effects(app_ptr: *mut App) -> usize {
                 app.copied = Some((text.clone(), json));
                 json!({"type": "clipboard", "text": text})
             }
+            Effect::Haptic(_) => json!({"type": "haptic"}),
+            Effect::SelectionMenu(menu) => json!({"type": "selectionMenu", "menu": menu.map(|m| json!({
+                "rect": [m.rect.x, m.rect.y, m.rect.width, m.rect.height],
+                "items": m.items.iter().map(|i| format!("{i:?}").to_lowercase()).collect::<Vec<_>>(),
+            }))}),
+            Effect::Magnifier(at) => json!({"type": "magnifier", "at": at.map(|(x, y)| [x, y])}),
+            Effect::ShowKeyboard => json!({"type": "showKeyboard"}),
         })
         .collect();
     app.set_result(&Value::Array(effects).to_string())

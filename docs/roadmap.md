@@ -71,7 +71,24 @@ Catatan yang dibawa ke fase berikutnya:
 
 Target: editor terasa seperti kolom teks bawaan Android, bukan sekadar tampil benar.
 
-### Milestone 1: seleksi sentuh terasa native
+### Milestone 1: seleksi sentuh terasa native · Sebagian besar selesai
+
+Sudah ada dan diuji (9 tes skenario headless di `openrich-view/src/touch.rs`, plus uji manual di perangkat 23049PCD8G):
+
+- Ketuk menaruh caret dengan handle tetesan yang hilang setelah 4 detik; ketuk caret lagi memunculkan menu Paste/Select all.
+- Tekan lama memilih kata (haptik `LONG_PRESS`, magnifier), lalu geser memperluas per kata.
+- Ketuk dua dan tiga kali memilih kata dan paragraf.
+- Handle Material digambar Skia. Menarik handle: keluar melompat per kata, kembali per karakter, tidak bisa melewati handle lain, auto-scroll di tepi, haptik `TEXT_HANDLE_MOVE` setiap perubahan, dan `Magnifier` asli Android.
+- Menu mengambang asli (`ActionMode`) dengan label lokal sistem dan aksi aplikasi lain (`PROCESS_TEXT`), disembunyikan selama scroll lalu muncul lagi.
+- Mengetik, tombol, atau mouse mengakhiri mode seleksi sentuh.
+
+Belum:
+
+- Menarik caret dengan tekan lama di caret (tanpa handle).
+- Handle gaya Apple baru digambar, belum diuji di iOS (P6).
+- Uji di keyboard selain keyboard Xiaomi.
+
+Rencana awal milestone:
 
 Inti di Rust (`openrich-view`), dipakai juga oleh web di HP (P3) dan iOS (P6):
 

@@ -21,6 +21,7 @@ pub enum Granularity {
 impl EditorView {
     /// A key press. Returns whether the editor used it.
     pub fn key_down(&mut self, event: &KeyEvent) -> bool {
+        self.end_touch_mode();
         if !self.editor.is_editable() && !is_navigation(&event.key) {
             return false;
         }
@@ -72,6 +73,7 @@ impl EditorView {
 
     /// Text typed or pasted as plain characters, replacing the selection.
     pub fn insert_text(&mut self, text: &str) -> bool {
+        self.end_touch_mode();
         if text.is_empty() || !self.editor.is_editable() {
             return false;
         }
@@ -343,6 +345,7 @@ impl EditorView {
     /// the document so layout, wrapping and the candidate window position
     /// are exact; it becomes one undo step when committed.
     pub fn set_composition(&mut self, text: &str) -> bool {
+        self.end_touch_mode();
         if !self.editor.is_editable() {
             return false;
         }

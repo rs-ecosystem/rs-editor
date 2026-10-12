@@ -3,8 +3,6 @@
 //! Every method takes the handle returned by `create` and must be called on
 //! the UI thread (Skia objects are not thread-safe).
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use jni::JNIEnv;
 use jni::objects::{JClass, JObject, JString};
 use jni::sys::{jboolean, jfloat, jint, jlong, jstring};
@@ -13,17 +11,10 @@ use ndk::native_window::NativeWindow;
 use openrich_commands::{KeyEvent, KeyPlatform, Modifiers};
 use openrich_extensions::EditorOptions;
 use openrich_theme::Theme;
-use openrich_view::{EditorView, PointerButton, PointerEvent, VelocityTracker, ViewOptions};
+use openrich_view::{EditorView, Effect, HapticKind, MenuItem, TouchPhase, ViewOptions};
 use serde_json::{Value, json};
 use skia_safe::gpu::{self, DirectContext, SurfaceOrigin, gl::FramebufferInfo};
 use skia_safe::{ColorType, Surface};
-
-/// Movement (dp) before a touch becomes a scroll.
-const TOUCH_SLOP: f32 = 8.0;
-/// A press longer than this selects a word.
-const LONG_PRESS_MS: u64 = 450;
-/// Taps closer than this in time (and 24 dp in space) count together.
-const MULTI_TAP_MS: u64 = 300;
 
 struct Gl {
     egl: egl::Instance<egl::Static>,
@@ -36,26 +27,9 @@ struct Gl {
     pixels: (i32, i32),
 }
 
-struct Touch {
-    start: (f32, f32),
-    last_y: f32,
-    down_ms: u64,
-    scrolling: bool,
-}
-
 pub struct App {
     view: EditorView,
     gl: Option<Gl>,
-    touch: Option<Touch>,
-    tracker: VelocityTracker,
-    /// Time, place and count of the last tap.
-    last_tap: Option<(u64, f32, f32, u32)>,
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
 }
 
 fn app<'a>(handle: jlong) -> &'a mut App {
@@ -245,16 +219,39 @@ impl App {
         }
     }
 
-    fn tap(&mut self, x: f32, y: f32, clicks: u32) {
-        let event = PointerEvent {
-            x,
-            y,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::default(),
-            click_count: clicks,
-        };
-        self.view.pointer_down(event);
-        self.view.pointer_up(event);
+    /// Effects for Java, with coordinates in pixels.
+    fn effects(&mut self) -> Value {
+        let scale = self.view.size().2;
+        let effects: Vec<Value> = self
+            .view
+            .take_effects()
+            .into_iter()
+            .filter_map(|effect| match effect {
+                Effect::Haptic(kind) => Some(json!({"type": "haptic", "kind": match kind {
+                    HapticKind::LongPress => "longPress",
+                    HapticKind::TextHandleMove => "textHandleMove",
+                }})),
+                Effect::SelectionMenu(menu) => Some(json!({"type": "menu", "menu": menu.map(|m| json!({
+                    "rect": [m.rect.x * scale, m.rect.y * scale, m.rect.right() * scale, m.rect.bottom() * scale],
+                    "items": m.items.iter().map(|item| menu_item_name(*item)).collect::<Vec<_>>(),
+                }))})),
+                Effect::Magnifier(at) => Some(json!({"type": "magnifier", "at": at.map(|(x, y)| [x * scale, y * scale])})),
+                Effect::ShowKeyboard => Some(json!({"type": "showKeyboard"})),
+                Effect::Clipboard { text, .. } => Some(json!({"type": "clipboard", "text": text})),
+                Effect::OpenUrl(url) => Some(json!({"type": "openUrl", "url": url})),
+                Effect::Redraw | Effect::ImeCursorArea(_) | Effect::Cursor(_) => None,
+            })
+            .collect();
+        Value::Array(effects)
+    }
+}
+
+fn menu_item_name(item: MenuItem) -> &'static str {
+    match item {
+        MenuItem::Cut => "cut",
+        MenuItem::Copy => "copy",
+        MenuItem::Paste => "paste",
+        MenuItem::SelectAll => "selectAll",
     }
 }
 
@@ -293,13 +290,7 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_create(
         bottom: 24.0,
         left: 20.0,
     });
-    Box::into_raw(Box::new(App {
-        view,
-        gl: None,
-        touch: None,
-        tracker: VelocityTracker::new(),
-        last_tap: None,
-    })) as jlong
+    Box::into_raw(Box::new(App { view, gl: None })) as jlong
 }
 
 #[unsafe(no_mangle)]
@@ -394,7 +385,7 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_render(
 }
 
 /// A touch event in pixels; `action` is 0 down, 1 move, 2 up, 3 cancel.
-/// Returns true when the soft keyboard should be shown (a tap on text).
+/// Results (keyboard, menu, haptics) come through `takeEffects`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_openrich_android_OpenRichNative_touch(
     _env: JNIEnv,
@@ -403,69 +394,55 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_touch(
     action: jint,
     x: jfloat,
     y: jfloat,
-) -> jboolean {
+) {
     let app = app(handle);
     let scale = app.view.size().2;
-    let (x, y) = (x / scale, y / scale);
-    let now = now_ms();
-    match action {
-        0 => {
-            app.view.stop_scrolling();
-            app.tracker.reset();
-            app.tracker.add(now, y);
-            app.touch = Some(Touch {
-                start: (x, y),
-                last_y: y,
-                down_ms: now,
-                scrolling: false,
-            });
-            0
-        }
-        1 => {
-            let Some(touch) = app.touch.as_mut() else {
-                return 0;
-            };
-            if !touch.scrolling && (x - touch.start.0).hypot(y - touch.start.1) > TOUCH_SLOP {
-                touch.scrolling = true;
-            }
-            if touch.scrolling {
-                let dy = touch.last_y - y;
-                touch.last_y = y;
-                app.tracker.add(now, y);
-                app.view.scroll_by(dy);
-            }
-            0
-        }
-        2 => {
-            let Some(touch) = app.touch.take() else {
-                return 0;
-            };
-            if touch.scrolling {
-                app.tracker.add(now, y);
-                app.view.fling(-app.tracker.velocity());
-                return 0;
-            }
-            if now - touch.down_ms >= LONG_PRESS_MS {
-                app.tap(x, y, 2);
-                app.last_tap = None;
-                return 1;
-            }
-            let clicks = match app.last_tap {
-                Some((at, tx, ty, count))
-                    if now - at <= MULTI_TAP_MS && (x - tx).hypot(y - ty) <= 24.0 =>
-                {
-                    count % 3 + 1
-                }
-                _ => 1,
-            };
-            app.last_tap = Some((now, x, y, clicks));
-            app.tap(x, y, clicks);
-            1
-        }
-        _ => {
-            app.touch = None;
-            0
-        }
+    let phase = match action {
+        0 => TouchPhase::Down,
+        1 => TouchPhase::Move,
+        2 => TouchPhase::Up,
+        _ => TouchPhase::Cancel,
+    };
+    app.view.touch(phase, x / scale, y / scale);
+}
+
+/// Effects since the last call as JSON: haptics, the selection menu,
+/// the magnifier, keyboard requests, clipboard writes.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_openrich_android_OpenRichNative_takeEffects(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    let effects = app(handle).effects().to_string();
+    new_string(&mut env, &effects)
+}
+
+/// A command chosen from the selection menu (`cut`, `copy`, `paste`,
+/// `selectAll`); `clipboard` is the clipboard text for paste. Returns text
+/// to put on the clipboard, or null.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_openrich_android_OpenRichNative_menuAction(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    item: JString,
+    clipboard: JString,
+) -> jstring {
+    let item = match string(&mut env, &item).as_str() {
+        "cut" => MenuItem::Cut,
+        "copy" => MenuItem::Copy,
+        "paste" => MenuItem::Paste,
+        _ => MenuItem::SelectAll,
+    };
+    let clipboard = if clipboard.is_null() {
+        None
+    } else {
+        Some(string(&mut env, &clipboard))
+    };
+    match app(handle).view.menu_action(item, clipboard.as_deref()) {
+        Some(text) => new_string(&mut env, &text),
+        None => std::ptr::null_mut(),
     }
 }
 

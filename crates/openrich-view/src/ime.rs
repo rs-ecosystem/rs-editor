@@ -146,6 +146,7 @@ impl EditorView {
     /// Deletes `before` UTF-16 units before the selection and `after` units
     /// after it, within the block (`deleteSurroundingText`).
     pub fn ime_delete_surrounding(&mut self, before: usize, after: usize) -> bool {
+        self.end_touch_mode();
         let Some(context) = self.ime_context() else {
             return false;
         };

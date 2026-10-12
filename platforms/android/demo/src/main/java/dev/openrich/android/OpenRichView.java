@@ -25,6 +25,7 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
     final long handle;
     private final float density;
     private final InputMethodManager imm;
+    private final SelectionUi selection;
     private boolean surfaceReady;
     private boolean frameScheduled;
     private int imeStart = Integer.MIN_VALUE;
@@ -36,6 +37,7 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
         imm = context.getSystemService(InputMethodManager.class);
         handle = OpenRichNative.create(1, 1, density, dark, contentJson);
         if (handle == 0) throw new IllegalStateException("OpenRich gagal dibuat");
+        selection = new SelectionUi(this);
         setFocusable(true);
         setFocusableInTouchMode(true);
         getHolder().addCallback(this);
@@ -46,6 +48,7 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
     }
 
     public void release() {
+        selection.release();
         OpenRichNative.destroy(handle);
     }
 
@@ -88,6 +91,8 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
         frameScheduled = false;
         if (!surfaceReady) return;
         long next = OpenRichNative.render(handle);
+        // A frame can start a long press or bring the menu back after a fling.
+        applyEffects();
         if (next >= 0 && next <= 16) {
             scheduleFrame();
         } else if (next > 16) {
@@ -107,11 +112,7 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
             case MotionEvent.ACTION_CANCEL: action = 3; break;
             default: return true;
         }
-        boolean showKeyboard = OpenRichNative.touch(handle, action, event.getX(), event.getY());
-        if (showKeyboard) {
-            requestFocus();
-            imm.showSoftInput(this, 0);
-        }
+        OpenRichNative.touch(handle, action, event.getX(), event.getY());
         afterInput();
         return true;
     }
@@ -199,7 +200,21 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
     }
 
     /** Redraws and tells the IME where the selection is now. */
+    void showKeyboard() {
+        requestFocus();
+        imm.showSoftInput(this, 0);
+    }
+
+    private void applyEffects() {
+        try {
+            selection.apply(new JSONArray(OpenRichNative.takeEffects(handle)));
+        } catch (JSONException ignored) {
+            // Effects are best effort.
+        }
+    }
+
     void afterInput() {
+        applyEffects();
         scheduleFrame();
         if (batchDepth > 0) return;
         ImeState state = imeState();

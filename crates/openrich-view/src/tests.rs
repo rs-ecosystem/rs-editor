@@ -866,3 +866,307 @@ fn ime_replace_works_in_a_new_paragraph_after_enter() {
     );
     assert_eq!(text_of(&view), "abc\nJ");
 }
+
+mod touch {
+    use super::*;
+
+    /// The view point (middle of the line) of document position `pos`.
+    fn point_of(view: &mut EditorView, pos: usize) -> (f32, f32) {
+        let rect = view
+            .layout()
+            .caret_rect(pos, Affinity::Downstream, 0.0)
+            .unwrap();
+        let rect = view.to_view(rect);
+        (rect.x, rect.center_y())
+    }
+
+    fn tap(view: &mut EditorView, (x, y): (f32, f32)) {
+        view.touch(TouchPhase::Down, x, y);
+        view.touch(TouchPhase::Up, x, y);
+    }
+
+    /// Paints a frame, which runs timed touch behavior.
+    fn frame(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((64, 64)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn menus(effects: &[Effect]) -> Vec<Option<Vec<MenuItem>>> {
+        effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::SelectionMenu(menu) => Some(menu.as_ref().map(|m| m.items.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn haptics(effects: &[Effect]) -> Vec<HapticKind> {
+        effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Haptic(kind) => Some(*kind),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn setup(content: Value) -> (EditorView, Arc<ManualClock>) {
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        view.take_effects();
+        (view, clock)
+    }
+
+    fn selection(view: &EditorView) -> (usize, usize) {
+        let s = view.editor().selection();
+        (s.from(), s.to())
+    }
+
+    #[test]
+    fn a_tap_places_the_caret_with_a_handle_that_fades() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        assert_eq!(selection(&view), (8, 8));
+        assert!(view.take_effects().contains(&Effect::ShowKeyboard));
+        let handles = view.touch_handles();
+        assert_eq!(handles.len(), 1);
+        assert_eq!(handles[0].kind, HandleKind::Caret);
+        assert!(
+            handles[0].center.1 > at.1,
+            "the handle hangs below the line"
+        );
+        clock.advance(4_100);
+        frame(&mut view);
+        assert!(view.touch_handles().is_empty());
+    }
+
+    #[test]
+    fn tapping_the_caret_again_toggles_the_paste_menu() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        clock.advance(500);
+        view.take_effects();
+        tap(&mut view, at);
+        assert_eq!(
+            menus(&view.take_effects()),
+            vec![Some(vec![MenuItem::Paste, MenuItem::SelectAll])]
+        );
+        clock.advance(500);
+        tap(&mut view, at);
+        assert_eq!(menus(&view.take_effects()), vec![None]);
+    }
+
+    #[test]
+    fn a_long_press_selects_a_word_and_dragging_extends_by_words() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        let (x, y) = point_of(&mut view, 8);
+        view.touch(TouchPhase::Down, x, y);
+        assert_eq!(
+            view.next_frame_in(),
+            Some(400),
+            "the long press wakes the view"
+        );
+        clock.advance(450);
+        frame(&mut view);
+        assert_eq!(selection(&view), (6, 11));
+        let effects = view.take_effects();
+        assert_eq!(haptics(&effects), vec![HapticKind::LongPress]);
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::Magnifier(Some(_))))
+        );
+        let (x2, _) = point_of(&mut view, 14);
+        view.touch(TouchPhase::Move, x2, y);
+        assert_eq!(selection(&view), (6, 17), "whole words");
+        assert_eq!(
+            haptics(&view.take_effects()),
+            vec![HapticKind::TextHandleMove]
+        );
+        view.touch(TouchPhase::Up, x2, y);
+        let effects = view.take_effects();
+        assert_eq!(
+            menus(&effects),
+            vec![Some(vec![
+                MenuItem::Cut,
+                MenuItem::Copy,
+                MenuItem::Paste,
+                MenuItem::SelectAll
+            ])]
+        );
+        assert!(effects.contains(&Effect::Magnifier(None)));
+    }
+
+    #[test]
+    fn handles_grow_by_words_shrink_by_characters_and_never_cross() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah sekali")]));
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        clock.advance(100);
+        tap(&mut view, at);
+        assert_eq!(selection(&view), (6, 11), "double tap selects the word");
+        let end = view
+            .touch_handles()
+            .into_iter()
+            .find(|h| h.kind == HandleKind::End)
+            .unwrap();
+        let (x11, _) = point_of(&mut view, 11);
+        let grab = end.center;
+        let drag_to = |view: &mut EditorView, pos: usize| {
+            let (x, _) = point_of(view, pos);
+            view.touch(TouchPhase::Move, grab.0 + (x - x11), grab.1);
+        };
+        view.touch(TouchPhase::Down, grab.0, grab.1);
+        drag_to(&mut view, 14);
+        assert_eq!(selection(&view), (6, 17), "growing snaps to the word end");
+        drag_to(&mut view, 15);
+        assert_eq!(
+            selection(&view),
+            (6, 17),
+            "moving on inside the word keeps its end"
+        );
+        drag_to(&mut view, 13);
+        assert_eq!(selection(&view), (6, 13), "moving back goes by character");
+        drag_to(&mut view, 19);
+        assert_eq!(
+            selection(&view),
+            (6, 24),
+            "moving outward again snaps to words"
+        );
+        drag_to(&mut view, 3);
+        assert_eq!(selection(&view), (6, 24), "the end never passes the start");
+        view.touch(TouchPhase::Up, grab.0, grab.1);
+        assert!(menus(&view.take_effects()).last().unwrap().is_some());
+    }
+
+    #[test]
+    fn scrolling_hides_the_menu_and_brings_it_back() {
+        let blocks: Vec<Value> = (0..60).map(|i| p(&format!("baris nomor {i}"))).collect();
+        let (mut view, clock) = setup(doc(blocks));
+        let at = point_of(&mut view, 3);
+        tap(&mut view, at);
+        clock.advance(100);
+        tap(&mut view, at);
+        assert!(menus(&view.take_effects()).last().unwrap().is_some());
+        view.touch(TouchPhase::Down, 200.0, 300.0);
+        clock.advance(16);
+        view.touch(TouchPhase::Move, 200.0, 250.0);
+        clock.advance(16);
+        view.touch(TouchPhase::Move, 200.0, 200.0);
+        view.touch(TouchPhase::Up, 200.0, 200.0);
+        assert_eq!(menus(&view.take_effects()), vec![None]);
+        assert!(view.is_scrolling());
+        for _ in 0..400 {
+            clock.advance(FRAME_MS);
+            frame(&mut view);
+        }
+        assert!(!view.is_scrolling());
+        assert!(
+            menus(&view.take_effects()).last().unwrap().is_some(),
+            "back after the fling"
+        );
+    }
+
+    #[test]
+    fn typing_ends_touch_selection() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia")]));
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        clock.advance(100);
+        tap(&mut view, at);
+        view.take_effects();
+        view.insert_text("x");
+        assert!(view.touch_handles().is_empty());
+        assert_eq!(menus(&view.take_effects()), vec![None]);
+    }
+
+    #[test]
+    fn menu_commands_copy_cut_paste_and_select_all() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        clock.advance(100);
+        tap(&mut view, at);
+        assert_eq!(
+            view.menu_action(MenuItem::Copy, None).as_deref(),
+            Some("dunia")
+        );
+        assert_eq!(selection(&view), (11, 11), "copy collapses the selection");
+        assert!(view.touch_handles().is_empty());
+        assert_eq!(view.menu_action(MenuItem::Paste, Some("!")), None);
+        assert_eq!(text_of(&view), "halo dunia! indah");
+        view.take_effects();
+        view.menu_action(MenuItem::SelectAll, None);
+        assert_eq!(
+            menus(&view.take_effects()).last().unwrap().clone(),
+            Some(vec![MenuItem::Cut, MenuItem::Copy, MenuItem::Paste])
+        );
+        assert_eq!(view.touch_handles().len(), 2);
+        assert_eq!(
+            view.menu_action(MenuItem::Cut, None).as_deref(),
+            Some("halo dunia! indah")
+        );
+        assert_eq!(text_of(&view), "");
+    }
+
+    #[test]
+    fn dragging_near_the_bottom_edge_scrolls_and_extends() {
+        let blocks: Vec<Value> = (0..80).map(|i| p(&format!("baris nomor {i}"))).collect();
+        let (mut view, clock) = setup(doc(blocks));
+        let at = point_of(&mut view, 3);
+        view.touch(TouchPhase::Down, at.0, at.1);
+        clock.advance(450);
+        frame(&mut view);
+        let (_, height, _) = view.size();
+        view.touch(TouchPhase::Move, at.0, height - 4.0);
+        let before = selection(&view).1;
+        assert_eq!(view.next_frame_in(), Some(FRAME_MS));
+        for _ in 0..60 {
+            clock.advance(FRAME_MS);
+            frame(&mut view);
+        }
+        assert!(view.scroll_y() > 100.0, "{}", view.scroll_y());
+        assert!(selection(&view).1 > before + 30);
+    }
+
+    #[test]
+    fn handles_are_painted_in_the_selection_color() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        clock.advance(100);
+        tap(&mut view, at);
+        let end = view
+            .touch_handles()
+            .into_iter()
+            .find(|h| h.kind == HandleKind::End)
+            .unwrap();
+        let (width, height, _) = view.size();
+        let mut surface =
+            skia_safe::surfaces::raster_n32_premul((width as i32, height as i32)).unwrap();
+        view.paint(surface.canvas());
+        let image = surface.image_snapshot();
+        let info = skia_safe::ImageInfo::new(
+            (1, 1),
+            skia_safe::ColorType::RGBA8888,
+            skia_safe::AlphaType::Unpremul,
+            None,
+        );
+        let mut pixel = [0u8; 4];
+        assert!(image.read_pixels(
+            &info,
+            &mut pixel,
+            4,
+            (end.center.0 as i32, end.center.1 as i32),
+            skia_safe::image::CachingHint::Allow,
+        ));
+        let expected = view.theme().palette.selection.with_alpha(1.0);
+        let argb = expected.argb();
+        let rgb = [(argb >> 16) as u8, (argb >> 8) as u8, argb as u8];
+        let close = pixel[..3].iter().zip(rgb).all(|(a, b)| a.abs_diff(b) <= 2);
+        assert!(close, "handle pixel {:?} vs {:?}", &pixel[..3], rgb);
+    }
+}

@@ -27,8 +27,17 @@ public final class OpenRichNative {
     /** Draws a frame; returns ms until the next one is needed (0 animating), or -1 idle. */
     public static native long render(long handle);
 
-    /** action: 0 down, 1 move, 2 up, 3 cancel. Returns true when the keyboard should show. */
-    public static native boolean touch(long handle, int action, float x, float y);
+    /** action: 0 down, 1 move, 2 up, 3 cancel; results arrive through {@link #takeEffects}. */
+    public static native void touch(long handle, int action, float x, float y);
+
+    /**
+     * Effects since the last call, as a JSON array of
+     * {type: haptic|menu|magnifier|showKeyboard|clipboard|openUrl, ...} (pixels).
+     */
+    public static native String takeEffects(long handle);
+
+    /** A selection menu command: cut, copy, paste or selectAll. Returns clipboard text or null. */
+    public static native String menuAction(long handle, String item, String clipboardText);
 
     /** A key as a W3C key name ("Backspace", "Enter", "ArrowLeft", "z"...). */
     public static native boolean keyDown(long handle, String key, boolean shift, boolean ctrl, boolean alt);

@@ -46,12 +46,12 @@ pub(crate) struct Drag {
 }
 
 impl EditorView {
-    fn hit_at(&mut self, x: f32, y: f32) -> Option<Hit> {
+    pub(crate) fn hit_at(&mut self, x: f32, y: f32) -> Option<Hit> {
         let (dx, dy) = self.to_document(x, y);
         self.layout().hit(dx, dy)
     }
 
-    fn checkbox_at(&mut self, x: f32, y: f32) -> Option<usize> {
+    pub(crate) fn checkbox_at(&mut self, x: f32, y: f32) -> Option<usize> {
         let (dx, dy) = self.to_document(x, y);
         self.layout()
             .decorations
@@ -71,7 +71,7 @@ impl EditorView {
             })
     }
 
-    fn link_at(&mut self, pos: usize) -> Option<String> {
+    pub(crate) fn link_at(&mut self, pos: usize) -> Option<String> {
         let doc = self.editor.doc().clone();
         let resolved = doc.resolve(pos).ok()?;
         let node = resolved.node_after().or_else(|| resolved.node_before())?;
@@ -83,14 +83,14 @@ impl EditorView {
             .map(str::to_owned)
     }
 
-    fn word_range(&mut self, pos: usize) -> Option<(usize, usize)> {
+    pub(crate) fn word_range(&mut self, pos: usize) -> Option<(usize, usize)> {
         let layout = self.layout().clone();
         let text = layout.text_at(pos)?;
         let range = text.layout.word_at(pos - text.pos);
         Some((text.pos + range.start, text.pos + range.end))
     }
 
-    fn block_range(&mut self, pos: usize) -> Option<(usize, usize)> {
+    pub(crate) fn block_range(&mut self, pos: usize) -> Option<(usize, usize)> {
         let layout = self.layout().clone();
         let text = layout.text_at(pos)?;
         Some((text.pos, text.end()))
@@ -101,6 +101,7 @@ impl EditorView {
     }
 
     pub fn pointer_down(&mut self, event: PointerEvent) -> bool {
+        self.end_touch_mode();
         if event.button != PointerButton::Primary {
             return false;
         }

@@ -517,6 +517,11 @@ impl Shell {
                     }
                     self.copied = Some((text, json));
                 }
+                // Touch-only effects; the desktop shell has no touch input.
+                Effect::Haptic(_)
+                | Effect::SelectionMenu(_)
+                | Effect::Magnifier(_)
+                | Effect::ShowKeyboard => {}
             }
         }
     }
