@@ -64,10 +64,10 @@ impl TestState {
     /// Runs a command, applying what it dispatches. Returns whether it ran.
     pub fn command(
         &mut self,
-        command: impl FnOnce(&EditorState, Option<&mut dyn FnMut(Transaction)>) -> bool,
+        command: impl FnOnce(&EditorState, crate::Dispatch, Option<&dyn crate::ViewContext>) -> bool,
     ) -> bool {
         let mut produced = Vec::new();
-        let applied = command(&self.state, Some(&mut |tr| produced.push(tr)));
+        let applied = command(&self.state, Some(&mut |tr| produced.push(tr)), None);
         for tr in produced {
             self.apply(tr);
         }

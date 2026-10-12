@@ -13,7 +13,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use openrich_state::{
-    Dispatch, EditorState, Plugin, PluginValue, SelectionBookmark, Transaction, meta,
+    Dispatch, EditorState, Plugin, PluginValue, SelectionBookmark, Transaction, ViewContext, meta,
 };
 use openrich_transform::{Assoc, Mappable, Mapping, Step, StepMap, Transform};
 
@@ -642,20 +642,28 @@ fn history_command(state: &EditorState, dispatch: Dispatch, redo: bool, scroll: 
 }
 
 /// Undoes the last change event.
-pub fn undo(state: &EditorState, dispatch: Dispatch) -> bool {
+pub fn undo(state: &EditorState, dispatch: Dispatch, _view: Option<&dyn ViewContext>) -> bool {
     history_command(state, dispatch, false, true)
 }
 
 /// Redoes the last undone event.
-pub fn redo(state: &EditorState, dispatch: Dispatch) -> bool {
+pub fn redo(state: &EditorState, dispatch: Dispatch, _view: Option<&dyn ViewContext>) -> bool {
     history_command(state, dispatch, true, true)
 }
 
-pub fn undo_no_scroll(state: &EditorState, dispatch: Dispatch) -> bool {
+pub fn undo_no_scroll(
+    state: &EditorState,
+    dispatch: Dispatch,
+    _view: Option<&dyn ViewContext>,
+) -> bool {
     history_command(state, dispatch, false, false)
 }
 
-pub fn redo_no_scroll(state: &EditorState, dispatch: Dispatch) -> bool {
+pub fn redo_no_scroll(
+    state: &EditorState,
+    dispatch: Dispatch,
+    _view: Option<&dyn ViewContext>,
+) -> bool {
     history_command(state, dispatch, true, false)
 }
 

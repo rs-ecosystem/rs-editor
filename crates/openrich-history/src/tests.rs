@@ -61,7 +61,11 @@ fn apply(state: &EditorState, f: impl FnOnce(&mut Transaction)) -> EditorState {
 
 fn command(state: &EditorState, cmd: openrich_state::CommandFn) -> EditorState {
     let mut result = state.clone();
-    cmd(state, Some(&mut |tr| result = state.apply(tr).unwrap()));
+    cmd(
+        state,
+        Some(&mut |tr| result = state.apply(tr).unwrap()),
+        None,
+    );
     result
 }
 
@@ -507,8 +511,8 @@ fn states_without_history_are_handled() {
     })
     .unwrap();
     assert_eq!((undo_depth(&state), redo_depth(&state)), (0, 0));
-    assert!(!undo(&state, None));
-    assert!(!redo(&state, None));
+    assert!(!undo(&state, None, None));
+    assert!(!redo(&state, None, None));
 }
 
 #[test]
@@ -638,6 +642,7 @@ fn includes_transactions_appended_to_undo_in_the_redo_history() {
             tr.set_meta("add", "B");
             state = before.apply(tr).unwrap();
         }),
+        None,
     );
     assert_eq!(state.doc(), &d(v![p(v!["Bx"])]));
     let before = state.clone();
@@ -647,6 +652,7 @@ fn includes_transactions_appended_to_undo_in_the_redo_history() {
             tr.set_meta("add", "C");
             state = before.apply(tr).unwrap();
         }),
+        None,
     );
     assert_eq!(state.doc(), &d(v![p(v!["CAxI"])]));
     state = command(&state, undo);
