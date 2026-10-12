@@ -113,7 +113,15 @@ Adapter Android:
 
 Tes: skenario gesture headless (posisi, granularitas, auto-scroll, urutan sinyal haptik dan menu) dan uji manual di perangkat.
 
-### Milestone 2: input dan platform
+### Milestone 2: input dan platform · Berjalan
+
+Sudah:
+
+- `CursorAnchorInfo` (posisi caret dengan baseline, batas tiap karakter komposisi, batas editor untuk tulisan tangan) dikirim saat IME memintanya lewat `requestCursorUpdates`. Keyboard Xiaomi tidak memintanya; belum diuji dengan keyboard yang memakainya.
+- Crate `openrich-markup`: HTML ↔ dokumen. Parser bergaya ProseMirror (selalu menghasilkan dokumen valid; Google Docs, Word, GitHub, tag soup), serializer bergaya Tiptap dengan JSON slice tersemat sehingga salin-tempel di OpenRich sendiri persis. 11 tes termasuk property test tag soup.
+- Salin menghasilkan teks + HTML dan tempel memakai HTML lebih dulu, di desktop (arboard), web (`text/html`) dan Android (`ClipData.newHtmlText`).
+
+Rencana awal milestone:
 
 - `CursorAnchorInfo` agar popup kandidat dan input tulisan tangan berada di tempat yang benar.
 - Uji Gboard dan Samsung Keyboard: komposisi, koreksi otomatis, input suara, swipe typing.

@@ -28,7 +28,7 @@ use openrich_transform::{Assoc, Mappable};
 
 pub use a11y::EDITOR_NODE;
 pub use accesskit;
-pub use ime::ImeContext;
+pub use ime::{ImeCaret, ImeContext};
 pub use input::Granularity;
 pub use openrich_commands::{KeyEvent, Modifiers};
 pub use openrich_layout::Affinity;
@@ -78,10 +78,7 @@ pub enum Effect {
     OpenUrl(String),
     Cursor(CursorIcon),
     /// Put this content on the clipboard.
-    Clipboard {
-        text: String,
-        json: serde_json::Value,
-    },
+    Clipboard(ClipboardContent),
     /// Play haptic feedback.
     Haptic(HapticKind),
     /// Show (or move) the floating selection menu; `None` hides it.
@@ -91,6 +88,17 @@ pub enum Effect {
     Magnifier(Option<(f32, f32)>),
     /// A tap on the text: bring up the soft keyboard.
     ShowKeyboard,
+}
+
+/// Copied content in the formats the clipboard takes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClipboardContent {
+    /// Plain text; blocks are separated by newlines.
+    pub text: String,
+    /// HTML for other apps; pasting it back into OpenRich is exact.
+    pub html: String,
+    /// The copied slice as JSON (`{content, openStart, openEnd}`).
+    pub json: serde_json::Value,
 }
 
 /// Options for [`EditorView::new`].

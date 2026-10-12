@@ -65,7 +65,7 @@ final class SelectionUi extends ActionMode.Callback2 {
                     view.showKeyboard();
                     break;
                 case "clipboard":
-                    setClipboard(effect.optString("text"));
+                    setClipboard(effect.optString("text"), effect.optString("html"));
                     break;
                 case "openUrl":
                     openUrl(effect.optString("url"));
@@ -204,9 +204,16 @@ final class SelectionUi extends ActionMode.Callback2 {
             case ID_SELECT_ALL: item = "selectAll"; break;
             default: return false;
         }
-        String clipboard = "paste".equals(item) ? clipboardText() : null;
-        String copied = OpenRichNative.menuAction(view.handle, item, clipboard);
-        if (copied != null) setClipboard(copied);
+        String text = null, html = null;
+        if ("paste".equals(item)) {
+            ClipData.Item clip = clipItem();
+            if (clip != null) {
+                html = clip.getHtmlText();
+                CharSequence plain = clip.coerceToText(view.getContext());
+                text = plain == null ? null : plain.toString();
+            }
+        }
+        setClipboardJson(OpenRichNative.menuAction(view.handle, item, text, html));
         view.afterInput();
         return true;
     }
@@ -247,18 +254,39 @@ final class SelectionUi extends ActionMode.Callback2 {
         return view.getContext().getSystemService(ClipboardManager.class);
     }
 
-    private void setClipboard(String text) {
-        if (text != null && !text.isEmpty()) {
-            clipboard().setPrimaryClip(ClipData.newPlainText("OpenRich", text));
+    /** Puts copied content on the clipboard, as HTML with a plain text fallback. */
+    void setClipboard(String text, String html) {
+        if (text == null || text.isEmpty()) return;
+        ClipData clip = html == null || html.isEmpty()
+                ? ClipData.newPlainText("OpenRich", text)
+                : ClipData.newHtmlText("OpenRich", text, html);
+        clipboard().setPrimaryClip(clip);
+    }
+
+    /** Applies {text, html} JSON from the editor, if any. */
+    void setClipboardJson(String json) {
+        if (json == null) return;
+        try {
+            JSONObject copied = new JSONObject(json);
+            setClipboard(copied.optString("text"), copied.optString("html"));
+        } catch (org.json.JSONException ignored) {
+            // Nothing to copy.
         }
     }
 
-    private String clipboardText() {
+    private ClipData.Item clipItem() {
         ClipData clip = clipboard().getPrimaryClip();
-        if (clip == null || clip.getItemCount() == 0) return null;
-        Context context = view.getContext();
-        CharSequence text = clip.getItemAt(0).coerceToText(context);
-        return text == null ? null : text.toString();
+        return clip == null || clip.getItemCount() == 0 ? null : clip.getItemAt(0);
+    }
+
+    /** Pastes the clipboard: HTML when present, otherwise text. */
+    void paste() {
+        ClipData.Item clip = clipItem();
+        if (clip == null) return;
+        String html = clip.getHtmlText();
+        if (html != null && OpenRichNative.pasteHtml(view.handle, html)) return;
+        CharSequence text = clip.coerceToText(view.getContext());
+        if (text != null) OpenRichNative.paste(view.handle, text.toString());
     }
 
     private void openUrl(String url) {

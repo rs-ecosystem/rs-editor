@@ -285,7 +285,8 @@ fn paste_text_splits_lines_and_json_round_trips() {
     assert!(view.paste_text("1\n2\n3"));
     assert_eq!(text_of(&view), "a1\n2\n3b");
     view.select_text(1, 5, Affinity::Downstream);
-    let (text, json) = view.copy().unwrap();
+    let copied = view.copy().unwrap();
+    let (text, json) = (copied.text, copied.json);
     assert_eq!(text, "a1\n");
     let end = view.editor().doc().content().size() - 1;
     view.select_text(end, end, Affinity::Downstream);
@@ -775,6 +776,26 @@ mod ime {
     }
 
     #[test]
+    fn caret_metrics_and_character_bounds_for_ime_popups() {
+        let (mut view, _) = view_with(doc(vec![p("a👩‍💻b")]), KeyPlatform::Other);
+        view.select_text(1, 1, Affinity::Downstream);
+        let caret = view.ime_caret().unwrap();
+        assert!(caret.top < caret.baseline && caret.baseline < caret.bottom);
+        let bounds = view.ime_character_bounds(0, 7);
+        assert_eq!(bounds.len(), 7);
+        let rects: Vec<_> = bounds.iter().map(|b| b.unwrap()).collect();
+        // "a", then five units of one emoji grapheme, then "b".
+        assert!(rects[0].right() <= rects[1].x + 0.5);
+        assert!(rects[1..6].iter().all(|r| *r == rects[1]));
+        assert!(rects[6].x >= rects[1].right() - 0.5);
+        assert!(
+            (rects[0].x - caret.x).abs() < 0.5,
+            "the caret sits before `a`"
+        );
+        assert_eq!(view.ime_character_bounds(6, 9)[2], None, "past the end");
+    }
+
+    #[test]
     fn keyboards_recompose_and_replace_words() {
         let (mut view, _) = view_with(doc(vec![p("halo dunia")]), KeyPlatform::Other);
         view.select_text(11, 11, Affinity::Downstream);
@@ -1110,22 +1131,26 @@ mod touch {
         clock.advance(100);
         tap(&mut view, at);
         assert_eq!(
-            view.menu_action(MenuItem::Copy, None).as_deref(),
+            view.menu_action(MenuItem::Copy, None, None)
+                .map(|c| c.text)
+                .as_deref(),
             Some("dunia")
         );
         assert_eq!(selection(&view), (11, 11), "copy collapses the selection");
         assert!(view.touch_handles().is_empty());
-        assert_eq!(view.menu_action(MenuItem::Paste, Some("!")), None);
+        assert_eq!(view.menu_action(MenuItem::Paste, Some("!"), None), None);
         assert_eq!(text_of(&view), "halo dunia! indah");
         view.take_effects();
-        view.menu_action(MenuItem::SelectAll, None);
+        view.menu_action(MenuItem::SelectAll, None, None);
         assert_eq!(
             menus(&view.take_effects()).last().unwrap().clone(),
             Some(vec![MenuItem::Cut, MenuItem::Copy, MenuItem::Paste])
         );
         assert_eq!(view.touch_handles().len(), 2);
         assert_eq!(
-            view.menu_action(MenuItem::Cut, None).as_deref(),
+            view.menu_action(MenuItem::Cut, None, None)
+                .map(|c| c.text)
+                .as_deref(),
             Some("halo dunia! indah")
         );
         assert_eq!(text_of(&view), "");
@@ -1286,4 +1311,43 @@ mod touch {
         let close = pixel[..3].iter().zip(rgb).all(|(a, b)| a.abs_diff(b) <= 2);
         assert!(close, "handle pixel {:?} vs {:?}", &pixel[..3], rgb);
     }
+}
+
+#[test]
+fn html_from_copy_pastes_back_exactly_and_other_html_merges_in() {
+    let content = doc(vec![
+        json!({"type": "paragraph", "content": [{"type": "text", "text": "tebal", "marks": [{"type": "bold"}]}, {"type": "text", "text": " biasa"}]}),
+        json!({"type": "bulletList", "content": [{"type": "listItem", "content": [p("item")]}]}),
+    ]);
+    let (mut view, _) = view_with(content, KeyPlatform::Other);
+    let end = view.editor().doc().content().size();
+    view.select_text(1, end - 1, Affinity::Downstream);
+    let copied = view.copy().unwrap();
+    assert!(
+        copied.html.contains("<strong>tebal</strong>"),
+        "{}",
+        copied.html
+    );
+    view.select_text(end - 1, end - 1, Affinity::Downstream);
+    let before = view.editor().get_json();
+    view.select_text(1, 1, Affinity::Downstream);
+    assert!(view.paste_html(&copied.html));
+    let after = view.editor().get_json();
+    assert_eq!(
+        after["content"][0]["content"][0]["marks"][0]["type"],
+        "bold"
+    );
+    assert!(
+        after["content"].as_array().unwrap().len() > before["content"].as_array().unwrap().len()
+    );
+
+    // Inline HTML from another app joins the paragraph at the caret.
+    let (mut view, _) = view_with(doc(vec![p("ab")]), KeyPlatform::Other);
+    view.select_text(2, 2, Affinity::Downstream);
+    assert!(view.paste_html(r#"<b style="font-weight:normal" id="docs-internal-guid-1"><span style="font-weight:700">X</span></b>"#));
+    assert_eq!(text_of(&view), "aXb");
+    assert_eq!(
+        view.editor().get_json()["content"][0]["content"][1]["marks"][0]["type"],
+        "bold"
+    );
 }

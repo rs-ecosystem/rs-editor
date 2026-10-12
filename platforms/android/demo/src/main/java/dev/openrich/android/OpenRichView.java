@@ -1,6 +1,8 @@
 package dev.openrich.android;
 
 import android.content.Context;
+import android.graphics.Matrix;
+import android.graphics.RectF;
 import android.text.InputType;
 import android.util.Log;
 import android.view.Choreographer;
@@ -8,6 +10,8 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.inputmethod.CursorAnchorInfo;
+import android.view.inputmethod.EditorBoundsInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
@@ -30,6 +34,8 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
     private boolean frameScheduled;
     private int imeStart = Integer.MIN_VALUE;
     int batchDepth;
+    /** The IME asked for CursorAnchorInfo after every change. */
+    boolean monitorCursor;
 
     public OpenRichView(Context context, String contentJson, boolean dark) {
         super(context);
@@ -200,6 +206,10 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
     }
 
     /** Redraws and tells the IME where the selection is now. */
+    SelectionUi selectionUi() {
+        return selection;
+    }
+
     void showKeyboard() {
         requestFocus();
         imm.showSoftInput(this, 0);
@@ -227,7 +237,60 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
         } else {
             imm.updateSelection(this, state.selectionStart, state.selectionEnd,
                     state.compositionStart, state.compositionEnd);
+            if (monitorCursor) sendCursorAnchorInfo(state);
         }
+    }
+
+    /**
+     * Tells the IME where the caret and the composing characters are, so
+     * candidate popups and handwriting line up with the text.
+     */
+    void sendCursorAnchorInfo(ImeState state) {
+        boolean composing = state.compositionStart >= 0;
+        int from = composing ? state.compositionStart : state.selectionStart;
+        int to = composing ? state.compositionEnd : state.selectionEnd;
+        CursorAnchorInfo.Builder builder = new CursorAnchorInfo.Builder();
+        builder.setSelectionRange(state.selectionStart, state.selectionEnd);
+        if (composing) {
+            builder.setComposingText(from, state.text.substring(from, Math.min(to, state.text.length())));
+        }
+        try {
+            JSONObject info = new JSONObject(OpenRichNative.imeCursorInfo(handle, from, to));
+            JSONArray caret = info.optJSONArray("caret");
+            if (caret != null) {
+                float x = (float) caret.getDouble(0), top = (float) caret.getDouble(1);
+                float baseline = (float) caret.getDouble(2), bottom = (float) caret.getDouble(3);
+                builder.setInsertionMarkerLocation(x, top, baseline, bottom, visibility(x, top, bottom));
+            }
+            JSONArray bounds = info.optJSONArray("bounds");
+            for (int i = 0; bounds != null && i < bounds.length(); i++) {
+                JSONArray r = bounds.optJSONArray(i);
+                if (r == null) continue;
+                float l = (float) r.getDouble(0), t = (float) r.getDouble(1);
+                float rt = (float) r.getDouble(2), b = (float) r.getDouble(3);
+                builder.addCharacterBounds(from + i, l, t, rt, b, visibility(l, t, b));
+            }
+        } catch (JSONException ignored) {
+            // Send what we have.
+        }
+        int[] location = new int[2];
+        getLocationOnScreen(location);
+        Matrix matrix = new Matrix();
+        matrix.setTranslate(location[0], location[1]);
+        builder.setMatrix(matrix);
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            RectF bounds = new RectF(0, 0, getWidth(), getHeight());
+            builder.setEditorBoundsInfo(new EditorBoundsInfo.Builder()
+                    .setEditorBounds(bounds)
+                    .setHandwritingBounds(bounds)
+                    .build());
+        }
+        imm.updateCursorAnchorInfo(this, builder.build());
+    }
+
+    private int visibility(float x, float top, float bottom) {
+        boolean visible = x >= 0 && x <= getWidth() && bottom >= 0 && top <= getHeight();
+        return visible ? CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION : CursorAnchorInfo.FLAG_HAS_INVISIBLE_REGION;
     }
 
     ImeState imeState() {

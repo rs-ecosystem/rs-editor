@@ -239,17 +239,23 @@ export async function mount(container, { content, dark = false, moduleUrl = "pkg
   const clipboardTarget = textarea ?? canvas;
   for (const kind of ["copy", "cut"]) {
     clipboardTarget.addEventListener(kind, (e) => {
-      const text = result(M._orx_copy(app, kind === "cut" ? 1 : 0));
-      if (!text) return;
-      e.clipboardData.setData("text/plain", text);
+      const copied = JSON.parse(result(M._orx_copy(app, kind === "cut" ? 1 : 0)));
+      if (!copied.text && !copied.html) return;
+      e.clipboardData.setData("text/plain", copied.text);
+      e.clipboardData.setData("text/html", copied.html);
       e.preventDefault();
       afterInput();
     });
   }
   clipboardTarget.addEventListener("paste", (e) => {
-    const text = e.clipboardData.getData("text/plain");
     e.preventDefault();
-    if (text) withString(text, (ptr, len) => M._orx_paste(app, ptr, len));
+    // HTML keeps formatting (and is exact for OpenRich's own copies).
+    const html = e.clipboardData.getData("text/html");
+    const pasted = html && withString(html, (ptr, len) => M._orx_paste_html(app, ptr, len));
+    if (!pasted) {
+      const text = e.clipboardData.getData("text/plain");
+      if (text) withString(text, (ptr, len) => M._orx_paste(app, ptr, len));
+    }
     afterInput();
   });
 

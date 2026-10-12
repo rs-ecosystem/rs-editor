@@ -1,8 +1,5 @@
 package dev.openrich.android;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -109,6 +106,21 @@ final class OpenRichInputConnection extends BaseInputConnection {
     }
 
     @Override
+    public boolean requestCursorUpdates(int cursorUpdateMode) {
+        log("requestCursorUpdates " + cursorUpdateMode);
+        view.monitorCursor = (cursorUpdateMode & CURSOR_UPDATE_MONITOR) != 0;
+        if ((cursorUpdateMode & CURSOR_UPDATE_IMMEDIATE) != 0) {
+            view.sendCursorAnchorInfo(view.imeState());
+        }
+        return true;
+    }
+
+    @Override
+    public boolean requestCursorUpdates(int cursorUpdateMode, int cursorUpdateFilter) {
+        return requestCursorUpdates(cursorUpdateMode);
+    }
+
+    @Override
     public boolean commitCorrection(android.view.inputmethod.CorrectionInfo correctionInfo) {
         log("commitCorrection " + correctionInfo);
         return true;
@@ -180,18 +192,12 @@ final class OpenRichInputConnection extends BaseInputConnection {
 
     @Override
     public boolean performContextMenuAction(int id) {
-        ClipboardManager clipboard = view.getContext().getSystemService(ClipboardManager.class);
         if (id == android.R.id.selectAll) {
             OpenRichNative.keyDown(handle, "a", false, true, false);
         } else if (id == android.R.id.copy || id == android.R.id.cut) {
-            String text = OpenRichNative.copy(handle, id == android.R.id.cut);
-            if (!text.isEmpty()) clipboard.setPrimaryClip(ClipData.newPlainText("OpenRich", text));
+            view.selectionUi().setClipboardJson(OpenRichNative.copy(handle, id == android.R.id.cut));
         } else if (id == android.R.id.paste) {
-            ClipData clip = clipboard.getPrimaryClip();
-            if (clip != null && clip.getItemCount() > 0) {
-                CharSequence text = clip.getItemAt(0).coerceToText(view.getContext());
-                OpenRichNative.paste(handle, text.toString());
-            }
+            view.selectionUi().paste();
         } else {
             return false;
         }

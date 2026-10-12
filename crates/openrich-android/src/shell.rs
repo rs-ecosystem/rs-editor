@@ -237,7 +237,7 @@ impl App {
                 }))})),
                 Effect::Magnifier(at) => Some(json!({"type": "magnifier", "at": at.map(|(x, y)| [x * scale, y * scale])})),
                 Effect::ShowKeyboard => Some(json!({"type": "showKeyboard"})),
-                Effect::Clipboard { text, .. } => Some(json!({"type": "clipboard", "text": text})),
+                Effect::Clipboard(content) => Some(json!({"type": "clipboard", "text": content.text, "html": content.html})),
                 Effect::OpenUrl(url) => Some(json!({"type": "openUrl", "url": url})),
                 Effect::Redraw | Effect::ImeCursorArea(_) | Effect::Cursor(_) => None,
             })
@@ -419,15 +419,17 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_takeEffects(
 }
 
 /// A command chosen from the selection menu (`cut`, `copy`, `paste`,
-/// `selectAll`); `clipboard` is the clipboard text for paste. Returns text
-/// to put on the clipboard, or null.
+/// `selectAll`). For paste, `text` and `html` are the clipboard contents
+/// (either may be null; HTML wins). Returns `{text, html}` JSON to put on
+/// the clipboard, or null.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_openrich_android_OpenRichNative_menuAction(
     mut env: JNIEnv,
     _class: JClass,
     handle: jlong,
     item: JString,
-    clipboard: JString,
+    text: JString,
+    html: JString,
 ) -> jstring {
     let item = match string(&mut env, &item).as_str() {
         "cut" => MenuItem::Cut,
@@ -435,13 +437,18 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_menuAction(
         "paste" => MenuItem::Paste,
         _ => MenuItem::SelectAll,
     };
-    let clipboard = if clipboard.is_null() {
-        None
-    } else {
-        Some(string(&mut env, &clipboard))
-    };
-    match app(handle).view.menu_action(item, clipboard.as_deref()) {
-        Some(text) => new_string(&mut env, &text),
+    let optional =
+        |env: &mut JNIEnv, value: &JString| (!value.is_null()).then(|| string(env, value));
+    let text = optional(&mut env, &text);
+    let html = optional(&mut env, &html);
+    match app(handle)
+        .view
+        .menu_action(item, text.as_deref(), html.as_deref())
+    {
+        Some(content) => {
+            let result = json!({"text": content.text, "html": content.html}).to_string();
+            new_string(&mut env, &result)
+        }
         None => std::ptr::null_mut(),
     }
 }
@@ -579,7 +586,8 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_imeState(
     new_string(&mut env, &state)
 }
 
-/// Copies or cuts the selection; returns its plain text (empty if none).
+/// Copies or cuts the selection; returns `{text, html}` JSON (empty
+/// strings when nothing is selected).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_openrich_android_OpenRichNative_copy(
     mut env: JNIEnv,
@@ -589,8 +597,11 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_copy(
 ) -> jstring {
     let view = &mut app(handle).view;
     let copied = if cut != 0 { view.cut() } else { view.copy() };
-    let text = copied.map(|(text, _)| text).unwrap_or_default();
-    new_string(&mut env, &text)
+    let result = match copied {
+        Some(content) => json!({"text": content.text, "html": content.html}),
+        None => json!({"text": "", "html": ""}),
+    };
+    new_string(&mut env, &result.to_string())
 }
 
 #[unsafe(no_mangle)]
@@ -602,6 +613,18 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_paste(
 ) {
     let text = string(&mut env, &text);
     app(handle).view.paste_text(&text);
+}
+
+/// Pastes clipboard HTML; returns whether anything was pasted.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_openrich_android_OpenRichNative_pasteHtml(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    html: JString,
+) -> jboolean {
+    let html = string(&mut env, &html);
+    jboolean::from(app(handle).view.paste_html(&html))
 }
 
 #[unsafe(no_mangle)]
@@ -643,4 +666,43 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_replaceText(
     app(handle)
         .view
         .ime_replace(start.max(0) as usize, end.max(0) as usize, &text, false);
+}
+
+/// Geometry for `CursorAnchorInfo`, in pixels: the caret line
+/// (`[x, top, baseline, bottom]`) and the bounds of each UTF-16 unit in
+/// `from..to` of the IME block (`null` where not laid out).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_openrich_android_OpenRichNative_imeCursorInfo(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    from: jint,
+    to: jint,
+) -> jstring {
+    let view = &mut app(handle).view;
+    let scale = view.size().2;
+    let caret = view.ime_caret().map(|c| {
+        [
+            c.x * scale,
+            c.top * scale,
+            c.baseline * scale,
+            c.bottom * scale,
+        ]
+    });
+    let bounds: Vec<Value> = view
+        .ime_character_bounds(from.max(0) as usize, to.max(from).max(0) as usize)
+        .into_iter()
+        .map(|rect| {
+            rect.map_or(Value::Null, |r| {
+                json!([
+                    r.x * scale,
+                    r.y * scale,
+                    r.right() * scale,
+                    r.bottom() * scale
+                ])
+            })
+        })
+        .collect();
+    let info = json!({"caret": caret, "bounds": bounds}).to_string();
+    new_string(&mut env, &info)
 }

@@ -23,7 +23,6 @@ use openrich_theme::Theme;
 use openrich_view::{
     CursorIcon, EditorView, Effect, KeyEvent, Modifiers, PointerButton, PointerEvent, ViewOptions,
 };
-use serde_json::Value;
 use skia_safe::{AlphaType, ColorType, ImageInfo, surfaces};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition};
@@ -86,8 +85,6 @@ struct Shell {
     last_click: Option<Click>,
     /// The IME cleared its preedit; a commit may follow in the same batch.
     preedit_cleared: bool,
-    /// Rich copy of the last copied range, pasted when the clipboard text still matches.
-    copied: Option<(String, Value)>,
     clipboard: Option<arboard::Clipboard>,
     accessibility: accesskit_winit::Adapter,
     /// An assistive technology is connected; send tree updates.
@@ -165,7 +162,6 @@ impl App {
             pressed: false,
             last_click: None,
             preedit_cleared: false,
-            copied: None,
             clipboard,
             accessibility,
             accessibility_active: false,
@@ -439,35 +435,28 @@ impl Shell {
 
     fn clipboard_key(&mut self, key: &str) -> bool {
         match key {
-            "c" | "x" => {
-                let content = if key == "c" {
-                    self.view.copy()
-                } else {
-                    self.view.cut()
-                };
-                if let Some((text, json)) = content {
-                    if let Some(clipboard) = self.clipboard.as_mut() {
-                        let _ = clipboard.set_text(text.clone());
-                    }
-                    self.copied = Some((text, json));
-                }
+            // The view puts its copy on the clipboard through an effect.
+            "c" => {
+                self.view.copy();
+                true
+            }
+            "x" => {
+                self.view.cut();
                 true
             }
             "v" => {
-                let text = self.clipboard.as_mut().and_then(|c| c.get_text().ok());
-                match (text, &self.copied) {
-                    (Some(text), Some((copied, json))) if &text == copied => {
-                        let json = json.clone();
-                        self.view.paste_json(&json);
-                    }
-                    (Some(text), _) => {
-                        self.view.paste_text(&text);
-                    }
-                    (None, Some((_, json))) => {
-                        let json = json.clone();
-                        self.view.paste_json(&json);
-                    }
-                    (None, None) => {}
+                let Some(clipboard) = self.clipboard.as_mut() else {
+                    return true;
+                };
+                // HTML keeps formatting (and is exact for OpenRich's own
+                // copies); plain text is the fallback.
+                let pasted = clipboard
+                    .get()
+                    .html()
+                    .ok()
+                    .is_some_and(|html| self.view.paste_html(&html));
+                if !pasted && let Ok(text) = clipboard.get_text() {
+                    self.view.paste_text(&text);
                 }
                 true
             }
@@ -511,11 +500,10 @@ impl Shell {
                     CursorIcon::Default => winit::window::CursorIcon::Default,
                 }),
                 Effect::OpenUrl(url) => eprintln!("buka tautan: {url}"),
-                Effect::Clipboard { text, json } => {
+                Effect::Clipboard(content) => {
                     if let Some(clipboard) = self.clipboard.as_mut() {
-                        let _ = clipboard.set_text(text.clone());
+                        let _ = clipboard.set_html(content.html, Some(content.text));
                     }
-                    self.copied = Some((text, json));
                 }
                 // Touch-only effects; the desktop shell has no touch input.
                 Effect::Haptic(_)

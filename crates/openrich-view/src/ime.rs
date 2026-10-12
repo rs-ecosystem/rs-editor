@@ -8,7 +8,7 @@
 //! When the caret leaves the block, the context's `start` changes and the
 //! adapter restarts its input session.
 
-use openrich_layout::Affinity;
+use openrich_layout::{Affinity, Rect};
 use openrich_state::Selection;
 
 use crate::{Composition, EditorView};
@@ -64,6 +64,15 @@ impl ImeContext {
         let (from, to) = (fix(from), fix(to.max(from)));
         String::from_utf16_lossy(&units[from..to])
     }
+}
+
+/// Where the caret is, for IME popups and handwriting (view coordinates).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImeCaret {
+    pub x: f32,
+    pub top: f32,
+    pub baseline: f32,
+    pub bottom: f32,
 }
 
 impl EditorView {
@@ -224,5 +233,60 @@ impl EditorView {
         }
         tr.scroll_into_view();
         self.dispatch(tr)
+    }
+
+    /// The caret's line metrics, in view coordinates.
+    pub fn ime_caret(&mut self) -> Option<ImeCaret> {
+        let head = self.editor.selection().head();
+        let affinity = self.affinity;
+        let layout = self.layout();
+        let text = layout.text_at(head)?;
+        let offset = head - text.pos;
+        let caret = text.layout.caret(offset, affinity);
+        let line = text.layout.lines()[text.layout.line_index(offset, affinity)];
+        let rect = self.to_view(Rect::new(
+            text.rect.x + caret.x,
+            text.rect.y + line.top,
+            0.0,
+            line.height,
+        ));
+        Some(ImeCaret {
+            x: rect.x,
+            top: rect.y,
+            baseline: rect.y + (line.baseline - line.top),
+            bottom: rect.bottom(),
+        })
+    }
+
+    /// Bounds of each UTF-16 unit in `from..to` of the IME block (view
+    /// coordinates); both halves of a surrogate pair, and every unit of a
+    /// grapheme, get the grapheme's box. `None` for units not laid out.
+    pub fn ime_character_bounds(&mut self, from: usize, to: usize) -> Vec<Option<Rect>> {
+        let Some(context) = self.ime_context() else {
+            return Vec::new();
+        };
+        let layout = self.layout();
+        let Some(text) = layout.text_at(context.start) else {
+            return vec![None; to.saturating_sub(from)];
+        };
+        let index = text.layout.index();
+        let len = text.layout.len();
+        (from..to)
+            .map(|offset| {
+                if offset >= len {
+                    return None;
+                }
+                let start = index.snap(offset, Affinity::Upstream);
+                let end = index.next_boundary(start).unwrap_or(len);
+                let rects = text.layout.selection_rects(start..end);
+                let first = *rects.first()?;
+                let union = rects.iter().skip(1).fold(first, |acc, r| {
+                    let (x0, y0) = (acc.x.min(r.x), acc.y.min(r.y));
+                    let (x1, y1) = (acc.right().max(r.right()), acc.bottom().max(r.bottom()));
+                    Rect::new(x0, y0, x1 - x0, y1 - y0)
+                });
+                Some(self.to_view(union.translate(text.rect.x, text.rect.y)))
+            })
+            .collect()
     }
 }

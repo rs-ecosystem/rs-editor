@@ -20,8 +20,6 @@ pub struct App {
     pixels: (i32, i32),
     /// Last string result, read by JavaScript through `orx_result`.
     result: Vec<u8>,
-    /// Rich copy of the last copied range.
-    copied: Option<(String, Value)>,
 }
 
 impl std::fmt::Debug for App {
@@ -157,7 +155,6 @@ pub unsafe extern "C" fn orx_init(
         surface: None,
         pixels: App::pixels_for(width, height, dpr),
         result: Vec::new(),
-        copied: None,
     }))
 }
 
@@ -436,9 +433,8 @@ pub unsafe extern "C" fn orx_take_effects(app_ptr: *mut App) -> usize {
                 CursorIcon::Pointer => "pointer",
                 CursorIcon::Default => "default",
             }}),
-            Effect::Clipboard { text, json } => {
-                app.copied = Some((text.clone(), json));
-                json!({"type": "clipboard", "text": text})
+            Effect::Clipboard(content) => {
+                json!({"type": "clipboard", "text": content.text, "html": content.html})
             }
             Effect::Haptic(_) => json!({"type": "haptic"}),
             Effect::SelectionMenu(menu) => json!({"type": "selectionMenu", "menu": menu.map(|m| json!({
@@ -452,7 +448,8 @@ pub unsafe extern "C" fn orx_take_effects(app_ptr: *mut App) -> usize {
     app.set_result(&Value::Array(effects).to_string())
 }
 
-/// Copies (or cuts) the selection; returns the plain text's length.
+/// Copies (or cuts) the selection. The result is JSON `{text, html}`
+/// (empty strings when nothing is selected); returns its length.
 ///
 /// # Safety
 /// `app` must be live.
@@ -464,31 +461,29 @@ pub unsafe extern "C" fn orx_copy(app_ptr: *mut App, cut: u32) -> usize {
     } else {
         app.view.copy()
     };
-    match copied {
-        Some((text, json)) => {
-            let len = app.set_result(&text);
-            app.copied = Some((text, json));
-            len
-        }
-        None => app.set_result(""),
-    }
+    let result = match copied {
+        Some(content) => json!({"text": content.text, "html": content.html}),
+        None => json!({"text": "", "html": ""}),
+    };
+    app.set_result(&result.to_string())
 }
 
-/// Pastes plain text; the editor's own copy pastes with its formatting.
+/// Pastes plain text; each line becomes a paragraph.
 ///
 /// # Safety
 /// `app` must be live; the string must be readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn orx_paste(app_ptr: *mut App, text: *const u8, len: usize) -> u32 {
     let app = unsafe { app(app_ptr) };
-    let text = unsafe { read(text, len) };
-    let rich = app
-        .copied
-        .as_ref()
-        .filter(|(copied, _)| *copied == text)
-        .map(|(_, json)| json.clone());
-    u32::from(match rich {
-        Some(json) => app.view.paste_json(&json),
-        None => app.view.paste_text(&text),
-    })
+    u32::from(app.view.paste_text(&unsafe { read(text, len) }))
+}
+
+/// Pastes clipboard HTML (formatting kept; exact for OpenRich's own copies).
+///
+/// # Safety
+/// `app` must be live; the string must be readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn orx_paste_html(app_ptr: *mut App, html: *const u8, len: usize) -> u32 {
+    let app = unsafe { app(app_ptr) };
+    u32::from(app.view.paste_html(&unsafe { read(html, len) }))
 }

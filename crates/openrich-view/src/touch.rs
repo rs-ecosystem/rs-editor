@@ -12,7 +12,7 @@ use openrich_state::{AllSelection, Selection, TextSelection};
 use skia_safe::{Canvas, Paint, PathBuilder};
 
 use crate::scroll::FRAME_MS;
-use crate::{EditorView, Effect, PointerButton, PointerEvent, VelocityTracker};
+use crate::{ClipboardContent, EditorView, Effect, PointerButton, PointerEvent, VelocityTracker};
 
 /// How handles look on the platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -702,25 +702,33 @@ impl EditorView {
         self.push_effect(Effect::Magnifier(at));
     }
 
-    /// Runs a command chosen from the selection menu. `clipboard` is the
-    /// platform clipboard's text, for Paste. Returns text to put on the
-    /// clipboard (Copy, Cut).
-    pub fn menu_action(&mut self, item: MenuItem, clipboard: Option<&str>) -> Option<String> {
+    /// Runs a command chosen from the selection menu. For Paste, `text`
+    /// and `html` are the platform clipboard's contents (HTML wins). Copy
+    /// and Cut return what to put on the clipboard.
+    pub fn menu_action(
+        &mut self,
+        item: MenuItem,
+        text: Option<&str>,
+        html: Option<&str>,
+    ) -> Option<ClipboardContent> {
         self.hide_menu();
         match item {
             MenuItem::Copy => {
-                let (text, _) = self.copy()?;
+                let copied = self.copy()?;
                 let to = self.editor.selection().to();
                 self.select_quiet(to, to);
                 self.touch.active = false;
-                Some(text)
+                Some(copied)
             }
             MenuItem::Cut => {
                 self.touch.active = false;
-                self.cut().map(|(text, _)| text)
+                self.cut()
             }
             MenuItem::Paste => {
-                if let Some(text) = clipboard.filter(|t| !t.is_empty()) {
+                let pasted = html
+                    .filter(|h| !h.trim().is_empty())
+                    .is_some_and(|h| self.paste_html(h));
+                if !pasted && let Some(text) = text.filter(|t| !t.is_empty()) {
                     self.paste_text(text);
                 }
                 self.touch.active = false;

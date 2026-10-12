@@ -20,6 +20,7 @@ openrich-extensions = { path = "crates/openrich-extensions" }
 openrich-theme = { path = "crates/openrich-theme" }
 openrich-layout = { path = "crates/openrich-layout" }
 openrich-view = { path = "crates/openrich-view" }
+openrich-markup = { path = "crates/openrich-markup" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

@@ -7,7 +7,7 @@ use openrich_model::{Fragment, MarkSet, Slice};
 use openrich_state::{NodeSelection, Selection, TextSelection, meta};
 use serde_json::Value;
 
-use crate::{Composition, EditorView, Effect, ViewQuery};
+use crate::{ClipboardContent, Composition, EditorView, Effect, ViewQuery};
 
 /// How far a deletion or caret movement reaches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -418,8 +418,8 @@ impl EditorView {
 
     // ---- clipboard --------------------------------------------------------
 
-    /// The selection as plain text and as a JSON slice.
-    pub fn copy(&mut self) -> Option<(String, Value)> {
+    /// The selection as plain text, HTML (for other apps) and a JSON slice.
+    pub fn copy(&mut self) -> Option<ClipboardContent> {
         let selection = self.editor.selection().clone();
         if selection.empty() {
             return None;
@@ -433,14 +433,16 @@ impl EditorView {
             "openStart": slice.open_start,
             "openEnd": slice.open_end,
         });
-        self.push_effect(Effect::Clipboard {
-            text: text.clone(),
-            json: json.clone(),
-        });
-        Some((text, json))
+        let content = ClipboardContent {
+            text,
+            html: openrich_markup::serialize_slice(&slice),
+            json,
+        };
+        self.push_effect(Effect::Clipboard(content.clone()));
+        Some(content)
     }
 
-    pub fn cut(&mut self) -> Option<(String, Value)> {
+    pub fn cut(&mut self) -> Option<ClipboardContent> {
         let copied = self.copy()?;
         let mut tr = self.editor.state().tr();
         tr.delete_selection().ok()?;
@@ -448,6 +450,19 @@ impl EditorView {
         tr.scroll_into_view();
         self.dispatch(tr);
         Some(copied)
+    }
+
+    /// Pastes HTML from the clipboard, keeping what the schema supports of
+    /// its formatting. HTML copied from OpenRich comes back exactly.
+    pub fn paste_html(&mut self, html: &str) -> bool {
+        if !self.editor.is_editable() {
+            return false;
+        }
+        let slice = openrich_markup::parse_slice(self.editor.schema(), html);
+        if slice.content.size() == 0 {
+            return false;
+        }
+        self.paste_slice(slice)
     }
 
     /// Pastes plain text; each line becomes a paragraph.

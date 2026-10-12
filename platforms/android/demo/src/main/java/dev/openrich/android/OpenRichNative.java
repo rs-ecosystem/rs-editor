@@ -36,8 +36,11 @@ public final class OpenRichNative {
      */
     public static native String takeEffects(long handle);
 
-    /** A selection menu command: cut, copy, paste or selectAll. Returns clipboard text or null. */
-    public static native String menuAction(long handle, String item, String clipboardText);
+    /**
+     * A selection menu command: cut, copy, paste or selectAll. For paste, the clipboard's
+     * text and HTML (either may be null). Returns {text, html} JSON for the clipboard, or null.
+     */
+    public static native String menuAction(long handle, String item, String clipboardText, String clipboardHtml);
 
     /** The system closed the selection menu on its own. */
     public static native void menuDismissed(long handle);
@@ -62,12 +65,22 @@ public final class OpenRichNative {
 
     public static native void setFocused(long handle, boolean focused);
 
+    /**
+     * JSON for CursorAnchorInfo, in pixels: {caret: [x, top, baseline, bottom] | null,
+     * bounds: [[left, top, right, bottom] | null, ...]} for UTF-16 units from..to of the IME block.
+     */
+    public static native String imeCursorInfo(long handle, int from, int to);
+
     /** JSON: {start, text, selection: [a, b], composition: [a, b] | null, caret: [x, y, w, h] | null}. */
     public static native String imeState(long handle);
 
+    /** Copies or cuts the selection; {text, html} JSON. */
     public static native String copy(long handle, boolean cut);
 
     public static native void paste(long handle, String text);
+
+    /** Pastes clipboard HTML; false when it held nothing usable. */
+    public static native boolean pasteHtml(long handle, String html);
 
     public static native void setDark(long handle, boolean dark);
 }
