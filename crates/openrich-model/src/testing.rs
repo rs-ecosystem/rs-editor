@@ -251,11 +251,19 @@ fn build_children(
 }
 
 fn build(name: &'static str, attrs: Map<String, Value>, children: Vec<Item>) -> TaggedNode {
-    let schema = schema();
+    build_in(&schema(), name, attrs, children)
+}
+
+fn build_in(
+    schema: &Schema,
+    name: &str,
+    attrs: Map<String, Value>,
+    children: Vec<Item>,
+) -> TaggedNode {
     let mut tags = HashMap::new();
     let mut inner = Vec::new();
     build_children(
-        &schema,
+        schema,
         &children,
         &MarkSet::none(),
         0,
@@ -342,4 +350,23 @@ pub fn code(children: Vec<Item>) -> Item {
 
 pub fn a(children: Vec<Item>) -> Item {
     mark("link", json!({"href": "foo"}), children)
+}
+
+/// Builds a node of any type in any schema, e.g. for custom test schemas.
+pub fn node_in(schema: &Schema, name: &str, attrs_value: Value, children: Vec<Item>) -> TaggedNode {
+    build_in(schema, name, attrs(attrs_value), children)
+}
+
+/// A child node item with attributes (built in the surrounding schema).
+pub fn n(name: &'static str, attrs_value: Value, children: Vec<Item>) -> Item {
+    Item::Node {
+        name,
+        attrs: attrs(attrs_value),
+        children,
+    }
+}
+
+/// A mark item with attributes wrapping `children`.
+pub fn m(name: &'static str, attrs_value: Value, children: Vec<Item>) -> Item {
+    mark(name, attrs_value, children)
 }

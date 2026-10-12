@@ -124,3 +124,46 @@ impl Schema {
         Ok(node)
     }
 }
+
+impl crate::replace::Slice {
+    /// `null` for an empty slice, otherwise `{content, openStart?, openEnd?}`.
+    pub fn to_json(&self) -> Value {
+        if self.content.size() == 0 {
+            return Value::Null;
+        }
+        let mut object = Map::new();
+        object.insert("content".into(), fragment_to_json(&self.content));
+        if self.open_start > 0 {
+            object.insert("openStart".into(), json!(self.open_start));
+        }
+        if self.open_end > 0 {
+            object.insert("openEnd".into(), json!(self.open_end));
+        }
+        Value::Object(object)
+    }
+}
+
+impl Schema {
+    pub fn slice_from_json(&self, value: &Value) -> Result<crate::replace::Slice> {
+        let Some(object) = value.as_object() else {
+            return match value {
+                Value::Null => Ok(crate::replace::Slice::empty()),
+                _ => Err(json_error("slice must be an object or null")),
+            };
+        };
+        let open = |key: &str| -> Result<usize> {
+            match object.get(key) {
+                None | Some(Value::Null) => Ok(0),
+                Some(value) => value
+                    .as_u64()
+                    .map(|n| n as usize)
+                    .ok_or_else(|| json_error(format!("`{key}` must be a non-negative integer"))),
+            }
+        };
+        Ok(crate::replace::Slice::new(
+            self.fragment_from_json(object.get("content").unwrap_or(&Value::Null))?,
+            open("openStart")?,
+            open("openEnd")?,
+        ))
+    }
+}

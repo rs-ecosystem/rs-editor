@@ -62,7 +62,17 @@ pub struct NodeSpec {
     /// Content is code: whitespace is preserved and marks are usually off.
     pub code: bool,
     /// Replacing the full content keeps this node (e.g. a list item).
+    /// Sets both `defining_as_context` and `defining_for_content`.
     pub defining: bool,
+    /// The node is kept as context when its content is replaced.
+    pub defining_as_context: bool,
+    /// Pasted content of this type keeps its wrapper.
+    pub defining_for_content: bool,
+    /// `"pre"` keeps whitespace and newlines; defaults to `"pre"` for code.
+    pub whitespace: Option<String>,
+    /// This inline leaf stands in for `\n` when text moves between code
+    /// and normal textblocks (Tiptap's hard break). At most one per schema.
+    pub linebreak_replacement: bool,
     /// Editing operations do not cross this node's boundary (e.g. table cells).
     pub isolating: bool,
     /// Plain text a leaf contributes to `text_between`, e.g. `"\n"` for a hard break.
@@ -131,6 +141,16 @@ impl NodeSpec {
 
     pub fn leaf_text(mut self, text: &str) -> Self {
         self.leaf_text = Some(text.to_owned());
+        self
+    }
+
+    pub fn whitespace(mut self, whitespace: &str) -> Self {
+        self.whitespace = Some(whitespace.to_owned());
+        self
+    }
+
+    pub fn linebreak_replacement(mut self) -> Self {
+        self.linebreak_replacement = true;
         self
     }
 }
@@ -249,6 +269,7 @@ pub(crate) struct SchemaInner {
     pub matches: Vec<MatchState>,
     pub top: u16,
     pub text: u16,
+    pub linebreak: Option<u16>,
 }
 
 /// A compiled schema. Cheap to clone; all node and mark types refer back to it.
@@ -457,6 +478,23 @@ impl Schema {
         if !nodes[top as usize].is_block {
             return Err(ModelError::Schema("the top node must be a block".into()));
         }
+        let mut linebreak = None;
+        for (id, node) in nodes.iter().enumerate() {
+            if !node.spec.linebreak_replacement {
+                continue;
+            }
+            if linebreak.is_some() {
+                return Err(ModelError::Schema(
+                    "multiple linebreak replacement nodes".into(),
+                ));
+            }
+            if node.is_block || node.content_match != 0 {
+                return Err(ModelError::Schema(
+                    "linebreak replacement nodes must be inline leaf nodes".into(),
+                ));
+            }
+            linebreak = Some(id as u16);
+        }
         Ok(Self(Arc::new(SchemaInner {
             nodes,
             marks,
@@ -465,6 +503,7 @@ impl Schema {
             matches,
             top,
             text,
+            linebreak,
         })))
     }
 
@@ -516,6 +555,14 @@ impl Schema {
             schema: self.clone(),
             id: self.0.text,
         }
+    }
+
+    /// The inline leaf that replaces `\n` outside code, if the schema has one.
+    pub fn linebreak_replacement(&self) -> Option<NodeType> {
+        self.0.linebreak.map(|id| NodeType {
+            schema: self.clone(),
+            id,
+        })
     }
 
     /// Creates a text node. Empty text is rejected.
@@ -640,6 +687,22 @@ impl NodeType {
 
     pub fn is_atom(&self) -> bool {
         self.is_leaf() || self.spec().atom
+    }
+
+    /// Whitespace and newlines in this node's text are significant.
+    pub fn is_whitespace_pre(&self) -> bool {
+        match self.spec().whitespace.as_deref() {
+            Some(mode) => mode == "pre",
+            None => self.spec().code,
+        }
+    }
+
+    pub fn is_defining_as_context(&self) -> bool {
+        self.spec().defining || self.spec().defining_as_context
+    }
+
+    pub fn is_defining_for_content(&self) -> bool {
+        self.spec().defining || self.spec().defining_for_content
     }
 
     pub fn has_required_attrs(&self) -> bool {

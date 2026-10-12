@@ -206,6 +206,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "openrich-transform"
+version = "0.1.0"
+dependencies = [
+ "openrich-model",
+ "proptest",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
