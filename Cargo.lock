@@ -1763,6 +1763,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "openrich-web"
+version = "0.1.0"
+dependencies = [
+ "openrich-commands",
+ "openrich-extensions",
+ "openrich-theme",
+ "openrich-view",
+ "serde_json",
+ "skia-safe",
+]
+
+[[package]]
 name = "orbclient"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"

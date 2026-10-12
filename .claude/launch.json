@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "openrich-web",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4174", "--bind", "0.0.0.0", "--directory", "crates/openrich-web/web"],
+      "port": 4174
+    }
+  ]
+}

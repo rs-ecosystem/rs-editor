@@ -407,7 +407,7 @@ impl EditorView {
         self.composition.map(|c| (c.from, c.to))
     }
 
-    fn close_history_now(&mut self) {
+    pub(crate) fn close_history_now(&mut self) {
         let mut tr = self.editor.state().tr();
         close_history(&mut tr);
         let _ = self.editor.dispatch(tr);

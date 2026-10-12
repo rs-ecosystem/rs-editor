@@ -757,3 +757,97 @@ mod accessibility {
         );
     }
 }
+
+mod ime {
+    use super::*;
+
+    #[test]
+    fn the_context_is_the_block_around_the_caret() {
+        let (mut view, _) = view_with(doc(vec![p("satu"), p("dua tiga")]), KeyPlatform::Other);
+        view.select_text(9, 12, Affinity::Downstream);
+        let context = view.ime_context().unwrap();
+        assert_eq!(context.start, 7);
+        assert_eq!(context.text, "dua tiga");
+        assert_eq!(context.selection, (2, 5));
+        assert_eq!(context.text_before(10), "du");
+        assert_eq!(context.text_after(2), "ig");
+        assert_eq!(context.selected_text(), "a t");
+    }
+
+    #[test]
+    fn keyboards_recompose_and_replace_words() {
+        let (mut view, _) = view_with(doc(vec![p("halo dunia")]), KeyPlatform::Other);
+        view.select_text(11, 11, Affinity::Downstream);
+        // Gboard marks the word before the caret, then replaces it.
+        assert!(view.ime_set_composing_region(5, 10));
+        assert_eq!(view.composition_range(), Some((6, 11)));
+        assert!(view.set_composition("dunianya"));
+        assert!(view.commit_composition("dunianya"));
+        assert_eq!(text_of(&view), "halo dunianya");
+        view.run("undo", &Value::Null).unwrap();
+        assert_eq!(
+            text_of(&view),
+            "halo dunia",
+            "the recomposition is one undo step"
+        );
+    }
+
+    #[test]
+    fn replacing_while_composing_tracks_the_range() {
+        let (mut view, _) = view_with(doc(vec![p("ab")]), KeyPlatform::Other);
+        view.select_text(3, 3, Affinity::Downstream);
+        assert!(view.ime_replace(2, 2, "k", true));
+        assert!(view.ime_replace(2, 3, "ka", true));
+        assert!(view.ime_replace(2, 4, "か", true));
+        assert_eq!(view.composition_range(), Some((3, 4)));
+        view.commit_composition("か");
+        assert_eq!(text_of(&view), "abか");
+        assert!(view.ime_replace(0, 1, "A", false));
+        assert_eq!(text_of(&view), "Abか");
+    }
+
+    #[test]
+    fn delete_surrounding_never_splits_a_grapheme() {
+        let (mut view, _) = view_with(doc(vec![p("x👩‍💻y")]), KeyPlatform::Other);
+        view.select_text(7, 7, Affinity::Downstream);
+        assert!(view.ime_delete_surrounding(1, 0));
+        assert_eq!(text_of(&view), "xy");
+        view.select_text(2, 2, Affinity::Downstream);
+        assert!(view.ime_delete_surrounding(1, 1));
+        assert_eq!(text_of(&view), "");
+    }
+
+    #[test]
+    fn typed_replacements_run_input_rules() {
+        let (mut view, _) = view_with(doc(vec![p("")]), KeyPlatform::Other);
+        view.select_text(1, 1, Affinity::Downstream);
+        assert!(view.ime_replace(0, 0, "#", false));
+        assert!(view.ime_replace(1, 1, " ", false));
+        assert_eq!(view.editor().get_json()["content"][0]["type"], "heading");
+    }
+}
+
+#[test]
+fn ime_replace_works_in_a_new_paragraph_after_enter() {
+    let (mut view, _) = view_with(doc(vec![p("abc")]), KeyPlatform::Other);
+    view.select_text(4, 4, Affinity::Downstream);
+    assert!(key(&mut view, "Enter", plain()));
+    let context = view.ime_context().unwrap();
+    assert_eq!(
+        (context.start, context.text.as_str(), context.selection),
+        (6, "", (0, 0))
+    );
+    assert!(
+        view.ime_replace(0, 0, "#", false),
+        "{:?}",
+        view.ime_context()
+    );
+    assert!(view.ime_replace(1, 1, "#", false));
+    assert!(view.ime_replace(2, 2, " ", false));
+    assert!(
+        view.ime_replace(0, 0, "J", false),
+        "{:?}",
+        view.ime_context()
+    );
+    assert_eq!(text_of(&view), "abc\nJ");
+}

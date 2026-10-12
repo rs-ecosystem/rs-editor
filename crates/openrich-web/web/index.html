@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+  <title>OpenRich Web</title>
+  <style>
+    :root { --background: #ffffff; --foreground: #0a0a0a; --muted: #737373; --border: #e5e5e5; --card: #fafafa; }
+    :root[data-theme="dark"] { --background: #0a0a0a; --foreground: #fafafa; --muted: #a3a3a3; --border: #262626; --card: #171717; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--background); color: var(--foreground);
+      font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    body { display: flex; flex-direction: column; }
+    header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+    header h1 { font-size: 15px; font-weight: 600; margin: 0; }
+    #status { color: var(--muted); font-size: 12px; margin-left: auto; font-variant-numeric: tabular-nums; }
+    button { font: inherit; color: var(--foreground); background: var(--card); border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+    #editor { flex: 1; min-height: 0; }
+    #error { color: #dc2626; padding: 16px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>OpenRich</h1>
+    <button id="theme" type="button">Tema gelap</button>
+    <span id="status">memuat…</span>
+  </header>
+  <div id="editor"></div>
+  <script type="module">
+    import { mount } from "./openrich.js";
+
+    const t = (text, marks = []) => marks.length
+      ? { type: "text", text, marks: marks.map((type) => ({ type })) }
+      : { type: "text", text };
+    const p = (...content) => ({ type: "paragraph", content });
+    const h = (level, text) => ({ type: "heading", attrs: { level }, content: [t(text)] });
+    const item = (...content) => ({ type: "listItem", content: [p(...content)] });
+    const task = (checked, text) => ({ type: "taskItem", attrs: { checked }, content: [p(t(text))] });
+
+    const content = { type: "doc", content: [
+      h(1, "OpenRich di web"),
+      p(t("Editor ini digambar oleh "), t("Skia", ["bold"]), t(" di WebGL2 dari WebAssembly — kode yang sama dengan desktop dan Android. Coba "),
+        t("tebal", ["bold"]), t(", "), t("miring", ["italic"]), t(", "), t("kode", ["code"]), t(" dan "), t("sorotan", ["highlight"]), t(".")),
+      h(2, "Coba"),
+      { type: "bulletList", content: [
+        item(t("Ketik "), t("# ", ["code"]), t(", "), t("- ", ["code"]), t(" atau "), t("[ ] ", ["code"]), t(" di awal baris.")),
+        item(t("Klik ganda memilih kata; Cmd/Ctrl-Z untuk undo.")),
+        item(t("Komposisi IME (Jepang, Cina) dan keyboard Android.")),
+      ]},
+      { type: "taskList", content: [task(true, "Skia di WebAssembly"), task(false, "EditContext dan fallback textarea")] },
+      { type: "blockquote", content: [p(t("Satu jalur render untuk semua platform."))] },
+      h(3, "Aksara"),
+      p(t("العربية من اليمين إلى اليسار، हिन्दी देवनागरी.")),
+      { type: "codeBlock", content: [t("fn main() {\n    println!(\"halo, web\");\n}")] },
+      { type: "paragraph" },
+    ]};
+
+    const status = document.getElementById("status");
+    const themeButton = document.getElementById("theme");
+    try {
+      const started = performance.now();
+      const input = new URLSearchParams(location.search).get("input") ?? undefined;
+      const editor = await mount(document.getElementById("editor"), { content, input });
+      const loadMs = Math.round(performance.now() - started);
+      let dark = false;
+      themeButton.onclick = () => {
+        dark = !dark;
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        themeButton.textContent = dark ? "Tema terang" : "Tema gelap";
+        editor.setDark(dark);
+        editor.focus();
+      };
+      setInterval(() => {
+        status.textContent = `input: ${editor.input} · muat ${loadMs} ms · frame ${editor.stats.lastFrameMs.toFixed(1)} ms · ${editor.stats.frames} frame`;
+      }, 500);
+      window.openrich = editor;
+    } catch (error) {
+      status.textContent = "gagal";
+      const box = document.createElement("div");
+      box.id = "error";
+      box.textContent = String(error?.stack ?? error);
+      document.body.append(box);
+    }
+  </script>
+</body>
+</html>

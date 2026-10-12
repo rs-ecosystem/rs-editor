@@ -7,6 +7,7 @@
 //! editor behaves the same everywhere.
 
 mod a11y;
+mod ime;
 mod input;
 mod paint;
 mod pointer;
@@ -26,6 +27,7 @@ use openrich_transform::{Assoc, Mappable};
 
 pub use a11y::EDITOR_NODE;
 pub use accesskit;
+pub use ime::ImeContext;
 pub use input::Granularity;
 pub use openrich_commands::{KeyEvent, Modifiers};
 pub use openrich_layout::Affinity;
