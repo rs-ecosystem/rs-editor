@@ -9,12 +9,14 @@
 | P0 | Kerangka workspace, CI, ADR, spike Skia (WASM, Android) | **Selesai.** Lihat [laporan spike](spikes/p0-web-android.md). |
 | P1 | Core headless: model, transform, state, history, command, extension, StarterKit | **Selesai** |
 | P2 | Layout inkremental, render Skia, view, tema shadcn, dev harness desktop | **Selesai** |
-| P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | Belum dimulai |
-| P4 | Android: SurfaceView/GL, InputConnection, gesture sentuh, AccessKit | Belum dimulai |
+| P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | Pondasi dari spike; dikerjakan **setelah P4** |
+| P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit | **Berikutnya.** Pondasi dari spike |
 | P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | Belum dimulai |
 | P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | Belum dimulai |
 | P7 | Windows dan Linux: winit, IME, AccessKit | Belum dimulai |
 | P8 | Tabel, mention, hardening, API 1.0 | Belum dimulai |
+
+Urutan pengerjaan: P4 dikerjakan sebelum P3. Interaksi sentuh dibangun dan diuji di Android lebih dulu, lalu dipakai ulang oleh web di HP (P3) dan iOS (P6).
 
 ## P1 — Core headless · Selesai
 
@@ -65,9 +67,47 @@ Catatan yang dibawa ke fase berikutnya:
 - Pohon aksesibilitas dibangun ulang dalam O(jumlah blok) per update saat teknologi bantu aktif. Ini cukup untuk 10.000 blok, belum untuk 100.000.
 - Mengetik lewat `AXSelectedText` di macOS belum didukung adapter AccessKit. Screen reader tetap bisa membaca, memindahkan seleksi, dan mengetik lewat keyboard biasa.
 
+## P4 — Android · Berikutnya
+
+Target: editor terasa seperti kolom teks bawaan Android, bukan sekadar tampil benar.
+
+### Milestone 1: seleksi sentuh terasa native
+
+Inti di Rust (`openrich-view`), dipakai juga oleh web di HP (P3) dan iOS (P6):
+
+- Pengenal gesture sentuh: ketuk menaruh caret, ketuk caret memunculkan menu (Tempel), ketuk dua kali dan tekan lama memilih kata, ketuk tiga kali memilih paragraf.
+- Handle seleksi: dua handle untuk rentang dan satu handle di bawah caret. Area sentuhnya lebih besar dari gambarnya, menarik handle cepat memperluas per kata, menarik ke tepi layar memicu auto-scroll, dan handle tidak boleh melewati handle lainnya.
+- `InteractionProfile` per platform: bentuk handle (tetesan Material, lolipop iOS), timing tekan lama, ukuran slop.
+- Sinyal ke platform:
+  - `Haptic(jenis)` saat tekan lama dan setiap seleksi pindah ke karakter atau kata baru;
+  - `SelectionMenu { rect, items }` saat seleksi muncul atau berubah; disembunyikan selama scroll atau drag, lalu muncul lagi setelah selesai;
+  - `Magnifier { at }` selama handle atau caret ditarik.
+
+Adapter Android:
+
+- Menu mengambang asli (`ActionMode.TYPE_FLOATING`): Potong, Salin, Tempel, Pilih semua, plus item sistem (Terjemahkan, Bagikan, asisten).
+- `android.widget.Magnifier` untuk kaca pembesar.
+- `performHapticFeedback` dengan konstanta sistem (`LONG_PRESS`, `TEXT_HANDLE_MOVE`), mengikuti setelan getar pengguna.
+- Handle digambar Skia dengan bentuk dan warna Material.
+
+Tes: skenario gesture headless (posisi, granularitas, auto-scroll, urutan sinyal haptik dan menu) dan uji manual di perangkat.
+
+### Milestone 2: input dan platform
+
+- `CursorAnchorInfo` agar popup kandidat dan input tulisan tangan berada di tempat yang benar.
+- Uji Gboard dan Samsung Keyboard: komposisi, koreksi otomatis, input suara, swipe typing.
+- Clipboard kaya (HTML) dan tempel dari aplikasi lain.
+- AccessKit untuk TalkBack.
+
+### Milestone 3: paket library
+
+- Binding Kotlin (BoltFFI) menggantikan JNI tangan, modul Gradle `openrich-android`, dan contoh aplikasi Compose.
+- API `chain/can/isActive` dari Kotlin.
+
 ## Berikutnya
 
-1. **P3 (web):** paket `@openrich/web`, clipboard HTML/Markdown, DOM ARIA dari pohon aksesibilitas, font emoji/CJK yang dimuat bertahap, uji di Safari, Firefox dan Chrome Android.
-2. **P4 (Android):** binding Kotlin (BoltFFI), handle dan menu seleksi, `CursorAnchorInfo`, AccessKit, uji Gboard dan Samsung Keyboard.
+1. **P4 (Android):** milestone di atas, dimulai dari seleksi sentuh.
+2. **P3 (web):** paket `@openrich/web`, clipboard HTML/Markdown, DOM ARIA dari pohon aksesibilitas, font emoji/CJK yang dimuat bertahap, uji di Safari, Firefox dan Chrome Android. Seleksi sentuh untuk web di HP memakai inti dari P4.
+3. **Desktop (P7):** menu klik kanan Potong/Salin/Tempel memakai sinyal `SelectionMenu` yang sama.
 
 Spike web dan Android sudah membuktikan jalurnya: [laporan spike P0](spikes/p0-web-android.md).
