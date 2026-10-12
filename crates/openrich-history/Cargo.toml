@@ -1,0 +1,19 @@
+[package]
+name = "openrich-history"
+description = "Undo/redo berbasis step terbalik untuk OpenRich (port prosemirror-history)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openrich-model.workspace = true
+openrich-transform.workspace = true
+openrich-state.workspace = true
+
+[dev-dependencies]
+openrich-model = { workspace = true, features = ["test-util"] }
+openrich-state = { workspace = true, features = ["test-util"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

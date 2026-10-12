@@ -614,8 +614,8 @@ fn plugins_can_append_transactions_linked_to_the_root() {
     assert_eq!(applied.state.doc(), &doc(v![p(v!["XA"])]).node);
     assert_eq!(applied.transactions.len(), 2);
     assert_eq!(
-        applied.transactions[1].get_meta::<u64>(meta::APPENDED_TRANSACTION),
-        Some(&applied.transactions[0].id())
+        applied.transactions[1].appended_to().map(|root| root.id()),
+        Some(applied.transactions[0].id())
     );
 }
 

@@ -215,8 +215,8 @@ impl EditorState {
                 transactions: Vec::new(),
             });
         }
-        let root_id = root.id();
         let mut new_state = self.apply_inner(&root)?;
+        let mut root_ref: Option<Arc<Transaction>> = None;
         let mut transactions = vec![root];
         // Per plugin: the state it last saw and how many transactions.
         let mut seen: Option<Vec<(EditorState, usize)>> = None;
@@ -236,7 +236,10 @@ impl EditorState {
                 if let Some(mut tr) = appended
                     && new_state.filter_transaction(&tr, Some(index))
                 {
-                    tr.set_meta(meta::APPENDED_TRANSACTION, root_id);
+                    let root = root_ref
+                        .get_or_insert_with(|| Arc::new(transactions[0].clone()))
+                        .clone();
+                    tr.set_meta(meta::APPENDED_TRANSACTION, root);
                     if seen.is_none() {
                         seen = Some(
                             (0..self.config.plugins.len())

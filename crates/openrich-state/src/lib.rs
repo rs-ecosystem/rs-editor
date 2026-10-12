@@ -14,6 +14,13 @@ pub use selection::{AllSelection, NodeSelection, Selection, SelectionBookmark, T
 pub use state::{AppliedTransaction, EditorState, EditorStateConfig, StateError};
 pub use transaction::{MetaValue, Transaction, meta};
 
+/// Receives the transaction a command produces. `None` asks the command
+/// only whether it would apply (like ProseMirror's `can()` dry run).
+pub type Dispatch<'a> = Option<&'a mut dyn FnMut(Transaction)>;
+
+/// A command: inspects the state and, if it applies, dispatches a transaction.
+pub type CommandFn = fn(&EditorState, Dispatch) -> bool;
+
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
 

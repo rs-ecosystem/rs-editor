@@ -52,6 +52,12 @@ pub trait Plugin: Send + Sync + 'static {
         None
     }
 
+    /// The undo history must keep steps exactly as applied (needed when a
+    /// collaboration plugin rebases them).
+    fn history_preserve_items(&self) -> bool {
+        false
+    }
+
     fn state_to_json(&self, _value: &PluginValue) -> Option<Value> {
         None
     }

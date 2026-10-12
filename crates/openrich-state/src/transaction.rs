@@ -23,11 +23,12 @@ pub type MetaValue = Arc<dyn Any + Send + Sync>;
 pub mod meta {
     /// `bool`: `false` keeps the change out of the undo history.
     pub const ADD_TO_HISTORY: &str = "addToHistory";
-    /// `u64`: id of the transaction an appended transaction responds to.
+    /// `Arc<Transaction>`: the root transaction an appended transaction responds to.
     pub const APPENDED_TRANSACTION: &str = "appendedTransaction";
     /// `&'static str`: the UI event behind the change (`"paste"`, `"drop"`, `"cut"`, …).
     pub const UI_EVENT: &str = "uiEvent";
-    /// `bool`: the change commits an IME composition.
+    /// `u64`: id of the IME composition this change belongs to; changes of
+    /// one composition form a single undo step.
     pub const COMPOSITION: &str = "composition";
     /// `bool`: the selection change came from a pointer.
     pub const POINTER: &str = "pointer";
@@ -94,7 +95,7 @@ impl Transaction {
         }
     }
 
-    /// Unique id, used to link appended transactions to their root.
+    /// Unique id of this transaction.
     pub fn id(&self) -> u64 {
         self.id
     }
@@ -305,5 +306,12 @@ impl Transaction {
 
     pub fn scrolled_into_view(&self) -> bool {
         self.scrolled_into_view
+    }
+}
+
+impl Transaction {
+    /// The root transaction this one was appended to, if any.
+    pub fn appended_to(&self) -> Option<&Arc<Transaction>> {
+        self.get_meta::<Arc<Transaction>>(meta::APPENDED_TRANSACTION)
     }
 }
