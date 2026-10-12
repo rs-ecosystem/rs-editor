@@ -1,21 +1,37 @@
 [workspace]
-resolver = "2"
-members = [
-    "crates/openrich-document",
-    "crates/openrich-editor",
-    "crates/openrich-layout",
-    "crates/openrich-render",
-    "crates/openrich-render-skia",
-    "crates/openrich-demo",
-    "crates/openrich-transaction",
-]
+resolver = "3"
+members = ["crates/*"]
+# v1 tetap bisa dibangun sebagai workspace terpisah di legacy/.
+exclude = ["legacy"]
 
 [workspace.package]
+version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.90"
 
 [workspace.dependencies]
+openrich-model = { path = "crates/openrich-model" }
+openrich-transform = { path = "crates/openrich-transform" }
+openrich-state = { path = "crates/openrich-state" }
+openrich-history = { path = "crates/openrich-history" }
+openrich-text = { path = "crates/openrich-text" }
+openrich-commands = { path = "crates/openrich-commands" }
+openrich-extensions = { path = "crates/openrich-extensions" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 unicode-segmentation = "1"
+proptest = "1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

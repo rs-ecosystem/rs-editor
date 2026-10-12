@@ -1,3 +1,5 @@
 /target/
+/legacy/target/
 .DS_Store
 *.swp
+node_modules/

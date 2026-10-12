@@ -6,7 +6,7 @@ CONTENTS_DIR="$APP_DIR/Contents"
 mkdir -p "$CONTENTS_DIR/MacOS"
 cd "$ROOT_DIR"
 cargo build -p openrich-demo --locked
-swiftc -parse-as-library -module-cache-path "${TMPDIR:-/tmp}/openrich-swift-modules" crates/openrich-demo/macos/OpenRichDemo.swift -o "$CONTENTS_DIR/MacOS/OpenRichDemo"
+swiftc -parse-as-library -module-cache-path "${TMPDIR:-/tmp}/openrich-swift-modules" openrich-demo/macos/OpenRichDemo.swift -o "$CONTENTS_DIR/MacOS/OpenRichDemo"
 cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
