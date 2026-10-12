@@ -12,6 +12,7 @@ impl EditorView {
     /// Paints the view. `canvas` is in device pixels; the view applies its
     /// scale, padding and scroll offset.
     pub fn paint(&mut self, canvas: &Canvas) {
+        self.tick_scroll();
         let theme = self.theme().clone();
         let layout = self.layout().clone();
         let scale = self.scale;

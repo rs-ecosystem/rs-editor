@@ -104,6 +104,7 @@ impl EditorView {
         if event.button != PointerButton::Primary {
             return false;
         }
+        self.stop_scrolling();
         self.set_focused(true);
         self.finish_composition();
         self.goal_x = None;

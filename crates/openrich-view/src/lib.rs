@@ -9,6 +9,7 @@
 mod input;
 mod paint;
 mod pointer;
+mod scroll;
 
 use std::fmt;
 use std::rc::Rc;
@@ -26,6 +27,7 @@ pub use input::Granularity;
 pub use openrich_commands::{KeyEvent, Modifiers};
 pub use openrich_layout::Affinity;
 pub use pointer::{PointerButton, PointerEvent};
+pub use scroll::{FRAME_MS, VelocityTracker};
 
 /// Space between the view's edges and the document.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -132,6 +134,7 @@ pub struct EditorView {
     pub(crate) scale: f32,
     pub(crate) padding: Insets,
     pub(crate) scroll_y: f32,
+    pub(crate) scroll: scroll::Scroll,
     pub(crate) focused: bool,
     pub(crate) clock: Arc<dyn Clock>,
     /// When the caret last became visible (resets the blink).
@@ -188,6 +191,7 @@ impl EditorView {
             scale: options.scale,
             padding: options.padding,
             scroll_y: 0.0,
+            scroll: scroll::Scroll::Idle,
             focused: false,
             blink_start: clock.now_ms(),
             clock,
@@ -334,11 +338,18 @@ impl EditorView {
         self.scroll_y
     }
 
+    /// Scrolls by `dy` at once (trackpads, which animate on their own),
+    /// stopping any scroll animation.
     pub fn scroll_by(&mut self, dy: f32) {
         self.scroll_to(self.scroll_y + dy);
     }
 
     pub fn scroll_to(&mut self, y: f32) {
+        self.stop_scrolling();
+        self.scroll_to_inner(y);
+    }
+
+    pub(crate) fn scroll_to_inner(&mut self, y: f32) {
         let before = self.scroll_y;
         self.scroll_y = y;
         self.clamp_scroll();
@@ -392,9 +403,12 @@ impl EditorView {
         std::mem::take(&mut self.effects)
     }
 
-    /// Milliseconds until the caret blinks next, when the view should
-    /// redraw even without input.
+    /// Milliseconds until the view should draw again without input: the
+    /// next animation frame while scrolling, or the next caret blink.
     pub fn next_frame_in(&self) -> Option<u64> {
+        if self.is_scrolling() {
+            return Some(FRAME_MS);
+        }
         if !self.focused || !self.editor.selection().empty() {
             return None;
         }

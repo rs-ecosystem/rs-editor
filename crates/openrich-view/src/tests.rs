@@ -484,3 +484,71 @@ fn edits_above_the_viewport_do_not_move_it() {
         "moved from {before} to {after}"
     );
 }
+
+fn frames(view: &mut EditorView, clock: &ManualClock, ms: u64) {
+    let mut surface = skia_safe::surfaces::raster_n32_premul((64, 64)).unwrap();
+    for _ in 0..ms / FRAME_MS {
+        clock.advance(FRAME_MS);
+        view.paint(surface.canvas());
+    }
+}
+
+#[test]
+fn smooth_steps_ease_to_their_total_and_add_up() {
+    let blocks: Vec<Value> = (0..200).map(|i| p(&format!("baris {i}"))).collect();
+    let (mut view, clock) = view_with(doc(blocks), KeyPlatform::Other);
+    view.scroll_smooth_by(120.0);
+    assert_eq!(view.next_frame_in(), Some(FRAME_MS));
+    frames(&mut view, &clock, 64);
+    let partway = view.scroll_y();
+    assert!(partway > 60.0 && partway < 120.0, "{partway}");
+    view.scroll_smooth_by(120.0);
+    frames(&mut view, &clock, 400);
+    assert!(
+        (view.scroll_y() - 240.0).abs() < 0.01,
+        "{}",
+        view.scroll_y()
+    );
+    assert!(!view.is_scrolling());
+}
+
+#[test]
+fn a_fling_decelerates_stops_and_respects_the_edges() {
+    let blocks: Vec<Value> = (0..400).map(|i| p(&format!("baris {i}"))).collect();
+    let (mut view, clock) = view_with(doc(blocks), KeyPlatform::Other);
+    view.fling(2_000.0);
+    frames(&mut view, &clock, 160);
+    let early = view.scroll_y();
+    frames(&mut view, &clock, 5_000);
+    let total = view.scroll_y();
+    assert!(!view.is_scrolling());
+    // Exponential decay covers 1 − e^(−160/τ) ≈ 27% in the first 160 ms.
+    assert!((early / total - 0.274).abs() < 0.02, "{early} of {total}");
+    // v·τ with τ = −1/ln(0.998) ≈ 499 ms: about 1000 px.
+    assert!((900.0..1_050.0).contains(&total), "{total}");
+
+    view.fling(-50_000.0);
+    frames(&mut view, &clock, 2_000);
+    assert_eq!(view.scroll_y(), 0.0);
+    assert!(!view.is_scrolling(), "stops at the top edge");
+
+    view.fling(3_000.0);
+    view.pointer_down(PointerEvent::at(10.0, 10.0));
+    assert!(!view.is_scrolling(), "a touch stops the momentum");
+}
+
+#[test]
+fn velocity_tracker_fits_recent_samples() {
+    let mut tracker = VelocityTracker::new();
+    // Old, slow samples fall out of the window.
+    tracker.add(0, 0.0);
+    tracker.add(50, 1.0);
+    for i in 0..6u64 {
+        tracker.add(500 + i * 16, 100.0 + i as f32 * 8.0);
+    }
+    assert!(
+        (tracker.velocity() - 500.0).abs() < 1.0,
+        "{}",
+        tracker.velocity()
+    );
+}

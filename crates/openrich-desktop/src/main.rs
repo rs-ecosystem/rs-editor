@@ -219,13 +219,17 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                let dy = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => -y * LINE_HEIGHT,
-                    MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => {
-                        -(y as f32) / shell.window.scale_factor() as f32
+                match delta {
+                    // Wheel notches animate; trackpads bring their own momentum.
+                    MouseScrollDelta::LineDelta(_, y) => {
+                        shell.view.scroll_smooth_by(-y * LINE_HEIGHT)
                     }
-                };
-                shell.view.scroll_by(dy);
+                    MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => {
+                        shell
+                            .view
+                            .scroll_by(-(y as f32) / shell.window.scale_factor() as f32);
+                    }
+                }
                 if shell.pressed {
                     let event = shell.pointer(1);
                     shell.view.pointer_move(event);
