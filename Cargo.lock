@@ -206,6 +206,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "openrich-state"
+version = "0.1.0"
+dependencies = [
+ "openrich-model",
+ "openrich-transform",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "openrich-transform"
 version = "0.1.0"
 dependencies = [

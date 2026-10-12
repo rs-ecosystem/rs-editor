@@ -1,0 +1,21 @@
+[package]
+name = "openrich-state"
+description = "EditorState, Selection, Transaction dan plugin OpenRich (port prosemirror-state)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+test-util = ["openrich-model/test-util"]
+
+[dependencies]
+openrich-model.workspace = true
+openrich-transform.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+openrich-model = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true
