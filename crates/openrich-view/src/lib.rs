@@ -6,6 +6,7 @@
 //! provide a canvas, and act on the [`Effect`]s the view emits, so the
 //! editor behaves the same everywhere.
 
+mod a11y;
 mod input;
 mod paint;
 mod pointer;
@@ -23,6 +24,8 @@ use openrich_state::{Clock, EditorState, SystemClock, TextDirection, Transaction
 use openrich_theme::Theme;
 use openrich_transform::{Assoc, Mappable};
 
+pub use a11y::EDITOR_NODE;
+pub use accesskit;
 pub use input::Granularity;
 pub use openrich_commands::{KeyEvent, Modifiers};
 pub use openrich_layout::Affinity;
@@ -147,6 +150,7 @@ pub struct EditorView {
     next_composition: u64,
     scroll_seen: u64,
     effects: Vec<Effect>,
+    pub(crate) a11y: a11y::A11y,
 }
 
 impl fmt::Debug for EditorView {
@@ -202,6 +206,7 @@ impl EditorView {
             next_composition: 1,
             scroll_seen,
             effects: Vec::new(),
+            a11y: a11y::A11y::default(),
         })
     }
 

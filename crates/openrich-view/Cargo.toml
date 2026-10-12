@@ -17,6 +17,7 @@ openrich-theme.workspace = true
 openrich-layout.workspace = true
 skia-safe = { version = "=0.153.3", features = ["textlayout"] }
 serde_json.workspace = true
+accesskit = "0.25"
 
 [lints]
 workspace = true

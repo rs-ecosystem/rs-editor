@@ -28,7 +28,7 @@ use skia_safe::{AlphaType, ColorType, ImageInfo, surfaces};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::{Window, WindowId};
 
@@ -89,12 +89,16 @@ struct Shell {
     /// Rich copy of the last copied range, pasted when the clipboard text still matches.
     copied: Option<(String, Value)>,
     clipboard: Option<arboard::Clipboard>,
+    accessibility: accesskit_winit::Adapter,
+    /// An assistive technology is connected; send tree updates.
+    accessibility_active: bool,
 }
 
 #[derive(Default)]
 struct App {
     args: Option<Args>,
     shell: Option<Shell>,
+    proxy: Option<EventLoopProxy<accesskit_winit::Event>>,
 }
 
 impl App {
@@ -109,8 +113,14 @@ impl App {
         let attributes = Window::default_attributes()
             .with_title("OpenRich")
             .with_inner_size(LogicalSize::new(820.0, 720.0))
-            .with_min_inner_size(LogicalSize::new(320.0, 240.0));
+            .with_min_inner_size(LogicalSize::new(320.0, 240.0))
+            // The accessibility adapter must attach before the window shows.
+            .with_visible(false);
         let window = Rc::new(event_loop.create_window(attributes)?);
+        let proxy = self.proxy.clone().ok_or("event loop proxy missing")?;
+        let accessibility =
+            accesskit_winit::Adapter::with_event_loop_proxy(event_loop, &window, proxy);
+        window.set_visible(true);
         window.set_ime_allowed(true);
         let context = softbuffer::Context::new(window.clone())?;
         let surface = softbuffer::Surface::new(&context, window.clone())?;
@@ -157,11 +167,13 @@ impl App {
             preedit_cleared: false,
             copied: None,
             clipboard,
+            accessibility,
+            accessibility_active: false,
         })
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<accesskit_winit::Event> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.shell.is_some() {
             return;
@@ -182,6 +194,7 @@ impl ApplicationHandler for App {
         let Some(shell) = self.shell.as_mut() else {
             return;
         };
+        shell.accessibility.process_event(&shell.window, &event);
         if shell.preedit_cleared && !matches!(event, WindowEvent::Ime(Ime::Commit(_))) {
             shell.settle_preedit();
         }
@@ -238,6 +251,32 @@ impl ApplicationHandler for App {
             _ => {}
         }
         shell.apply_effects();
+        shell.update_accessibility();
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: accesskit_winit::Event) {
+        let Some(shell) = self.shell.as_mut() else {
+            return;
+        };
+        match event.window_event {
+            accesskit_winit::WindowEvent::InitialTreeRequested => {
+                shell.accessibility_active = true;
+                let Shell {
+                    accessibility,
+                    view,
+                    ..
+                } = shell;
+                accessibility.update_if_active(|| view.accessibility_tree());
+            }
+            accesskit_winit::WindowEvent::ActionRequested(request) => {
+                shell.view.accessibility_action(&request);
+                shell.apply_effects();
+                shell.update_accessibility();
+            }
+            accesskit_winit::WindowEvent::AccessibilityDeactivated => {
+                shell.accessibility_active = false;
+            }
+        }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -269,6 +308,15 @@ impl ApplicationHandler for App {
 }
 
 impl Shell {
+    fn update_accessibility(&mut self) {
+        if !self.accessibility_active {
+            return;
+        }
+        if let Some(update) = self.view.accessibility_update() {
+            self.accessibility.update_if_active(|| update);
+        }
+    }
+
     fn resize(&mut self) {
         let scale = self.window.scale_factor();
         let size = self.window.inner_size().to_logical::<f32>(scale);
@@ -508,7 +556,7 @@ fn key_name(key: &Key) -> Option<String> {
 }
 
 fn main() {
-    let event_loop = match EventLoop::new() {
+    let event_loop = match EventLoop::with_user_event().build() {
         Ok(event_loop) => event_loop,
         Err(error) => {
             eprintln!("event loop gagal: {error}");
@@ -518,6 +566,7 @@ fn main() {
     let mut app = App {
         args: Some(Args::parse()),
         shell: None,
+        proxy: Some(event_loop.create_proxy()),
     };
     if let Err(error) = event_loop.run_app(&mut app) {
         eprintln!("{error}");

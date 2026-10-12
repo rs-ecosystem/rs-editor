@@ -552,3 +552,208 @@ fn velocity_tracker_fits_recent_samples() {
         tracker.velocity()
     );
 }
+
+mod accessibility {
+    use std::collections::HashMap;
+
+    use accesskit::{
+        Action, ActionData, ActionRequest, Node as AxNode, NodeId, Role, TextPosition,
+        TextSelection, Toggled, TreeId,
+    };
+
+    use super::*;
+
+    fn sample() -> Value {
+        doc(vec![
+            json!({"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": "Judul"}]}),
+            p(&"kata panjang ".repeat(12)),
+            json!({"type": "bulletList", "content": [{"type": "listItem", "content": [p("satu")]}]}),
+            json!({"type": "taskList", "content": [{"type": "taskItem", "attrs": {"checked": false}, "content": [p("tugas")]}]}),
+        ])
+    }
+
+    struct Tree(HashMap<NodeId, AxNode>);
+
+    impl Tree {
+        fn apply(&mut self, update: accesskit::TreeUpdate) {
+            for (id, node) in update.nodes {
+                self.0.insert(id, node);
+            }
+        }
+
+        fn node(&self, id: NodeId) -> &AxNode {
+            &self.0[&id]
+        }
+
+        /// Text runs in tree order below `id`.
+        fn runs(&self, id: NodeId, out: &mut Vec<NodeId>) {
+            for &child in self.node(id).children() {
+                if self.node(child).role() == Role::TextRun {
+                    out.push(child);
+                } else {
+                    self.runs(child, out);
+                }
+            }
+        }
+
+        fn text(&self) -> String {
+            let mut runs = Vec::new();
+            self.runs(EDITOR_NODE, &mut runs);
+            runs.iter()
+                .map(|&id| self.node(id).value().unwrap_or(""))
+                .collect()
+        }
+    }
+
+    #[test]
+    fn the_tree_mirrors_the_document_with_lines_and_roles() {
+        let (mut view, _) = view_with(sample(), KeyPlatform::Other);
+        let update = view.accessibility_tree();
+        assert_eq!(update.tree.as_ref().map(|t| t.root), Some(EDITOR_NODE));
+        assert_eq!(update.tree_id, TreeId::ROOT);
+        let mut tree = Tree(HashMap::new());
+        tree.apply(update);
+        assert_eq!(tree.node(EDITOR_NODE).role(), Role::MultilineTextInput);
+        let content = tree.node(EDITOR_NODE).children()[0];
+        let tops: Vec<&AxNode> = tree
+            .node(content)
+            .children()
+            .iter()
+            .map(|&id| tree.node(id))
+            .collect();
+        let roles: Vec<Role> = tops.iter().map(|n| n.role()).collect();
+        assert_eq!(
+            roles,
+            [Role::Heading, Role::Paragraph, Role::List, Role::List]
+        );
+        assert_eq!(tops[0].level(), Some(2));
+        assert!(
+            tops[1].children().len() > 1,
+            "the long paragraph wraps into several runs"
+        );
+        let text = tree.text();
+        assert_eq!(
+            text,
+            format!("Judul\n{}\nsatu\ntugas\n", "kata panjang ".repeat(12))
+        );
+        let checkbox = tree
+            .0
+            .values()
+            .find(|n| n.role() == Role::CheckBox)
+            .unwrap();
+        assert_eq!(checkbox.toggled(), Some(Toggled::False));
+        // Character geometry is present for laid-out lines.
+        let mut runs = Vec::new();
+        tree.runs(EDITOR_NODE, &mut runs);
+        let first = tree.node(runs[0]);
+        assert_eq!(first.character_lengths().len(), "Judul\n".len());
+        assert_eq!(first.character_positions().map(<[f32]>::len), Some(6));
+        assert!(first.bounds().is_some());
+    }
+
+    #[test]
+    fn selections_round_trip_through_text_positions() {
+        let (mut view, _) = view_with(sample(), KeyPlatform::Other);
+        view.select_text(3, 12, Affinity::Downstream);
+        let mut tree = Tree(HashMap::new());
+        tree.apply(view.accessibility_tree());
+        let selection = *tree.node(EDITOR_NODE).text_selection().unwrap();
+        assert_eq!(selection.anchor.character_index, 2);
+        // Move the selection through the action and read it back.
+        assert!(view.accessibility_action(&ActionRequest {
+            action: Action::SetTextSelection,
+            target_tree: TreeId::ROOT,
+            target_node: EDITOR_NODE,
+            data: Some(ActionData::SetTextSelection(TextSelection {
+                anchor: selection.focus,
+                focus: selection.anchor,
+            })),
+        }));
+        let moved = view.editor().selection().clone();
+        assert_eq!((moved.anchor(), moved.head()), (12, 3));
+    }
+
+    #[test]
+    fn typing_sends_only_the_edited_block() {
+        let blocks: Vec<Value> = (0..200).map(|i| p(&format!("paragraf {i}"))).collect();
+        let (mut view, _) = view_with(doc(blocks), KeyPlatform::Other);
+        let mut tree = Tree(HashMap::new());
+        let full = view.accessibility_tree();
+        let total = full.nodes.len();
+        tree.apply(full);
+        assert!(view.accessibility_update().is_none(), "nothing changed");
+        view.select_text(3, 3, Affinity::Downstream);
+        view.insert_text("x");
+        let update = view.accessibility_update().unwrap();
+        assert!(
+            update.nodes.len() <= 6,
+            "{} of {total} nodes",
+            update.nodes.len()
+        );
+        tree.apply(update);
+        assert!(
+            tree.text().starts_with("paxragraf 0\nparagraf 1\n"),
+            "{}",
+            &tree.text()[..30]
+        );
+        // Scrolling moves one node.
+        view.scroll_by(100.0);
+        let update = view.accessibility_update().unwrap();
+        assert!(
+            update.nodes.len() <= 3,
+            "{:?}",
+            update
+                .nodes
+                .iter()
+                .map(|(id, n)| (id, n.role()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn actions_type_text_and_toggle_tasks() {
+        let (mut view, _) = view_with(sample(), KeyPlatform::Other);
+        let mut tree = Tree(HashMap::new());
+        tree.apply(view.accessibility_tree());
+        let mut runs = Vec::new();
+        tree.runs(EDITOR_NODE, &mut runs);
+        assert!(view.accessibility_action(&ActionRequest {
+            action: Action::SetTextSelection,
+            target_tree: TreeId::ROOT,
+            target_node: EDITOR_NODE,
+            data: Some(ActionData::SetTextSelection(TextSelection {
+                anchor: TextPosition {
+                    node: runs[0],
+                    character_index: 5
+                },
+                focus: TextPosition {
+                    node: runs[0],
+                    character_index: 5
+                },
+            })),
+        }));
+        assert!(view.accessibility_action(&ActionRequest {
+            action: Action::ReplaceSelectedText,
+            target_tree: TreeId::ROOT,
+            target_node: EDITOR_NODE,
+            data: Some(ActionData::Value("!".into())),
+        }));
+        assert!(view.editor().get_text("\n").starts_with("Judul!"));
+        let checkbox = *tree
+            .0
+            .iter()
+            .find(|(_, n)| n.role() == Role::CheckBox)
+            .unwrap()
+            .0;
+        assert!(view.accessibility_action(&ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: checkbox,
+            data: None,
+        }));
+        assert_eq!(
+            view.editor().get_json()["content"][3]["content"][0]["attrs"]["checked"],
+            true
+        );
+    }
+}
