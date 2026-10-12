@@ -68,6 +68,20 @@ Temuan:
   - `CursorAnchorInfo` (posisi popup kandidat, input tulisan tangan) belum diisi.
   - Tekan lama saat ini juga memunculkan keyboard; di P4 seharusnya memunculkan handle dan menu seleksi.
 
+### Gboard (diuji 2026-10-13, P4)
+
+Gboard mengirim tiap huruf langsung dengan `commitText` tanpa komposisi, tetapi tetap menampilkan saran dan kapitalisasi otomatis.
+
+| Aksi | Panggilan dari Gboard |
+| --- | --- |
+| Memilih saran "Halos" setelah "Halo" | `commitText "s "` |
+| Backspace | `sendKeyEvent KEYCODE_DEL` |
+| Enter | `commitText "\n"` |
+| Koreksi otomatis | `deleteSurroundingText 4 0`, `commitCorrection`, lalu `commitText "halo "` |
+| Batal-koreksi (↶) | `replaceText 135 139 "lao"` (API 33+) |
+
+`replaceText` awalnya tidak diteruskan ke editor, sehingga batal-koreksi gagal. Sekarang `replaceText` diteruskan ke `ime_replace`, dan batal-koreksi sudah diuji di perangkat. Glide typing tidak bisa disimulasikan lewat adb; hasilnya tetap datang lewat `commitText`/`setComposingText`. Samsung Keyboard tidak terpasang di perangkat uji.
+
 ## Keputusan untuk fase berikutnya
 
 1. Protokol IME berbasis blok (`ImeContext`) dipakai bersama oleh EditContext, textarea, dan `InputConnection`. Di P6 protokol yang sama dipakai untuk `UITextInput`/`NSTextInputClient`.

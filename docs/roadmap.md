@@ -71,7 +71,7 @@ Catatan yang dibawa ke fase berikutnya:
 
 Target: editor terasa seperti kolom teks bawaan Android, bukan sekadar tampil benar.
 
-### Milestone 1: seleksi sentuh terasa native · Selesai, tinggal uji keyboard lain
+### Milestone 1: seleksi sentuh terasa native · Selesai
 
 Sudah ada dan diuji (15 tes skenario headless di `openrich-view/src/touch.rs`, plus uji manual di perangkat 23049PCD8G):
 
@@ -90,7 +90,7 @@ Sudah ada dan diuji (15 tes skenario headless di `openrich-view/src/touch.rs`, p
 Belum:
 
 - Handle gaya Apple belum diuji di perangkat iOS (P6).
-- Uji di Gboard (terpasang di perangkat uji, tetapi bukan keyboard aktif) dan Samsung Keyboard.
+- Samsung Keyboard (tidak ada di perangkat uji). Gboard sudah diuji: ketik, saran, koreksi otomatis dan batal-koreksi (lewat `replaceText`) berjalan; lihat [laporan spike](spikes/p0-web-android.md).
 
 Rencana awal milestone:
 

@@ -100,6 +100,21 @@ final class OpenRichInputConnection extends BaseInputConnection {
     }
 
     @Override
+    public boolean replaceText(int start, int end, CharSequence text, int newCursorPosition,
+            android.view.inputmethod.TextAttribute textAttribute) {
+        log("replaceText " + start + " " + end + " \"" + text + "\" " + newCursorPosition);
+        OpenRichNative.replaceText(handle, Math.min(start, end), Math.max(start, end), text.toString());
+        view.afterInput();
+        return true;
+    }
+
+    @Override
+    public boolean commitCorrection(android.view.inputmethod.CorrectionInfo correctionInfo) {
+        log("commitCorrection " + correctionInfo);
+        return true;
+    }
+
+    @Override
     public boolean setSelection(int start, int end) {
         log("setSelection " + start + " " + end);
         OpenRichNative.setSelection(handle, start, end);

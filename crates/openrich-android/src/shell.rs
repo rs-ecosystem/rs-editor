@@ -627,3 +627,20 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_menuDismissed(
 ) {
     app(handle).view.selection_menu_dismissed();
 }
+
+/// `replaceText` (API 33): replaces `start..end` of the IME block with
+/// `text`, as keyboards do to undo an autocorrection.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_openrich_android_OpenRichNative_replaceText(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    start: jint,
+    end: jint,
+    text: JString,
+) {
+    let text = string(&mut env, &text);
+    app(handle)
+        .view
+        .ime_replace(start.max(0) as usize, end.max(0) as usize, &text, false);
+}

@@ -57,6 +57,9 @@ public final class OpenRichNative {
 
     public static native void setSelection(long handle, int start, int end);
 
+    /** Replaces start..end (UTF-16, within the IME block) with text, typed (input rules run). */
+    public static native void replaceText(long handle, int start, int end, String text);
+
     public static native void setFocused(long handle, boolean focused);
 
     /** JSON: {start, text, selection: [a, b], composition: [a, b] | null, caret: [x, y, w, h] | null}. */
