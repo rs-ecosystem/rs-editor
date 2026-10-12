@@ -50,6 +50,21 @@ pub const BUNDLED_FONTS: &[(&str, &[u8])] = &[
     (
         "LiberationMono-BoldItalic.ttf",
         include_bytes!("../assets/fonts/LiberationMono-BoldItalic.ttf"),
+    ),    (
+        "NotoSansArabic-Regular.ttf",
+        include_bytes!("../assets/fonts/NotoSansArabic-Regular.ttf"),
+    ),
+    (
+        "NotoSansArabic-Bold.ttf",
+        include_bytes!("../assets/fonts/NotoSansArabic-Bold.ttf"),
+    ),
+    (
+        "NotoSansDevanagari-Regular.ttf",
+        include_bytes!("../assets/fonts/NotoSansDevanagari-Regular.ttf"),
+    ),
+    (
+        "NotoSansDevanagari-Bold.ttf",
+        include_bytes!("../assets/fonts/NotoSansDevanagari-Bold.ttf"),
     ),
 ];
 
@@ -158,6 +173,30 @@ impl SkiaParagraph {
 
     /// Maps a local paragraph coordinate to a core grapheme offset.
     pub fn hit_test(&self, x: f32, y: f32) -> Option<TextHit> {
+        let hit = self.glyph_hit(x, y)?;
+        // Skia hits individual glyphs. A grapheme shaped from several glyphs,
+        // such as a Devanagari conjunct, then yields offsets that alternate
+        // inside it, so resolve within a grapheme by its midpoint instead.
+        let start = hit.grapheme_offset.saturating_sub(1);
+        let end = (hit.grapheme_offset + 1).min(self.index_map.grapheme_len());
+        for offset in start..end {
+            for rect in self.selection_rects(offset..offset + 1).ok()? {
+                if x < rect.left || x > rect.right || y < rect.top || y > rect.bottom {
+                    continue;
+                }
+                let epsilon = (rect.width() * 0.01).clamp(0.001, 0.1);
+                let edge = if x < rect.center_x() {
+                    rect.left + epsilon
+                } else {
+                    rect.right - epsilon
+                };
+                return self.glyph_hit(edge, rect.center_y());
+            }
+        }
+        Some(hit)
+    }
+
+    fn glyph_hit(&self, x: f32, y: f32) -> Option<TextHit> {
         let hit: PositionWithAffinity = self
             .paragraph
             .get_glyph_position_at_coordinate(Point::new(x, y));
@@ -196,7 +235,7 @@ thread_local! {
         let mut provider = TypefaceFontProvider::new();
         for (_, bytes) in BUNDLED_FONTS {
             let face = manager.new_from_data(Data::new_copy(bytes), None)
-                .expect("bundled Liberation font must decode");
+                .expect("bundled font must decode");
             provider.register_typeface(face, None);
         }
         provider.into()
@@ -231,7 +270,14 @@ fn text_style(font_size: f32, marks: &[Mark]) -> TextStyle {
     let mut style = TextStyle::new();
     style.set_font_size(font_size);
     style.set_color(Color::BLACK);
-    style.set_font_families(&["Liberation Sans", "Arial"]);
+    // Scripts absent from Liberation use bundled Noto so the browser's DOM
+    // text, and with it Android's native caret handle, matches Skia.
+    style.set_font_families(&[
+        "Liberation Sans",
+        "Noto Sans Arabic",
+        "Noto Sans Devanagari",
+        "Arial",
+    ]);
     style.set_font_style(match (bold, italic) {
         (true, true) => FontStyle::bold_italic(),
         (true, false) => FontStyle::bold(),
@@ -255,6 +301,8 @@ fn text_style(font_size: f32, marks: &[Mark]) -> TextStyle {
         // Skia resolves installed family names, not CSS generic families.
         style.set_font_families(&[
             "Liberation Mono",
+            "Noto Sans Arabic",
+            "Noto Sans Devanagari",
             "Menlo",
             "Consolas",
             "DejaVu Sans Mono",
@@ -497,6 +545,21 @@ mod tests {
         DOCUMENT_SCHEMA_VERSION, Document, Inline, ListItem, NodeId, Position, Selection,
     };
     use openrich_render::{DocumentEntryKind, DocumentLayout};
+
+    #[test]
+    fn hit_testing_inside_a_multi_glyph_grapheme_is_monotonic() {
+        // Noto shapes "न्दी" from several glyphs; offsets must not step back.
+        let paragraph = SkiaParagraph::new("हिन्दी", 400.0, 16.0).unwrap();
+        let (width, height) = paragraph.size();
+        let mut previous = 0;
+        for step in 0..=400 {
+            let x = width * step as f32 / 400.0;
+            let offset = paragraph.hit_test(x, height / 2.0).unwrap().grapheme_offset;
+            assert!(offset >= previous, "offset {offset} after {previous} at x={x}");
+            previous = offset;
+        }
+        assert_eq!(previous, paragraph.text_index_map().grapheme_len());
+    }
 
     #[test]
     fn paragraph_layout_hit_testing_and_selection_geometry_work() {

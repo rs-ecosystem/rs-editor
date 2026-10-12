@@ -134,7 +134,7 @@ impl EditorState {
         };
         self.selection = selection;
         self.active_marks = Some(composition.marks);
-        self.dispatch(EditorCommand::InsertText(text))
+        self.dispatch_composition_text(text)
     }
 
     /// Sets the selection after checking block types and grapheme offsets.
@@ -200,7 +200,18 @@ impl EditorState {
         if committed_text.is_empty() {
             return Ok(None);
         }
-        self.dispatch(EditorCommand::InsertText(committed_text))
+        self.dispatch_composition_text(committed_text)
+    }
+
+    /// A committed composition is its own undo step; later typing must not
+    /// join it.
+    fn dispatch_composition_text(
+        &mut self,
+        text: String,
+    ) -> Result<Option<Transaction>, EditorError> {
+        let result = self.dispatch(EditorCommand::InsertText(text));
+        self.typing_group_open = false;
+        result
     }
 
     pub fn cancel_composition(&mut self) -> bool {
@@ -1180,6 +1191,31 @@ mod tests {
 
         editor.dispatch(EditorCommand::Redo).unwrap();
         assert_eq!(text_in(&editor.document().blocks[0]), "A🙂B");
+    }
+
+    #[test]
+    fn typing_after_a_composition_is_a_separate_undo_step() {
+        let document = Document {
+            schema_version: openrich_document::DOCUMENT_SCHEMA_VERSION,
+            blocks: vec![Block::Paragraph {
+                id: NodeId::new(),
+                content: vec![Inline::text("Halo")],
+            }],
+        };
+        let mut editor = EditorState::new(document).unwrap();
+        editor.set_selection(caret(4)).unwrap();
+        editor
+            .dispatch(EditorCommand::InsertText(" d".into()))
+            .unwrap();
+        editor.begin_composition();
+        editor.replace_composition(caret(6), "愛".into()).unwrap();
+        editor.dispatch(EditorCommand::InsertText("!".into())).unwrap();
+        assert_eq!(text_in(&editor.document().blocks[0]), "Halo d愛!");
+
+        editor.dispatch(EditorCommand::Undo).unwrap();
+        assert_eq!(text_in(&editor.document().blocks[0]), "Halo d愛");
+        editor.dispatch(EditorCommand::Undo).unwrap();
+        assert_eq!(text_in(&editor.document().blocks[0]), "Halo d");
     }
 
     #[test]

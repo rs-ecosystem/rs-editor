@@ -1,9 +1,10 @@
 import { prepareScene, hitTest, caretRect, selectionRects, navigate, comparePositions } from '/interaction.mjs';
-import { replacementDiff, typingMarks, typingStyle, sceneMatches, wordRange, touchMovement, isDoubleTap, selectionOwner, preeditDocument, documentFingerprint } from '/input.mjs';
+import { compositionEdits, blockTexts, typingMarks, typingStyle, sceneMatches, wordRange, touchMovement, isDoubleTap, selectionOwner, preeditDocument, documentFingerprint } from '/input.mjs';
 const editor = document.querySelector('#editor');
 const surface = document.querySelector('#surface');
 const canvas = document.querySelector('#skiaCanvas');
 const status = document.querySelector('#status');
+const announcer = document.querySelector('#announcer');
 const loading = document.querySelector('#loading');
 const preview = document.querySelector('#compositionPreview');
 const fileInput = document.querySelector('#fileInput');
@@ -13,6 +14,7 @@ let currentState = null;
 let composing = false;
 let compositionSelection = null;
 let compositionSnapshot = null;
+let compositionStaleCaret = null;
 let compositionDocument = null;
 let previewDocument = null;
 let compositionEpoch = 0;
@@ -63,6 +65,14 @@ let deferredInputs = [];
 const segmenter = typeof Intl.Segmenter === 'function'
   ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
   : null;
+
+// Messages a screen reader user needs: errors and completed file/clipboard actions.
+function announce(message) {
+  status.textContent = message;
+  // An identical message is not re-read unless the live region changes first.
+  if (announcer.textContent === message) { announcer.textContent = ''; setTimeout(() => { announcer.textContent = message; }, 50); }
+  else announcer.textContent = message;
+}
 
 function graphemes(text) {
   return segmenter ? [...segmenter.segment(text)].map(item => item.segment) : Array.from(text);
@@ -125,9 +135,50 @@ function makeBlock(block, index) {
   return element;
 }
 
+// Wraps a formatted list block for assistive technology. The editable text
+// stays in its own <p>/<hN>: Chrome resolves caret positions in an empty <li>
+// that also holds the checkbox to the next block instead.
+function makeListItem(block, element) {
+  const item = document.createElement('li');
+  if (block.format.list === 'checkbox') {
+    // Pointer taps use Skia geometry; this proxy exposes checked state to AT.
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.className = 'semantic-check';
+    check.contentEditable = 'false';
+    check.tabIndex = -1;
+    check.checked = !!block.format.checked;
+    check.setAttribute('aria-label', (block.content || []).map(run => run.text || '').join('') || 'Item checklist');
+    item.append(check);
+  }
+  item.append(element);
+  return item;
+}
+
+// Current DOM text per top-level block; null when the browser removed it.
+function domBlockTexts() {
+  return (currentState?.document.blocks || []).map((_, index) => editor.querySelector(`[data-block="${index}"]`)?.textContent ?? null);
+}
+
 function renderSemanticDocument() {
   if (!currentState) return;
-  editor.replaceChildren(...currentState.document.blocks.map(makeBlock));
+  const nodes = [];
+  let group = null;
+  currentState.document.blocks.forEach((block, index) => {
+    const element = makeBlock(block, index);
+    const list = block.type === 'formatted' && block.format?.list !== 'none' ? block.format.list : null;
+    if (!list) { group = null; nodes.push(element); return; }
+    if (group?.dataset.list !== list) {
+      group = document.createElement(list === 'ordered' ? 'ol' : 'ul');
+      group.className = 'semantic-list';
+      group.dataset.list = list;
+      // WebKit drops list semantics for list-style:none unless the role is explicit.
+      group.setAttribute('role', 'list');
+      nodes.push(group);
+    }
+    group.append(makeListItem(block, element));
+  });
+  editor.replaceChildren(...nodes);
   restoreSelection(currentState.selection);
 }
 
@@ -210,7 +261,10 @@ async function updateState(state, rerender = true, preserveSelection = false) {
     if (changed && !sceneSchedule) sceneSchedule = requestAnimationFrame(() => { sceneSchedule = 0; renderCanvas(); });
   } else if (!composing) restoreSelection(currentState.selection);
   scheduleOverlay();
-  status.textContent = composing ? 'Menulis dengan IME…' : 'Tersimpan di engine lokal';
+  // Routine progress stays visual. Rewriting a live region on every keystroke
+  // makes screen readers interrupt the text being read back.
+  const routine = composing ? 'Menulis dengan IME…' : 'Tersimpan di engine lokal';
+  if (status.textContent !== routine) status.textContent = routine;
 }
 
 // One scene request returns text pixels and matching geometry atomically.
@@ -266,7 +320,7 @@ async function renderCanvas(force = false) {
   } catch (error) {
     if (error.name !== 'AbortError' && token === sceneRequest) {
       activeSceneKey = null;
-      status.textContent = error.message;
+      announce(error.message);
       loading.textContent = `Gagal merender: ${error.message}`;
     }
   } finally {
@@ -432,7 +486,7 @@ function action(command, options = {}) {
       value.expected_document = currentState.document;
       const state = await post('/api/action', value);
       await updateState(state, options.keepDom !== true, options.preserveSelection === true || epoch !== selectionEpoch || options.keepDom === true);
-      if (options.message) status.textContent = options.message;
+      if (options.message) announce(options.message);
     } catch (error) {
       if (error.status === 409) {
         actionGeneration += 1;
@@ -444,10 +498,10 @@ function action(command, options = {}) {
         const waiters = compositionWaiters; compositionWaiters = [];
         for (const resolve of waiters) resolve();
       }
-      status.textContent = error.message;
+      announce(error.message);
     }
     finally { if (mutation) mutationPending -= 1; flushDeferredInputs(); }
-  }).catch(error => { status.textContent = error.message; });
+  }).catch(error => { announce(error.message); });
   if (command === 'insert_text' || command === 'composition_commit' || command === 'composition_replace') {
     clearTimeout(historyTimer);
     historyTimer = setTimeout(() => action('end_history_group', { noSelection: true, keepDom: true }), 750);
@@ -487,6 +541,9 @@ function selectionchange() {
   const nativeRange = selection && comparePositions(selection.anchor, selection.focus) !== 0;
   if (nativeRange && touchMode) { nativeSelectionActive = !preciseSelection; scheduleOverlay(); }
   if (composing || (pointerSession && !nativeRange)) return;
+  // While edits are in flight the DOM still holds pre-edit text, so a
+  // collapsed native caret (e.g. after an IME commit) is stale, not a move.
+  if (pendingCaret && mutationPending && !nativeRange) return;
   if (selection && (comparePositions(selection.anchor, currentState.selection.anchor) !== 0 || comparePositions(selection.focus, currentState.selection.focus) !== 0)) {
     nativeSelectionActive = !preciseSelection && touchMode && comparePositions(selection.anchor, selection.focus) !== 0;
     // Android owns an active handle drag. Writing its range back with
@@ -693,27 +750,34 @@ editor.addEventListener('beforeinput', event => {
     event.preventDefault(); compositionTail = null; return;
   }
   compositionTail = null;
-  let selection = readSelection();
-  const target = event.getTargetRanges?.()[0];
-  if (target) {
-    const anchor = endpointFromDom(target.startContainer, target.startOffset);
-    const focus = endpointFromDom(target.endContainer, target.endOffset);
-    if (anchor && focus) selection = {anchor, focus};
-  }
+  // Until the engine replies, the DOM still shows pre-edit text, so its
+  // target ranges point before the text typed since; pendingCaret wins.
+  // Resolve after flushPendingInsert so that flush's caret is included.
+  // Spellcheck replacements name the word to replace, so keep their range.
+  const resolveSelection = () => {
+    if (pendingCaret && event.inputType !== 'insertReplacementText') return pendingCaret;
+    const target = event.getTargetRanges?.()[0];
+    if (target) {
+      const anchor = endpointFromDom(target.startContainer, target.startOffset);
+      const focus = endpointFromDom(target.endContainer, target.endOffset);
+      if (anchor && focus) return {anchor, focus};
+    }
+    return readSelection();
+  };
   if (event.inputType === 'insertText' || event.inputType === 'insertFromComposition' || event.inputType === 'insertReplacementText') {
     event.preventDefault();
-    if (!pendingInsert) pendingInsertSelection = selection;
+    if (!pendingInsert) pendingInsertSelection = resolveSelection();
     pendingInsert += event.data || '';
     clearTimeout(insertTimer);
     insertTimer = setTimeout(flushPendingInsert, 8);
   } else if (event.inputType === 'deleteContentBackward') {
-    event.preventDefault(); flushPendingInsert(); action('delete_backward', { selection });
+    event.preventDefault(); flushPendingInsert(); action('delete_backward', { selection: resolveSelection() });
   } else if (event.inputType === 'deleteContentForward') {
-    event.preventDefault(); flushPendingInsert(); action('delete_forward', { selection });
+    event.preventDefault(); flushPendingInsert(); action('delete_forward', { selection: resolveSelection() });
   } else if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
     event.preventDefault(); flushPendingInsert(); action(event.inputType === 'historyUndo' ? 'undo' : 'redo');
   } else if (event.inputType === 'insertParagraph' || event.inputType === 'insertLineBreak') {
-    event.preventDefault(); flushPendingInsert(); action('split_block', { selection });
+    event.preventDefault(); flushPendingInsert(); action('split_block', { selection: resolveSelection() });
   }
 });
 
@@ -767,12 +831,17 @@ editor.addEventListener('compositionstart', () => {
   if (composing) return;
   flushPendingInsert();
   compositionSelection = readSelection();
+  // Typed text still in flight has not reached the DOM, so the browser starts
+  // composing behind the logical caret predicted for that text.
+  const native = readNativeSelection();
+  compositionStaleCaret = pendingCaret && native && comparePositions(native.anchor, native.focus) === 0 &&
+    comparePositions(native.focus, pendingCaret.focus) !== 0 ? native.focus : null;
   compositionMarks = typingMarks(currentState, compositionSelection);
   compositionDirty = false;
   compositionEpoch += 1;
   compositionDocument = structuredClone(currentState.document);
   previewDocument = compositionDocument;
-  compositionSnapshot = currentState.document.blocks.map(block => (block.content || []).map(run => run.text || '').join(''));
+  compositionSnapshot = blockTexts(currentState.document);
   composing = true;
   surface.classList.add('composing');
   applyCompositionStyle();
@@ -794,13 +863,9 @@ editor.addEventListener('compositionend', event => {
   // Mobile keyboards can recompose the word around a moved caret. event.data
   // is the complete composing word, not necessarily text to insert. Diff the
   // native result against the engine snapshot to obtain the replacement range.
-  const edits = [];
-  for (let index = 0; index < (compositionSnapshot || []).length; index++) {
-    const element = editor.querySelector(`[data-block="${index}"]`);
-    if (!element) continue;
-    const edit = replacementDiff(compositionSnapshot[index], element.textContent || '', index);
-    if (edit) edits.push(edit);
-  }
+  const {edits, unsupported} = compositionEdits(compositionSnapshot || [], domBlockTexts(), compositionSelection, compositionStaleCaret);
+  const staleCaret = compositionStaleCaret;
+  compositionStaleCaret = null;
   const finalNativeSelection = readNativeSelection();
   composing = false;
   for (const [element, cssText] of compositionStyles) element.style.cssText = cssText;
@@ -808,7 +873,9 @@ editor.addEventListener('compositionend', event => {
   nativeSelectionGuard = 0;
   // The keyboard can end an unchanged reconversion because the user moved
   // the caret. That destination must survive cancel/commit responses.
-  if (edits.length <= 1 && finalNativeSelection) setLocalSelection(finalNativeSelection);
+  // A stale native caret also ends behind the logical one; the engine reply
+  // places the caret after the moved insertion instead.
+  if (!unsupported && finalNativeSelection && !staleCaret) setLocalSelection(finalNativeSelection);
   const tail = { text: event.data || '', until: performance.now() + 100 };
   compositionTail = tail;
   // Only suppress the browser's trailing insertion in this event turn. A real
@@ -822,13 +889,15 @@ editor.addEventListener('compositionend', event => {
   preview.textContent = '';
   // The native IME operates within one block. Preserve its captured typing
   // marks in one engine command instead of clearing them via set_selection.
-  if (edits.length === 1) action('composition_replace', { ...edits[0], preserveSelection: true });
+  if (edits.length === 1 && staleCaret) {
+    const caret = { ...edits[0].selection.anchor, offset: edits[0].selection.anchor.offset + graphemeOffset(edits[0].text) };
+    pendingCaret = { anchor: caret, focus: { ...caret } };
+    action('composition_replace', { ...edits[0] });
+  } else if (edits.length === 1) action('composition_replace', { ...edits[0], preserveSelection: true });
   else {
-    action('composition_cancel', { noSelection: true, keepDom: edits.length === 0, preserveSelection: edits.length === 0 });
-    if (edits.length > 1) {
-      status.textContent = 'Komposisi lintas paragraf belum didukung; perubahan dibatalkan.';
-      renderSemanticDocument();
-    }
+    action('composition_cancel', { noSelection: true, keepDom: !unsupported, preserveSelection: !unsupported,
+      message: unsupported ? 'Komposisi tidak dapat dipetakan ke dokumen; perubahan dibatalkan.' : undefined });
+    if (unsupported) renderSemanticDocument();
   }
   if (!edits.length) scheduleOverlay();
   const waiters = compositionWaiters; compositionWaiters = [];
@@ -855,7 +924,7 @@ document.querySelector('#saveButton').addEventListener('click', async () => {
   link.download = 'openrich-document.json';
   link.click();
   URL.revokeObjectURL(link.href);
-  status.textContent = 'Dokumen JSON diunduh';
+  announce('Dokumen JSON diunduh');
 });
 document.querySelector('#openButton').addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', async () => {
@@ -864,14 +933,15 @@ fileInput.addEventListener('change', async () => {
   try {
     const state = await post('/api/load', await file.text(), true);
     await updateState(state);
-    status.textContent = `Dibuka: ${file.name}`;
-  } catch (error) { status.textContent = error.message; }
+    announce(`Dibuka: ${file.name}`);
+  } catch (error) { announce(error.message); }
   fileInput.value = '';
 });
 
 async function start() {
   try {
-    await Promise.all(['OpenRich Sans','OpenRich Mono'].flatMap(family => ['400','700','italic 400','italic 700'].map(style => document.fonts.load(`${style} 16px "${family}"`))));
+    // The sample text also loads the Arabic and Devanagari unicode-range faces.
+    await Promise.all(['OpenRich Sans','OpenRich Mono'].flatMap(family => ['400','700','italic 400','italic 700'].map(style => document.fonts.load(`${style} 16px "${family}"`, 'aاअ'))));
     const response = await fetch('/api/state');
     await updateState(await response.json());
     canvasResizeObserver = new ResizeObserver(() => renderCanvas());
@@ -939,6 +1009,19 @@ editor.addEventListener('input', () => {
   if (!composing) { renderSemanticDocument(); scheduleOverlay(); }
 });
 editor.addEventListener('dragstart', event => event.preventDefault());
+// Screen readers activate the checklist proxy directly; pointer taps are
+// resolved from Skia geometry in the surface pointerdown handler.
+editor.addEventListener('click', async event => {
+  const check = event.target.closest?.('.semantic-check');
+  if (!check) return;
+  event.preventDefault();
+  await finishComposition();
+  flushPendingInsert();
+  const index = Number(check.parentElement.querySelector('[data-block]').dataset.block);
+  const format = currentState.document.blocks[index].format;
+  const position = {block_index:index, offset:0, affinity:'downstream'};
+  action('set_block_format', {format:{...format, checked:!format.checked}, selection:{anchor:position, focus:position}});
+});
 for (const [index, handle] of selectionHandles.entries()) {
   handle.addEventListener('pointerdown', event => {
     event.preventDefault(); event.stopPropagation();
@@ -988,9 +1071,9 @@ for (const button of selectionMenu.querySelectorAll('button')) {
     // execCommand also works on the HTTP LAN demo where Clipboard API is
     // unavailable. Copy first; only delete when copying actually succeeded.
     const copied = document.execCommand('copy');
-    if (!copied) { status.textContent = 'Tidak bisa menyalin. Gunakan tombol salin di keyboard.'; return; }
+    if (!copied) { announce('Tidak bisa menyalin. Gunakan tombol salin di keyboard.'); return; }
     if (command === 'cut') { preciseSelection = false; action('insert_text', {text:'',selection}); }
-    else status.textContent = 'Teks disalin';
+    else announce('Teks disalin');
     scheduleOverlay();
   });
 }
@@ -1010,8 +1093,7 @@ function scheduleCompositionStyle() {
     compositionStyleFrame = 0;
     if (composing) {
       applyCompositionStyle();
-      const texts = compositionDocument.blocks.map((_, index) => editor.querySelector(`[data-block="${index}"]`)?.textContent);
-      previewDocument = preeditDocument(compositionDocument, texts, compositionMarks);
+      previewDocument = preeditDocument(compositionDocument, domBlockTexts(), compositionMarks, compositionSelection, compositionStaleCaret, currentState.document);
       renderCanvas();
     }
   });

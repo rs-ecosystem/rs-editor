@@ -46,7 +46,7 @@
       <div id="surface" class="surface">
         <canvas id="skiaCanvas" class="skia-canvas" width="960" height="180" aria-hidden="true"></canvas>
         <canvas id="selectionCanvas" class="selection-canvas" aria-hidden="true"></canvas>
-        <div id="editor" class="semantic-editor" contenteditable="true" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="Dokumen OpenRich" aria-multiline="true"></div>
+        <div id="editor" class="semantic-editor" contenteditable="true" role="textbox" spellcheck="false" autocorrect="off" autocapitalize="off" aria-label="Dokumen OpenRich" aria-multiline="true"></div>
         <button type="button" class="selection-handle" id="selectionStart" aria-label="Geser awal seleksi" hidden></button>
         <button type="button" class="selection-handle" id="selectionEnd" aria-label="Geser akhir seleksi" hidden></button>
         <div id="selectionMenu" class="selection-menu" role="toolbar" aria-label="Aksi seleksi" hidden>
@@ -57,7 +57,7 @@
         <div id="compositionPreview" class="composition-preview" aria-hidden="true"></div>
         <div id="loading" class="loading">Memuat dokumen…</div>
       </div>
-      <footer class="editor-footer"><span id="status" role="status" aria-live="polite">Terhubung ke engine lokal</span><span>Enter untuk paragraf baru · Paste mendukung teks</span></footer>
+      <footer class="editor-footer"><span id="status">Terhubung ke engine lokal</span><span id="announcer" class="sr-only" role="status" aria-live="polite"></span><span>Enter untuk paragraf baru · Paste mendukung teks</span></footer>
     </section>
     <aside class="performance-hud" aria-label="Performa rendering">
       <span title="Frekuensi callback animasi browser; bukan FPS renderer Skia">UI <b id="uiFPS">—</b> FPS</span>
