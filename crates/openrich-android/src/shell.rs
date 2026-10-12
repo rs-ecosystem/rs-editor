@@ -617,3 +617,13 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_setDark(
         Theme::light()
     });
 }
+
+/// The system closed the selection menu (back button, a tap elsewhere).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_openrich_android_OpenRichNative_menuDismissed(
+    _env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) {
+    app(handle).view.selection_menu_dismissed();
+}

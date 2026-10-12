@@ -71,9 +71,9 @@ Catatan yang dibawa ke fase berikutnya:
 
 Target: editor terasa seperti kolom teks bawaan Android, bukan sekadar tampil benar.
 
-### Milestone 1: seleksi sentuh terasa native · Sebagian besar selesai
+### Milestone 1: seleksi sentuh terasa native · Selesai, tinggal uji keyboard lain
 
-Sudah ada dan diuji (9 tes skenario headless di `openrich-view/src/touch.rs`, plus uji manual di perangkat 23049PCD8G):
+Sudah ada dan diuji (15 tes skenario headless di `openrich-view/src/touch.rs`, plus uji manual di perangkat 23049PCD8G):
 
 - Ketuk menaruh caret dengan handle tetesan yang hilang setelah 4 detik; ketuk caret lagi memunculkan menu Paste/Select all.
 - Tekan lama memilih kata (haptik `LONG_PRESS`, magnifier), lalu geser memperluas per kata.
@@ -82,11 +82,15 @@ Sudah ada dan diuji (9 tes skenario headless di `openrich-view/src/touch.rs`, pl
 - Menu mengambang asli (`ActionMode`) dengan label lokal sistem dan aksi aplikasi lain (`PROCESS_TEXT`), disembunyikan selama scroll lalu muncul lagi.
 - Mengetik, tombol, atau mouse mengakhiri mode seleksi sentuh.
 
+- Ketuk handle caret membuka/menutup menu Paste; salin lalu tempel lewat menu diuji di perangkat.
+- Keyboard terbuka: caret yang terlihat tetap terlihat saat view mengecil.
+- Profil iOS: tekan lama menggeser caret di bawah magnifier; handle gaya Apple (bar dan knob) diuji headless.
+- Menu yang ditutup sistem (tombol back) disinkronkan ke view.
+
 Belum:
 
-- Menarik caret dengan tekan lama di caret (tanpa handle).
-- Handle gaya Apple baru digambar, belum diuji di iOS (P6).
-- Uji di keyboard selain keyboard Xiaomi.
+- Handle gaya Apple belum diuji di perangkat iOS (P6).
+- Uji di Gboard (terpasang di perangkat uji, tetapi bukan keyboard aktif) dan Samsung Keyboard.
 
 Rencana awal milestone:
 

@@ -207,7 +207,9 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
 
     private void applyEffects() {
         try {
-            selection.apply(new JSONArray(OpenRichNative.takeEffects(handle)));
+            String effects = OpenRichNative.takeEffects(handle);
+            if (effects.length() > 2) log("effects " + effects);
+            selection.apply(new JSONArray(effects));
         } catch (JSONException ignored) {
             // Effects are best effort.
         }

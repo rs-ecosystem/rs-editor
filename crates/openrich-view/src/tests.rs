@@ -960,6 +960,25 @@ mod touch {
     }
 
     #[test]
+    fn tapping_the_caret_handle_toggles_the_paste_menu() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        let handle = view.touch_handles()[0];
+        clock.advance(500);
+        view.take_effects();
+        tap(&mut view, handle.center);
+        assert_eq!(
+            menus(&view.take_effects()),
+            vec![Some(vec![MenuItem::Paste, MenuItem::SelectAll])]
+        );
+        assert_eq!(selection(&view), (8, 8), "the caret stays");
+        clock.advance(500);
+        tap(&mut view, handle.center);
+        assert_eq!(menus(&view.take_effects()), vec![None]);
+    }
+
+    #[test]
     fn a_long_press_selects_a_word_and_dragging_extends_by_words() {
         let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
         let (x, y) = point_of(&mut view, 8);
@@ -1130,6 +1149,104 @@ mod touch {
         }
         assert!(view.scroll_y() > 100.0, "{}", view.scroll_y());
         assert!(selection(&view).1 > before + 30);
+    }
+
+    #[test]
+    fn the_caret_stays_visible_when_the_keyboard_shrinks_the_view() {
+        let blocks: Vec<Value> = (0..60).map(|i| p(&format!("baris nomor {i}"))).collect();
+        let (mut view, _) = setup(doc(blocks));
+        let (_, height, scale) = view.size();
+        // Tap a line near the bottom of the view.
+        let target = view.to_document(100.0, height - 30.0);
+        let pos = match view.layout().hit(target.0, target.1) {
+            Some(openrich_layout::Hit::Text { pos, .. }) => pos,
+            _ => panic!("no text near the bottom"),
+        };
+        let at = point_of(&mut view, pos);
+        tap(&mut view, at);
+        let before = view.caret_rect().unwrap();
+        assert!(before.bottom() <= height);
+        // The keyboard takes 60% of the screen.
+        view.resize(640.0, height * 0.4, scale);
+        let after = view.caret_rect().unwrap();
+        assert!(
+            after.y >= 0.0 && after.bottom() <= height * 0.4,
+            "caret at {after:?}"
+        );
+        assert!(view.scroll_y() > 0.0);
+    }
+
+    #[test]
+    fn a_caret_scrolled_away_is_left_alone_on_resize() {
+        let blocks: Vec<Value> = (0..60).map(|i| p(&format!("baris nomor {i}"))).collect();
+        let (mut view, _) = setup(doc(blocks));
+        view.select_text(3, 3, Affinity::Downstream);
+        view.scroll_to(800.0);
+        let (_, height, scale) = view.size();
+        view.resize(640.0, height * 0.4, scale);
+        assert_eq!(view.scroll_y(), 800.0);
+    }
+
+    #[test]
+    fn on_ios_a_long_press_moves_the_caret_under_a_magnifier() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        view.set_interaction_profile(InteractionProfile::ios());
+        let (x, y) = point_of(&mut view, 3);
+        view.touch(TouchPhase::Down, x, y);
+        clock.advance(550);
+        frame(&mut view);
+        assert_eq!(selection(&view), (3, 3), "no word selection");
+        let effects = view.take_effects();
+        assert_eq!(haptics(&effects), vec![HapticKind::LongPress]);
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::Magnifier(Some(_))))
+        );
+        let (x2, _) = point_of(&mut view, 12);
+        view.touch(TouchPhase::Move, x2, y);
+        assert_eq!(selection(&view), (12, 12));
+        view.touch(TouchPhase::Up, x2, y);
+        let effects = view.take_effects();
+        assert!(effects.contains(&Effect::Magnifier(None)));
+        assert!(menus(&effects).is_empty(), "moving the caret shows no menu");
+    }
+
+    #[test]
+    fn apple_handles_put_knobs_above_and_below_the_selection() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        view.set_interaction_profile(InteractionProfile::ios());
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        clock.advance(100);
+        tap(&mut view, at);
+        assert_eq!(selection(&view), (6, 11));
+        let handles = view.touch_handles();
+        let start = handles
+            .iter()
+            .find(|h| h.kind == HandleKind::Start)
+            .unwrap();
+        let end = handles.iter().find(|h| h.kind == HandleKind::End).unwrap();
+        assert!(start.center.1 < start.line.y, "start knob above the line");
+        assert!(end.center.1 > end.line.bottom(), "end knob below the line");
+        assert_eq!(start.center.0, start.line.x);
+    }
+
+    #[test]
+    fn a_menu_closed_by_the_system_can_be_opened_again() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        clock.advance(500);
+        tap(&mut view, at);
+        assert!(menus(&view.take_effects()).last().unwrap().is_some());
+        view.selection_menu_dismissed();
+        clock.advance(500);
+        tap(&mut view, at);
+        assert!(
+            menus(&view.take_effects()).last().unwrap().is_some(),
+            "the next tap on the caret shows it again"
+        );
     }
 
     #[test]

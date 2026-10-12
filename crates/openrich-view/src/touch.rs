@@ -23,11 +23,22 @@ pub enum HandleStyle {
     Apple,
 }
 
+/// What a long press on text does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LongPressAction {
+    /// Select the word, then extend by words while dragging (Android).
+    SelectWord,
+    /// Pick up the caret and move it with the finger under a magnifier
+    /// (iOS); double tap selects words.
+    MoveCaret,
+}
+
 /// Timings and sizes of touch interaction on one platform. Appearance
 /// follows the platform; behavior is the same everywhere.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InteractionProfile {
     pub handle_style: HandleStyle,
+    pub long_press: LongPressAction,
     pub long_press_ms: u64,
     /// Taps closer than this count as a double/triple tap.
     pub multi_tap_ms: u64,
@@ -47,6 +58,7 @@ impl InteractionProfile {
     pub fn android() -> Self {
         Self {
             handle_style: HandleStyle::Material,
+            long_press: LongPressAction::SelectWord,
             long_press_ms: 400,
             multi_tap_ms: 300,
             touch_slop: 8.0,
@@ -60,6 +72,7 @@ impl InteractionProfile {
     pub fn ios() -> Self {
         Self {
             handle_style: HandleStyle::Apple,
+            long_press: LongPressAction::MoveCaret,
             long_press_ms: 500,
             multi_tap_ms: 350,
             touch_slop: 10.0,
@@ -142,12 +155,18 @@ enum Gesture {
     WordSelecting {
         anchor: (usize, usize),
     },
+    /// After a long press with [`LongPressAction::MoveCaret`]: the caret
+    /// follows the finger.
+    CaretMoving,
     /// Dragging a handle; `offset` is finger minus the handle's text point.
     Handle {
         kind: HandleKind,
         offset: (f32, f32),
         /// The previous text position under the finger.
         last: Option<usize>,
+        /// Where the finger went down, to tell a tap from a drag.
+        start: (f32, f32),
+        moved: bool,
     },
 }
 
@@ -202,9 +221,9 @@ impl EditorView {
                 kind: handle.kind,
                 offset: (x - tip.0, y - tip.1),
                 last: None,
+                start: (x, y),
+                moved: false,
             });
-            self.hide_menu();
-            self.set_magnifier(Some((handle.line.x, handle.line.center_y())));
             return;
         }
         self.touch.gesture = Some(Gesture::Pending {
@@ -229,14 +248,28 @@ impl EditorView {
                 self.touch.gesture = Some(Gesture::Scrolling { last_y: y });
             }
             Some(Gesture::WordSelecting { anchor }) => self.extend_by_words(anchor, x, y),
-            Some(Gesture::Handle { kind, offset, last }) => {
-                if let Some(pos) = self.drag_handle(kind, offset, last, x, y) {
-                    self.touch.gesture = Some(Gesture::Handle {
-                        kind,
-                        offset,
-                        last: Some(pos),
-                    });
+            Some(Gesture::CaretMoving) => self.move_caret_to(x, y),
+            Some(Gesture::Handle {
+                kind,
+                offset,
+                last,
+                start,
+                moved,
+            }) => {
+                let moved = moved || (x - start.0).hypot(y - start.1) > self.profile.touch_slop;
+                if !moved {
+                    return;
                 }
+                // The drag starts: the menu steps aside until it ends.
+                self.hide_menu();
+                let last = self.drag_handle(kind, offset, last, x, y).or(last);
+                self.touch.gesture = Some(Gesture::Handle {
+                    kind,
+                    offset,
+                    last,
+                    start,
+                    moved,
+                });
             }
             None => {}
         }
@@ -253,9 +286,15 @@ impl EditorView {
                 self.fling(-velocity);
             }
             Some(Gesture::WordSelecting { .. }) => self.show_menu(),
-            Some(Gesture::Handle { kind, .. }) => {
-                if kind == HandleKind::Caret {
+            Some(Gesture::CaretMoving) => {}
+            Some(Gesture::Handle { kind, moved, .. }) => {
+                if kind != HandleKind::Caret {
+                    self.show_menu();
+                } else if moved {
                     self.touch.caret_handle_until = now + self.profile.caret_handle_ms;
+                } else if self.touch.menu_shown {
+                    // A tap on the caret handle toggles the Paste menu.
+                    self.hide_menu();
                 } else {
                     self.show_menu();
                 }
@@ -317,7 +356,9 @@ impl EditorView {
             {
                 self.long_press(start.0, start.1);
             }
-            Some(Gesture::WordSelecting { .. }) | Some(Gesture::Handle { .. }) => {
+            Some(Gesture::WordSelecting { .. })
+            | Some(Gesture::CaretMoving)
+            | Some(Gesture::Handle { .. }) => {
                 let (x, y) = self.touch.finger;
                 let zone = self.profile.edge_scroll_zone;
                 let step = if y < zone {
@@ -359,7 +400,9 @@ impl EditorView {
             Some(Gesture::Pending { down_ms, .. }) => {
                 return Some((down_ms + self.profile.long_press_ms).saturating_sub(now));
             }
-            Some(Gesture::WordSelecting { .. }) | Some(Gesture::Handle { .. }) => {
+            Some(Gesture::WordSelecting { .. })
+            | Some(Gesture::CaretMoving)
+            | Some(Gesture::Handle { .. }) => {
                 let y = self.touch.finger.1;
                 let zone = self.profile.edge_scroll_zone;
                 if y < zone || y > self.height - zone {
@@ -380,6 +423,16 @@ impl EditorView {
             return;
         };
         self.finish_composition();
+        if self.profile.long_press == LongPressAction::MoveCaret {
+            self.select_quiet(pos, pos);
+            self.touch.gesture = Some(Gesture::CaretMoving);
+            self.push_effect(Effect::Haptic(HapticKind::LongPress));
+            if let Some(line) = self.endpoint_line(pos, Affinity::Downstream) {
+                self.set_magnifier(Some((line.x, line.center_y())));
+            }
+            self.request_redraw();
+            return;
+        }
         let (from, to) = self.word_range(pos).unwrap_or((pos, pos));
         self.select_quiet(from, to);
         self.touch.active = true;
@@ -389,6 +442,17 @@ impl EditorView {
             self.set_magnifier(Some((line.x, line.center_y())));
         }
         self.request_redraw();
+    }
+
+    fn move_caret_to(&mut self, x: f32, y: f32) {
+        let Some(Hit::Text { pos, affinity }) = self.hit_at(x, y) else {
+            return;
+        };
+        self.select_with_tick(pos, pos);
+        self.affinity = affinity;
+        if let Some(line) = self.endpoint_line(pos, affinity) {
+            self.set_magnifier(Some((line.x, line.center_y())));
+        }
     }
 
     fn extend_by_words(&mut self, anchor: (usize, usize), x: f32, y: f32) {
@@ -674,6 +738,13 @@ impl EditorView {
         }
     }
 
+    /// The platform closed the selection menu on its own (back button, a
+    /// tap elsewhere in the system UI).
+    pub fn selection_menu_dismissed(&mut self) {
+        self.touch.menu_shown = false;
+        self.touch.menu_wanted = false;
+    }
+
     /// Typing, keys or a mouse end touch selection mode.
     pub(crate) fn end_touch_mode(&mut self) {
         if self.touch.active || self.touch.menu_shown {
@@ -688,7 +759,7 @@ impl EditorView {
     pub fn is_touch_dragging(&self) -> bool {
         matches!(
             self.touch.gesture,
-            Some(Gesture::Handle { .. } | Gesture::WordSelecting { .. })
+            Some(Gesture::Handle { .. } | Gesture::WordSelecting { .. } | Gesture::CaretMoving)
         )
     }
 

@@ -35,8 +35,8 @@ pub use openrich_layout::Affinity;
 pub use pointer::{PointerButton, PointerEvent};
 pub use scroll::{FRAME_MS, VelocityTracker};
 pub use touch::{
-    Handle, HandleKind, HandleStyle, HapticKind, InteractionProfile, MenuItem, SelectionMenu,
-    TouchPhase,
+    Handle, HandleKind, HandleStyle, HapticKind, InteractionProfile, LongPressAction, MenuItem,
+    SelectionMenu, TouchPhase,
 };
 
 /// Space between the view's edges and the document.
@@ -255,10 +255,20 @@ impl EditorView {
     }
 
     pub fn resize(&mut self, width: f32, height: f32, scale: f32) {
+        // When the view shrinks under a visible caret (a soft keyboard
+        // opening), keep the caret on screen like platform text fields do.
+        let follow_caret = self.focused
+            && height < self.height
+            && self
+                .caret_rect()
+                .is_some_and(|r| r.y >= 0.0 && r.bottom() <= self.height);
         self.width = width;
         self.height = height;
         self.scale = scale;
         self.clamp_scroll();
+        if follow_caret {
+            self.scroll_into_view();
+        }
         self.request_redraw();
     }
 

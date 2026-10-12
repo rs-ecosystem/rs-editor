@@ -39,6 +39,9 @@ public final class OpenRichNative {
     /** A selection menu command: cut, copy, paste or selectAll. Returns clipboard text or null. */
     public static native String menuAction(long handle, String item, String clipboardText);
 
+    /** The system closed the selection menu on its own. */
+    public static native void menuDismissed(long handle);
+
     /** A key as a W3C key name ("Backspace", "Enter", "ArrowLeft", "z"...). */
     public static native boolean keyDown(long handle, String key, boolean shift, boolean ctrl, boolean alt);
 

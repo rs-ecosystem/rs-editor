@@ -124,6 +124,9 @@ final class SelectionUi extends ActionMode.Callback2 {
         items = next;
         if (mode == null) {
             mode = view.startActionMode(this, ActionMode.TYPE_FLOATING);
+            if (android.util.Log.isLoggable("OpenRichView", android.util.Log.DEBUG)) {
+                android.util.Log.d("OpenRichView", "startActionMode -> " + mode);
+            }
         } else {
             mode.invalidate();
             mode.invalidateContentRect();
@@ -210,7 +213,11 @@ final class SelectionUi extends ActionMode.Callback2 {
 
     @Override
     public void onDestroyActionMode(ActionMode destroyed) {
-        if (mode == destroyed) mode = null;
+        // Still current means the system closed it, not the editor.
+        if (mode == destroyed) {
+            mode = null;
+            OpenRichNative.menuDismissed(view.handle);
+        }
     }
 
     @Override
