@@ -18,6 +18,9 @@ public final class OpenRichNative {
 
     public static native void destroy(long handle);
 
+    /** Exposes the editor to TalkBack (AccessKit becomes the view's accessibility delegate). */
+    public static native void attachAccessibility(long handle, android.view.View view);
+
     public static native boolean attachSurface(long handle, Surface surface);
 
     public static native void resize(long handle, int width, int height, float density);

@@ -47,6 +47,7 @@ public final class OpenRichView extends SurfaceView implements SurfaceHolder.Cal
         setFocusable(true);
         setFocusableInTouchMode(true);
         getHolder().addCallback(this);
+        OpenRichNative.attachAccessibility(handle, this);
     }
 
     private static void log(String message) {

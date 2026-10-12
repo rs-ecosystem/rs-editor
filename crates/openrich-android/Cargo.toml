@@ -21,6 +21,8 @@ skia-safe = { version = "=0.153.3", features = ["gl", "textlayout"] }
 jni = "0.21"
 ndk = "0.9"
 khronos-egl = { version = "6", features = ["static", "no-pkg-config"] }
+accesskit = "0.25"
+accesskit_android = { version = "0.9", features = ["embedded-dex"] }
 
 [lints.rust]
 # JNI entry points need `#[no_mangle]` and raw handles.

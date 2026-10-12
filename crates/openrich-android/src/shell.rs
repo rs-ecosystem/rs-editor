@@ -3,9 +3,11 @@
 //! Every method takes the handle returned by `create` and must be called on
 //! the UI thread (Skia objects are not thread-safe).
 
-use jni::JNIEnv;
-use jni::objects::{JClass, JObject, JString};
+use accesskit::{ActionHandler, ActionRequest, ActivationHandler, TreeId, TreeUpdate};
+use accesskit_android::InjectingAdapter;
+use jni::objects::{GlobalRef, JClass, JObject, JString};
 use jni::sys::{jboolean, jfloat, jint, jlong, jstring};
+use jni::{JNIEnv, JavaVM};
 use khronos_egl as egl;
 use ndk::native_window::NativeWindow;
 use openrich_commands::{KeyEvent, KeyPlatform, Modifiers};
@@ -30,6 +32,34 @@ struct Gl {
 pub struct App {
     view: EditorView,
     gl: Option<Gl>,
+    /// TalkBack and other accessibility services (AccessKit).
+    accessibility: Option<InjectingAdapter>,
+    /// The Java view, to tell it about changes made by accessibility actions.
+    host: Option<(JavaVM, GlobalRef)>,
+}
+
+/// Answers AccessKit on the UI thread, where the Java delegate calls in.
+struct Accessibility(jlong);
+
+impl ActivationHandler for Accessibility {
+    fn request_initial_tree(&mut self) -> Option<TreeUpdate> {
+        Some(app(self.0).view.accessibility_tree())
+    }
+}
+
+impl ActionHandler for Accessibility {
+    fn do_action(&mut self, request: ActionRequest) {
+        let app = app(self.0);
+        if !app.view.accessibility_action(&request) {
+            return;
+        }
+        // Let the Java view redraw and resync the IME.
+        if let Some((vm, host)) = &app.host
+            && let Ok(mut env) = vm.attach_current_thread()
+        {
+            let _ = env.call_method(host.as_obj(), "afterInput", "()V", &[]);
+        }
+    }
 }
 
 fn app<'a>(handle: jlong) -> &'a mut App {
@@ -290,7 +320,12 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_create(
         bottom: 24.0,
         left: 20.0,
     });
-    Box::into_raw(Box::new(App { view, gl: None })) as jlong
+    Box::into_raw(Box::new(App {
+        view,
+        gl: None,
+        accessibility: None,
+        host: None,
+    })) as jlong
 }
 
 #[unsafe(no_mangle)]
@@ -378,6 +413,18 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_render(
 ) -> jlong {
     let app = app(handle);
     let resizing = app.gl.as_mut().is_some_and(|gl| gl.frame(&mut app.view));
+    // Changes since the last frame, while an accessibility service listens.
+    if let Some(adapter) = app.accessibility.as_mut() {
+        let view = &mut app.view;
+        adapter.update_if_active(|| {
+            view.accessibility_update().unwrap_or(TreeUpdate {
+                nodes: Vec::new(),
+                tree: None,
+                tree_id: TreeId::ROOT,
+                focus: openrich_view::EDITOR_NODE,
+            })
+        });
+    }
     if resizing {
         return 0;
     }
@@ -705,4 +752,28 @@ pub extern "system" fn Java_dev_openrich_android_OpenRichNative_imeCursorInfo(
         .collect();
     let info = json!({"caret": caret, "bounds": bounds}).to_string();
     new_string(&mut env, &info)
+}
+
+/// Makes the editor visible to TalkBack: AccessKit installs itself as the
+/// view's accessibility delegate.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_openrich_android_OpenRichNative_attachAccessibility(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    view: JObject,
+) {
+    let app = app(handle);
+    if app.accessibility.is_some() {
+        return;
+    }
+    if let (Ok(vm), Ok(host)) = (env.get_java_vm(), env.new_global_ref(&view)) {
+        app.host = Some((vm, host));
+    }
+    app.accessibility = Some(InjectingAdapter::new(
+        &mut env,
+        &view,
+        Accessibility(handle),
+        Accessibility(handle),
+    ));
 }
