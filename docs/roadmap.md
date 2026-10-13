@@ -9,7 +9,7 @@
 | P0 | Kerangka workspace, CI, ADR, spike Skia (WASM, Android) | **Selesai.** Lihat [laporan spike](spikes/p0-web-android.md). |
 | P1 | Core headless: model, transform, state, history, command, extension, StarterKit | **Selesai** |
 | P2 | Layout inkremental, render Skia, view, tema shadcn, dev harness desktop | **Selesai** |
-| P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Berjalan.** Milestone 1 dan 2 selesai |
+| P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Hampir selesai.** Milestone 1–2 selesai, milestone 3 tinggal uji screen reader sungguhan dan Firefox |
 | P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit, library Kotlin dan Compose | **Selesai.** Navigasi TalkBack dan Samsung Keyboard jadi tugas lanjutan |
 | P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | Belum dimulai |
 | P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | Belum dimulai |
