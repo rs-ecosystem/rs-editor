@@ -11,14 +11,14 @@
 | S3 `InputConnection` | Keyboard bawaan Xiaomi (`com.preff.kb`): ketik, kapitalisasi otomatis, saran kata, komposisi ulang, Backspace, Enter | Berhasil; Gboard dan Samsung Keyboard belum dicoba |
 | S4 EditContext dan fallback textarea | Keduanya berjalan di Chromium (ketik, Enter, Backspace, input rule, undo/redo) | Berhasil di Chromium; Safari dan Firefox belum dicoba |
 
-## S1 — Web (`crates/openrich-web`)
+## S1 — Web (`crates/rs-editor-web`)
 
-- **Build:** `crates/openrich-web/build.sh` (emsdk 6.0.12, Rust 1.98, `wasm32-unknown-emscripten`). Skia memakai binary prebuilt `ganesh-gl-jpegd-jpege-pdf-textlayout`.
+- **Build:** `crates/rs-editor-web/build.sh` (emsdk 6.0.12, Rust 1.98, `wasm32-unknown-emscripten`). Skia memakai binary prebuilt `ganesh-gl-jpegd-jpege-pdf-textlayout`.
 - **Masalah model exception.** rustc selalu men-link dengan `-fwasm-exceptions`. Sementara itu, pustaka C di dalam Skia prebuilt (libpng, libjpeg, FreeType) memakai setjmp/longjmp gaya JavaScript (`invoke_*`), dan emsdk 6 menolak kombinasi keduanya.
   - **Solusi:** build web memakai `panic = "abort"`, dan `emcc-link.sh` membuang `-fwasm-exceptions`, memakai `-sSUPPORT_LONGJMP=emscripten`, serta mendefinisikan tag `__cpp_exception` yang masih dirujuk std.
   - **Alternatif jangka panjang:** build Skia sendiri dengan wasm SjLj. Ini baru perlu kalau web membutuhkan unwinding.
 - **Input:**
-  - EditContext dipakai untuk Chrome/Edge. Teks yang dilihat IME adalah blok teks di sekitar caret (protokol `ime_*` di `openrich-view`).
+  - EditContext dipakai untuk Chrome/Edge. Teks yang dilihat IME adalah blok teks di sekitar caret (protokol `ime_*` di `rs-editor-view`).
   - Textarea tersembunyi dipakai sebagai fallback (`?input=textarea` untuk memaksanya). Textarea tidak pernah dipakai untuk geometri.
 - **Ukuran (Chromium, macOS):** muat 150–750 ms (frame pertama menyertakan kompilasi shader); frame berikutnya 0,3–1,5 ms.
 - **Belum:**
@@ -26,7 +26,7 @@
   - Safari, Firefox, dan Chrome Android belum diuji.
   - `characterboundsupdate` masih memakai kotak caret untuk semua karakter.
 
-## S2 — Android (`crates/openrich-android`, `platforms/android`)
+## S2 — Android (`crates/rs-editor-android`, `platforms/android`)
 
 - **Arsitektur:**
   - Java memegang `SurfaceView`, loop `Choreographer`, dan `InputConnection`.

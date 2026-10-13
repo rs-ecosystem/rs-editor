@@ -7,17 +7,17 @@ plugins {
 }
 
 android {
-    namespace = "dev.openrich.sample"
+    namespace = "com.rseditor.sample"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.openrich.sample"
+        applicationId = "com.rseditor.sample"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "0.1"
         ndk {
-            abiFilters += providers.gradleProperty("openrichAbi").orNull ?: "arm64-v8a"
+            abiFilters += providers.gradleProperty("rs-editorAbi").orNull ?: "arm64-v8a"
         }
     }
 
@@ -42,7 +42,7 @@ android {
 }
 
 dependencies {
-    implementation(project(":openrich-compose"))
+    implementation(project(":rs-editor-compose"))
     implementation(libs.androidx.core.ktx)
     // Newer lifecycle than activity-compose asks for (as in rs-organizer).
     implementation(libs.androidx.lifecycle.runtime.ktx)

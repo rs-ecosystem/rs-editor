@@ -3,9 +3,9 @@
 
     platforms/android/package-native.py [--release] [--arch arm64|x86_64]
 
-Writes into platforms/android/openrich/generated/:
+Writes into platforms/android/rs-editor/generated/:
   kotlin/   the BoltFFI Kotlin class (NativeEditor) and its JNI glue
-  jniLibs/  libopenrich_android.so per ABI
+  jniLibs/  librs_editor_android.so per ABI
 
 Same approach as rs-organizer's tools/package-android.py: BoltFFI 0.29.3's
 `pack` links with whole-archive, which duplicates the HarfBuzz objects in
@@ -66,7 +66,7 @@ def main():
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[2]
-    crate = root / "crates/openrich-android"
+    crate = root / "crates/rs-editor-android"
     config = android_config(crate / "boltffi.toml")
     android = config["targets.android"]
     kotlin = (crate / config["targets.android.kotlin"]["output"]).resolve()
@@ -104,14 +104,14 @@ def main():
             f"CXX_{under}": str(cpp),
             f"AR_{under}": str(bin_dir / "llvm-ar"),
         })
-        output = run("cargo", "rustc", "--lib", "--locked", "-p", "openrich-android", "--target", triple,
+        output = run("cargo", "rustc", "--lib", "--locked", "-p", "rs-editor-android", "--target", triple,
                      "--crate-type", "staticlib", *build_args,
                      "--", "--cfg", "boltffi_binding_expansion", "--print", "native-static-libs",
                      cwd=root, env=env, capture=True)
         print(output, end="")
         native_libs = next((line.split("native-static-libs:", 1)[1].split()
                             for line in output.splitlines() if "native-static-libs:" in line), [])
-        archive = target_dir / triple / profile / "libopenrich_android.a"
+        archive = target_dir / triple / profile / "librs_editor_android.a"
 
         work = target_dir / "boltffi-android" / triple / profile
         work.mkdir(parents=True, exist_ok=True)
@@ -123,8 +123,8 @@ def main():
         # Nothing references our own JNI functions at link time; keep them.
         symbols = subprocess.run([bin_dir / "llvm-nm", "--defined-only", "-j", archive],
                                  check=True, capture_output=True, text=True).stdout.split()
-        keep = sorted({s for s in symbols if s.startswith("Java_dev_openrich_android_")})
-        destination = libs / abi / "libopenrich_android.so"
+        keep = sorted({s for s in symbols if s.startswith("Java_com_rseditor_android_")})
+        destination = libs / abi / "librs_editor_android.so"
         destination.parent.mkdir(parents=True, exist_ok=True)
         run(cpp, "-shared", "-static-libstdc++", "-o", destination, glue,
             *[f"-Wl,--undefined={s}" for s in keep], archive,

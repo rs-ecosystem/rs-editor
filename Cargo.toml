@@ -10,17 +10,17 @@ edition = "2024"
 rust-version = "1.90"
 
 [workspace.dependencies]
-openrich-model = { path = "crates/openrich-model" }
-openrich-transform = { path = "crates/openrich-transform" }
-openrich-state = { path = "crates/openrich-state" }
-openrich-history = { path = "crates/openrich-history" }
-openrich-text = { path = "crates/openrich-text" }
-openrich-commands = { path = "crates/openrich-commands" }
-openrich-extensions = { path = "crates/openrich-extensions" }
-openrich-theme = { path = "crates/openrich-theme" }
-openrich-layout = { path = "crates/openrich-layout" }
-openrich-view = { path = "crates/openrich-view" }
-openrich-markup = { path = "crates/openrich-markup" }
+rs-editor-model = { path = "crates/rs-editor-model" }
+rs-editor-transform = { path = "crates/rs-editor-transform" }
+rs-editor-state = { path = "crates/rs-editor-state" }
+rs-editor-history = { path = "crates/rs-editor-history" }
+rs-editor-text = { path = "crates/rs-editor-text" }
+rs-editor-commands = { path = "crates/rs-editor-commands" }
+rs-editor-extensions = { path = "crates/rs-editor-extensions" }
+rs-editor-theme = { path = "crates/rs-editor-theme" }
+rs-editor-layout = { path = "crates/rs-editor-layout" }
+rs-editor-view = { path = "crates/rs-editor-view" }
+rs-editor-markup = { path = "crates/rs-editor-markup" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

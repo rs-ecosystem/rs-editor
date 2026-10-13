@@ -51,6 +51,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --release -p openrich-transform -p openrich-extensions -p openrich-markup proptests
+      - run: cargo test --release -p rs-editor-transform -p rs-editor-extensions -p rs-editor-markup proptests
         env:
           PROPTEST_CASES: "20000"

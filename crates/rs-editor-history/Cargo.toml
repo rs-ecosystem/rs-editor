@@ -1,0 +1,19 @@
+[package]
+name = "rs-editor-history"
+description = "Undo/redo berbasis step terbalik untuk Rs Editor (port prosemirror-history)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rs-editor-model.workspace = true
+rs-editor-transform.workspace = true
+rs-editor-state.workspace = true
+
+[dev-dependencies]
+rs-editor-model = { workspace = true, features = ["test-util"] }
+rs-editor-state = { workspace = true, features = ["test-util"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

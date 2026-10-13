@@ -1,6 +1,6 @@
-# Roadmap OpenRich v2
+# Roadmap Rs Editor v2
 
-> Pembaruan terakhir: 2026-10-13. Status hanya mencerminkan apa yang sudah ada dan teruji di repo. Roadmap v1 diarsipkan di [legacy-roadmap-v1.md](legacy-roadmap-v1.md). Arsitekturnya dijelaskan di [ADR 0007](adr/0007-openrich-v2-architecture.md).
+> Pembaruan terakhir: 2026-10-13. Status hanya mencerminkan apa yang sudah ada dan teruji di repo. Roadmap v1 diarsipkan di [legacy-roadmap-v1.md](legacy-roadmap-v1.md). Arsitekturnya dijelaskan di [ADR 0007](adr/0007-rs-editor-v2-architecture.md).
 
 ## Ringkasan
 
@@ -22,13 +22,13 @@ Urutan pengerjaan: P4 dikerjakan sebelum P3. Interaksi sentuh dibangun dan diuji
 
 | Crate | Isi | Bukti |
 | --- | --- | --- |
-| `openrich-model` | Schema dengan content expression (DFA), mark set ternormalisasi, pohon node immutable, `ResolvedPos`, replace, JSON Tiptap | Port tes model ProseMirror dan tes UTF-16/JSON |
-| `openrich-transform` | Step, `StepMap`/`Mapping`, replace dengan fitting, lift/wrap/split/join, mark, set block type | Seluruh `test-trans.ts` dan `test-mapping.ts` diport; property test transform acak |
-| `openrich-state` | `Selection` (text, node, all), bookmark, `Transaction`, `EditorState`, plugin, `Clock` | Port `test-selection.ts` dan `test-state.ts` |
-| `openrich-history` | Undo/redo dari step terbalik, pengelompokan waktu dan komposisi IME, rebase kolaborasi | Port `test-history.ts` |
-| `openrich-commands` | Command dasar, list, keymap per platform | Port `test-commands.ts`, tes list dan keymap |
-| `openrich-text` | Batas grapheme dan kata dalam UTF-16 | Tes emoji ZWJ, kombinasi diakritik, kata |
-| `openrich-extensions` | Sistem extension, StarterKit, input rule markdown, `Editor` headless | Tes end-to-end dan property test sesi editing acak |
+| `rs-editor-model` | Schema dengan content expression (DFA), mark set ternormalisasi, pohon node immutable, `ResolvedPos`, replace, JSON Tiptap | Port tes model ProseMirror dan tes UTF-16/JSON |
+| `rs-editor-transform` | Step, `StepMap`/`Mapping`, replace dengan fitting, lift/wrap/split/join, mark, set block type | Seluruh `test-trans.ts` dan `test-mapping.ts` diport; property test transform acak |
+| `rs-editor-state` | `Selection` (text, node, all), bookmark, `Transaction`, `EditorState`, plugin, `Clock` | Port `test-selection.ts` dan `test-state.ts` |
+| `rs-editor-history` | Undo/redo dari step terbalik, pengelompokan waktu dan komposisi IME, rebase kolaborasi | Port `test-history.ts` |
+| `rs-editor-commands` | Command dasar, list, keymap per platform | Port `test-commands.ts`, tes list dan keymap |
+| `rs-editor-text` | Batas grapheme dan kata dalam UTF-16 | Tes emoji ZWJ, kombinasi diakritik, kata |
+| `rs-editor-extensions` | Sistem extension, StarterKit, input rule markdown, `Editor` headless | Tes end-to-end dan property test sesi editing acak |
 
 StarterKit mencakup paragraf, heading, blockquote, code block, garis horizontal, hard break, bullet/ordered/task list, gambar, link (dengan autolink dan validasi href), bold, italic, underline, strike, code, highlight, subscript, superscript, perataan teks, typography, history, character count, dan placeholder.
 
@@ -36,10 +36,10 @@ StarterKit mencakup paragraf, heading, blockquote, code block, garis horizontal,
 
 | Crate | Isi | Bukti |
 | --- | --- | --- |
-| `openrich-theme` | Token shadcn light/dark dari format `design/tokens.json`, tipografi heading/paragraf/kode, spacing editor | Tes parsing token dan warna |
-| `openrich-layout` | Font Geist/Geist Mono terbundel (variable, wght 400–800) plus Noto Arab/Devanagari. Layout `SkParagraph` yang malas per blok top-level: fragment di-cache per node, blok jauh dari viewport memakai tinggi perkiraan, posisi blok disimpan per chunk 64 blok. Caret dengan affinity, hit-test, seleksi, navigasi vertikal dan visual, render dokumen (bullet, nomor, checkbox, quote, code, garis, gambar) | 13 tes, termasuk layout incremental yang harus identik dengan layout dari nol setelah edit di batas chunk |
-| `openrich-view` | `EditorView`: keyboard per platform, mouse, checkbox task, komposisi IME sebagai satu langkah undo, clipboard teks/JSON, kedip caret, placeholder. Window layout ±1 layar dengan scroll anchoring. Scroll halus (roda) dan momentum (fling) dengan `VelocityTracker`. Pohon aksesibilitas AccessKit: text run per baris dengan geometri karakter, seleksi, action pilih teks, ketik, dan centang task | 25 tes headless dan 4 golden pixel test (`tests/golden`) |
-| `openrich-desktop` | Shell winit + softbuffer (raster CPU), keyboard, IME, mouse, scroll, clipboard, adapter `accesskit_winit`; contoh `perf` | Diuji manual di macOS, termasuk pohon AX yang terbaca sistem |
+| `rs-editor-theme` | Token shadcn light/dark dari format `design/tokens.json`, tipografi heading/paragraf/kode, spacing editor | Tes parsing token dan warna |
+| `rs-editor-layout` | Font Geist/Geist Mono terbundel (variable, wght 400–800) plus Noto Arab/Devanagari. Layout `SkParagraph` yang malas per blok top-level: fragment di-cache per node, blok jauh dari viewport memakai tinggi perkiraan, posisi blok disimpan per chunk 64 blok. Caret dengan affinity, hit-test, seleksi, navigasi vertikal dan visual, render dokumen (bullet, nomor, checkbox, quote, code, garis, gambar) | 13 tes, termasuk layout incremental yang harus identik dengan layout dari nol setelah edit di batas chunk |
+| `rs-editor-view` | `EditorView`: keyboard per platform, mouse, checkbox task, komposisi IME sebagai satu langkah undo, clipboard teks/JSON, kedip caret, placeholder. Window layout ±1 layar dengan scroll anchoring. Scroll halus (roda) dan momentum (fling) dengan `VelocityTracker`. Pohon aksesibilitas AccessKit: text run per baris dengan geometri karakter, seleksi, action pilih teks, ketik, dan centang task | 25 tes headless dan 4 golden pixel test (`tests/golden`) |
+| `rs-editor-desktop` | Shell winit + softbuffer (raster CPU), keyboard, IME, mouse, scroll, clipboard, adapter `accesskit_winit`; contoh `perf` | Diuji manual di macOS, termasuk pohon AX yang terbaca sistem |
 
 Ukuran saat ini (raster CPU, macOS, `--release`, contoh `perf`):
 
@@ -51,12 +51,12 @@ Ukuran saat ini (raster CPU, macOS, `--release`, contoh `perf`):
 
 Pada 100.000 blok, sisa biaya ada di model dokumen: setiap perubahan menyalin array anak level atas (perilaku yang sama dengan ProseMirror). Kalau dokumen sepanjang itu jadi target, anak level atas perlu disimpan dalam pohon persisten.
 
-Golden pixel test memakai `OPENRICH_UPDATE_GOLDEN=1 cargo test -p openrich-view --test golden` untuk memperbarui gambar. Kegagalan menulis gambar aktual dan diff ke `target/golden-failures/`, dan CI mengunggahnya sebagai artifact. Golden disimpan per OS (`tests/golden/macos`, `tests/golden/linux`): prebuilt Skia untuk Apple merasterisasi tepi glyph dengan CoreText, sedangkan Linux memakai FreeType, jadi tepinya sedikit berbeda walaupun layout identik.
+Golden pixel test memakai `RS_EDITOR_UPDATE_GOLDEN=1 cargo test -p rs-editor-view --test golden` untuk memperbarui gambar. Kegagalan menulis gambar aktual dan diff ke `target/golden-failures/`, dan CI mengunggahnya sebagai artifact. Golden disimpan per OS (`tests/golden/macos`, `tests/golden/linux`): prebuilt Skia untuk Apple merasterisasi tepi glyph dengan CoreText, sedangkan Linux memakai FreeType, jadi tepinya sedikit berbeda walaupun layout identik.
 
 Menjalankan harness:
 
 ```bash
-cargo run -p openrich-desktop --release
+cargo run -p rs-editor-desktop --release
 ```
 
 Argumen `--dark` memakai tema gelap, `--large 10000` membuka dokumen panjang, dan F2 mengganti tema.
@@ -73,7 +73,7 @@ Target: editor terasa seperti kolom teks bawaan Android, bukan sekadar tampil be
 
 ### Milestone 1: seleksi sentuh terasa native · Selesai
 
-Sudah ada dan diuji (15 tes skenario headless di `openrich-view/src/touch.rs`, plus uji manual di perangkat 23049PCD8G):
+Sudah ada dan diuji (15 tes skenario headless di `rs-editor-view/src/touch.rs`, plus uji manual di perangkat 23049PCD8G):
 
 - Ketuk menaruh caret dengan handle tetesan yang hilang setelah 4 detik; ketuk caret lagi memunculkan menu Paste/Select all.
 - Tekan lama memilih kata (haptik `LONG_PRESS`, magnifier), lalu geser memperluas per kata.
@@ -94,7 +94,7 @@ Belum:
 
 Rencana awal milestone:
 
-Inti di Rust (`openrich-view`), dipakai juga oleh web di HP (P3) dan iOS (P6):
+Inti di Rust (`rs-editor-view`), dipakai juga oleh web di HP (P3) dan iOS (P6):
 
 - Pengenal gesture sentuh: ketuk menaruh caret, ketuk caret memunculkan menu (Tempel), ketuk dua kali dan tekan lama memilih kata, ketuk tiga kali memilih paragraf.
 - Handle seleksi: dua handle untuk rentang dan satu handle di bawah caret. Area sentuhnya lebih besar dari gambarnya, menarik handle cepat memperluas per kata, menarik ke tepi layar memicu auto-scroll, dan handle tidak boleh melewati handle lainnya.
@@ -118,7 +118,7 @@ Tes: skenario gesture headless (posisi, granularitas, auto-scroll, urutan sinyal
 Sudah:
 
 - `CursorAnchorInfo` (posisi caret dengan baseline, batas tiap karakter komposisi, batas editor untuk tulisan tangan) dikirim saat IME memintanya lewat `requestCursorUpdates`. Gboard memintanya dalam mode MONITOR, dan `dumpsys input_method` di perangkat menunjukkan posisi caret, baseline, batas editor dan matriks layar yang benar. Keyboard Xiaomi tidak memintanya.
-- Crate `openrich-markup`: HTML ↔ dokumen. Parser bergaya ProseMirror (selalu menghasilkan dokumen valid; Google Docs, Word, GitHub, tag soup), serializer bergaya Tiptap dengan JSON slice tersemat sehingga salin-tempel di OpenRich sendiri persis. 11 tes termasuk property test tag soup.
+- Crate `rs-editor-markup`: HTML ↔ dokumen. Parser bergaya ProseMirror (selalu menghasilkan dokumen valid; Google Docs, Word, GitHub, tag soup), serializer bergaya Tiptap dengan JSON slice tersemat sehingga salin-tempel di Rs Editor sendiri persis. 11 tes termasuk property test tag soup.
 - Salin menghasilkan teks + HTML dan tempel memakai HTML lebih dulu, di desktop (arboard), web (`text/html`) dan Android (`ClipData.newHtmlText`). Di perangkat: kata tebal yang disalin lalu ditempel tetap tebal.
 - TalkBack lewat AccessKit (`accesskit_android`, delegate tertanam sebagai dex). `uiautomator dump` di perangkat menunjukkan editor sebagai `EditText` berisi seluruh teks dokumen, blok sebagai `View`, list sebagai `ListView`, task sebagai `CheckBox` dengan status yang benar, semuanya dengan posisi di layar.
 
@@ -127,7 +127,7 @@ Belum: Samsung Keyboard (tidak ada di perangkat uji), `addVisibleLineBounds` (AP
 **Tugas lanjutan: TalkBack.** Uji langsung di perangkat (TalkBack 17.0.1, 2026-10-13):
 
 - Berjalan: editor dibacakan sebagai kolom edit berisi seluruh teks; struktur (judul, paragraf, list, checkbox dengan statusnya) dan posisinya terekspos.
-- Probe debug yang meniru TalkBack (`adb shell am broadcast -a dev.openrich.demo.A11Y_PROBE --ei granularity 4`, ada di demo Java lama sampai commit fefb288) memindahkan kursor per baris dengan benar. Pemetaan posisi di batas paragraf sudah diperbaiki, dan algoritma traversal AccessKit diuji di `screen_reader_line_steps_move_forward_through_every_line`.
+- Probe debug yang meniru TalkBack (`adb shell am broadcast -a com.rseditor.demo.A11Y_PROBE --ei granularity 4`, ada di demo Java lama sampai commit fefb288) memindahkan kursor per baris dengan benar. Pemetaan posisi di batas paragraf sudah diperbaiki, dan algoritma traversal AccessKit diuji di `screen_reader_line_steps_move_forward_through_every_line`.
 - Belum berjalan: dengan kontrol membaca "Lines", usapan TalkBack di perangkat tidak mengirim `ACTION_NEXT_AT_MOVEMENT_GRANULARITY` (log hanya menunjukkan lepas/pasang fokus), sehingga pengguna tidak bisa bergerak per baris. Juga, usap kanan/kiri tidak berpindah per judul/paragraf karena semuanya berada di dalam satu kolom edit.
 - Arah: pelajari cara Chrome mengekspos `contenteditable` ke TalkBack (navigasi per paragraf dan judul tanpa membaca dua kali) dan terapkan lewat AccessKit; cari tahu kenapa TalkBack tidak mengirim aksi granularitas ke node kita.
 
@@ -141,18 +141,18 @@ Rencana awal milestone:
 ### Milestone 3: paket library · Selesai
 
 - **Binding Kotlin lewat BoltFFI 0.29.3** (sama dengan rs-organizer):
-  - `crates/openrich-android/src/api.rs` mengekspor kelas `NativeEditor`, yang mencakup konten (JSON, HTML, teks), perintah, sentuhan, IME, dan clipboard. Nilai terstruktur dikirim sebagai string JSON.
-  - API ini juga dibangun di host, sehingga bisa dites dengan `cargo test -p openrich-android`. Salah satu tesnya memastikan setiap perintah di `OpenRichChain` Kotlin benar-benar ada.
+  - `crates/rs-editor-android/src/api.rs` mengekspor kelas `NativeEditor`, yang mencakup konten (JSON, HTML, teks), perintah, sentuhan, IME, dan clipboard. Nilai terstruktur dikirim sebagai string JSON.
+  - API ini juga dibangun di host, sehingga bisa dites dengan `cargo test -p rs-editor-android`. Salah satu tesnya memastikan setiap perintah di `RsEditorChain` Kotlin benar-benar ada.
   - JNI tangan hanya tersisa untuk hal yang butuh objek Java (`shell.rs`): Surface/EGL dan AccessKit.
 - **Packaging:** `platforms/android/package-native.py` menyalin pendekatan rs-organizer. Skrip ini menjalankan build binding-expansion, mengompilasi `jni_glue.c`, lalu me-link staticlib dengan clang++ tanpa whole-archive (menghindari simbol HarfBuzz ganda dari Skia), plus `-z max-page-size=16384`.
   - BoltFFI membaca metadata dari build host memakai variabel lingkungan yang tidak dilacak Cargo. Karena itu skrip memakai target dir terpisah (`target/boltffi-metadata`).
 - **Proyek Gradle (Kotlin DSL, versi sama dengan rs-organizer):**
-  - `:openrich` berisi `OpenRichEditorView` dengan API ala Tiptap:
+  - `:rs-editor` berisi `RsEditorView` dengan API ala Tiptap:
     - konten: `json`, `html`, `text`, `isEditable`;
     - perintah: `chain().focus().toggleBold().run()`, `can()…run()`, `isActive`, `getAttributes`;
     - `OnChangeListener` yang dipicu oleh `revision`.
     - Konten awal diberikan lewat konstruktor, sehingga undo tidak bisa mengosongkan dokumen.
-  - `:openrich-compose` berisi `OpenRichEditor` dan `rememberOpenRichEditorState`. Pembacaan seperti `isActive` bersifat observable, jadi toolbar ikut berubah saat seleksi berpindah.
+  - `:rs-editor-compose` berisi `RsEditor` dan `rememberRsEditorState`. Pembacaan seperti `isActive` bersifat observable, jadi toolbar ikut berubah saat seleksi berpindah.
   - `:sample` adalah aplikasi Compose dengan toolbar di atas keyboard. Tombol menyala saat aktif dan nonaktif bila `can()` bernilai false.
 - **Perbaikan inti yang ditemukan lewat toolbar:** dry run `chain` sebelumnya memeriksa setiap perintah terhadap state awal. Akibatnya `can()` untuk perintah gabungan (misalnya bullet list → task list, yaitu `clearNodes` lalu `wrapInList`) salah bernilai false. Sekarang dry run mensimulasikan rantainya, sama seperti Tiptap.
 - **Uji di perangkat (Gboard):**
@@ -165,7 +165,7 @@ Rencana awal milestone:
 
 ## Berikutnya
 
-1. **P3 (web):** paket `@openrich/web`, clipboard HTML/Markdown, DOM ARIA dari pohon aksesibilitas, font emoji/CJK yang dimuat bertahap, uji di Safari, Firefox dan Chrome Android. Seleksi sentuh untuk web di HP memakai inti dari P4.
+1. **P3 (web):** paket `@rs-editor/web`, clipboard HTML/Markdown, DOM ARIA dari pohon aksesibilitas, font emoji/CJK yang dimuat bertahap, uji di Safari, Firefox dan Chrome Android. Seleksi sentuh untuk web di HP memakai inti dari P4.
 2. **Tugas lanjutan Android:** navigasi TalkBack (lihat milestone 2), Samsung Keyboard, `addVisibleLineBounds`, paket AAR/Maven.
 3. **Desktop (P7):** menu klik kanan Potong/Salin/Tempel memakai sinyal `SelectionMenu` yang sama.
 

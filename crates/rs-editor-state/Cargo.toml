@@ -1,0 +1,21 @@
+[package]
+name = "rs-editor-state"
+description = "EditorState, Selection, Transaction dan plugin Rs Editor (port prosemirror-state)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+test-util = ["rs-editor-model/test-util"]
+
+[dependencies]
+rs-editor-model.workspace = true
+rs-editor-transform.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+rs-editor-model = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

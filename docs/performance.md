@@ -1,4 +1,4 @@
-# Performa demo OpenRich
+# Performa demo Rs Editor
 
 ## Jalur interaksi
 
@@ -35,19 +35,19 @@ Jalankan demo lalu perhatikan panel saat drag, menahan panah, mengetik, dan resi
 Tes interaksi murni dapat dijalankan dengan:
 
 ```sh
-node --test crates/openrich-demo/tests/interaction.test.mjs
+node --test crates/rs-editor-demo/tests/interaction.test.mjs
 ```
 
 Untuk tes payload/geometri asli, jalankan host terpisah agar seleksi sesi pengguna tidak terganggu:
 
 ```sh
-cargo run -p openrich-demo -- 127.0.0.1:4174
+cargo run -p rs-editor-demo -- 127.0.0.1:4174
 ```
 
 Di terminal lain:
 
 ```sh
-OPENRICH_DEMO_URL=http://127.0.0.1:4174 node --test crates/openrich-demo/tests/scene.test.mjs
+RS_EDITOR_DEMO_URL=http://127.0.0.1:4174 node --test crates/rs-editor-demo/tests/scene.test.mjs
 ```
 
 Tes membandingkan hit lokal dengan Skia pada tiga skala layar dan memulihkan seleksi awal setelah selesai. Browser HUD juga mengekspos jumlah request dan sampel melalui atribut `data-*` pada `.performance-hud` untuk pemeriksaan pengembang.

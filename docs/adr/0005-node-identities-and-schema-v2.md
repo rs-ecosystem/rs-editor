@@ -1,6 +1,6 @@
 # ADR 0005: Identitas node dan schema dokumen v2
 
-- Status: digantikan oleh [ADR 0007](0007-openrich-v2-architecture.md)
+- Status: digantikan oleh [ADR 0007](0007-rs-editor-v2-architecture.md)
 - Tanggal: 2026-10-11
 
 ## Konteks

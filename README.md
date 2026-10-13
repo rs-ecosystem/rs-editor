@@ -1,8 +1,8 @@
-# OpenRich
+# Rs Editor
 
-OpenRich adalah library rich text editor dalam Rust yang dirender dengan Skia. Targetnya web, Android, iOS, macOS, Windows dan Linux, dengan tampilan dan rasa yang sama di semua platform, fitur setara Tiptap, dan gaya shadcn/ui.
+Rs Editor adalah library rich text editor dalam Rust yang dirender dengan Skia. Targetnya web, Android, iOS, macOS, Windows dan Linux, dengan tampilan dan rasa yang sama di semua platform, fitur setara Tiptap, dan gaya shadcn/ui.
 
-Nama ini masih nama kerja. Arsitekturnya dijelaskan di [ADR 0007](docs/adr/0007-openrich-v2-architecture.md), dan statusnya di [roadmap](docs/roadmap.md).
+Sebelumnya bernama OpenRich; implementasi v1 di `legacy/` dan dokumen v1 yang diarsipkan masih memakai nama lama. Arsitekturnya dijelaskan di [ADR 0007](docs/adr/0007-rs-editor-v2-architecture.md), dan statusnya di [roadmap](docs/roadmap.md).
 
 ## Status
 
@@ -13,7 +13,7 @@ Implementasi v1 (server HTTP + DOM mirror) dibekukan di [`legacy/`](legacy/) seb
 ## Contoh
 
 ```rust
-use openrich_extensions::{Editor, EditorOptions};
+use rs_editor_extensions::{Editor, EditorOptions};
 use serde_json::json;
 
 let mut editor = Editor::new(EditorOptions {
@@ -36,13 +36,13 @@ Command dipanggil dengan nama dan argumen JSON (`run`, `can`, `chain`), sehingga
 
 ```text
 crates/
-├── openrich-model/       # schema, node immutable, posisi UTF-16, JSON Tiptap
-├── openrich-transform/   # step, mapping, replace/lift/wrap/split/join
-├── openrich-state/       # EditorState, Selection, Transaction, plugin
-├── openrich-history/     # undo/redo dari step terbalik
-├── openrich-commands/    # command editing, list, keymap
-├── openrich-text/        # batas grapheme dan kata (UTF-16)
-└── openrich-extensions/  # extension Tiptap-style, StarterKit, Editor headless
+├── rs-editor-model/       # schema, node immutable, posisi UTF-16, JSON Tiptap
+├── rs-editor-transform/   # step, mapping, replace/lift/wrap/split/join
+├── rs-editor-state/       # EditorState, Selection, Transaction, plugin
+├── rs-editor-history/     # undo/redo dari step terbalik
+├── rs-editor-commands/    # command editing, list, keymap
+├── rs-editor-text/        # batas grapheme dan kata (UTF-16)
+└── rs-editor-extensions/  # extension Tiptap-style, StarterKit, Editor headless
 legacy/                   # implementasi v1, tidak lagi dikembangkan
 ```
 
@@ -61,7 +61,7 @@ cargo test --workspace
 Property test bisa dijalankan lebih lama dengan `PROPTEST_CASES`, misalnya:
 
 ```sh
-PROPTEST_CASES=20000 cargo test --release -p openrich-transform -p openrich-extensions proptests
+PROPTEST_CASES=20000 cargo test --release -p rs-editor-transform -p rs-editor-extensions proptests
 ```
 
 ## Lisensi

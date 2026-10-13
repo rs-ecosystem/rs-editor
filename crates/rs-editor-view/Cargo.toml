@@ -1,0 +1,27 @@
+[package]
+name = "rs-editor-view"
+description = "EditorView Rs Editor: input, gesture, IME, scroll dan painting lintas platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rs-editor-model.workspace = true
+rs-editor-transform.workspace = true
+rs-editor-state.workspace = true
+rs-editor-history.workspace = true
+rs-editor-commands.workspace = true
+rs-editor-extensions.workspace = true
+rs-editor-text.workspace = true
+rs-editor-theme.workspace = true
+rs-editor-layout.workspace = true
+skia-safe = { version = "=0.153.3", features = ["textlayout"] }
+serde_json.workspace = true
+accesskit = "0.25"
+rs-editor-markup.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+accesskit_consumer = "0.39"

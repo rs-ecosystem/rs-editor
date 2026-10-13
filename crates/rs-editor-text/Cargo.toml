@@ -1,0 +1,16 @@
+[package]
+name = "rs-editor-text"
+description = "Batas grapheme dan kata dalam satuan UTF-16 untuk posisi dokumen Rs Editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rs-editor-model.workspace = true
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+rs-editor-model = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

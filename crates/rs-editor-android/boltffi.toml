@@ -1,0 +1,22 @@
+# Kotlin bindings for the Android library (platforms/android/rs-editor).
+# Built by platforms/android/package-native.py, not `boltffi pack`.
+[package]
+name = "rs-editor-android"
+crate = "rs_editor_android"
+version = "0.1.0"
+
+[targets.apple]
+enabled = false
+
+[targets.android]
+architectures = ["arm64", "x86_64"]
+output = "../../platforms/android/rs-editor/generated"
+min_sdk = 26
+
+[targets.android.kotlin]
+package = "com.rseditor.android"
+library_name = "rs_editor_android"
+output = "../../platforms/android/rs-editor/generated/kotlin"
+
+[targets.android.pack]
+output = "../../platforms/android/rs-editor/generated/jniLibs"

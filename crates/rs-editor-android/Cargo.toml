@@ -1,0 +1,42 @@
+[package]
+name = "rs-editor-android"
+description = "Shell Android Rs Editor: Skia GL di SurfaceView, gesture sentuh dan InputConnection; binding Kotlin lewat BoltFFI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+# platforms/android/package-native.py links the staticlib with the generated JNI glue.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Must match the installed boltffi_cli exactly (same as rs-organizer).
+boltffi = "=0.29.3"
+rs-editor-commands.workspace = true
+rs-editor-extensions.workspace = true
+rs-editor-markup.workspace = true
+rs-editor-model.workspace = true
+rs-editor-theme.workspace = true
+rs-editor-view.workspace = true
+serde_json.workspace = true
+
+# The surface and accessibility halves only exist on Android; the API
+# builds everywhere, so bindings are generated and tested on the host.
+[target.'cfg(target_os = "android")'.dependencies]
+skia-safe = { version = "=0.153.3", features = ["gl", "textlayout"] }
+jni = "0.21"
+ndk = "0.9"
+khronos-egl = { version = "6", features = ["static", "no-pkg-config"] }
+accesskit = "0.25"
+accesskit_android = { version = "0.9", features = ["embedded-dex"] }
+
+[lints.rust]
+# JNI entry points need `#[no_mangle]` and raw handles.
+unsafe_code = "allow"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"

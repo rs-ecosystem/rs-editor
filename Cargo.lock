@@ -1907,180 +1907,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
-name = "openrich-android"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_android",
- "boltffi",
- "jni 0.21.1",
- "khronos-egl",
- "ndk",
- "openrich-commands",
- "openrich-extensions",
- "openrich-markup",
- "openrich-model",
- "openrich-theme",
- "openrich-view",
- "serde_json",
- "skia-safe",
-]
-
-[[package]]
-name = "openrich-commands"
-version = "0.1.0"
-dependencies = [
- "openrich-model",
- "openrich-state",
- "openrich-transform",
- "serde_json",
-]
-
-[[package]]
-name = "openrich-desktop"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_winit",
- "arboard",
- "bytemuck",
- "openrich-commands",
- "openrich-extensions",
- "openrich-theme",
- "openrich-view",
- "serde_json",
- "skia-safe",
- "softbuffer",
- "winit",
-]
-
-[[package]]
-name = "openrich-extensions"
-version = "0.1.0"
-dependencies = [
- "openrich-commands",
- "openrich-history",
- "openrich-model",
- "openrich-state",
- "openrich-transform",
- "proptest",
- "regex",
- "serde_json",
- "thiserror 2.0.21",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "openrich-history"
-version = "0.1.0"
-dependencies = [
- "openrich-model",
- "openrich-state",
- "openrich-transform",
- "serde_json",
-]
-
-[[package]]
-name = "openrich-layout"
-version = "0.1.0"
-dependencies = [
- "openrich-model",
- "openrich-text",
- "openrich-theme",
- "serde_json",
- "skia-safe",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "openrich-markup"
-version = "0.1.0"
-dependencies = [
- "html5gum",
- "openrich-extensions",
- "openrich-model",
- "proptest",
- "serde_json",
-]
-
-[[package]]
-name = "openrich-model"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "openrich-state"
-version = "0.1.0"
-dependencies = [
- "openrich-model",
- "openrich-transform",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "openrich-text"
-version = "0.1.0"
-dependencies = [
- "openrich-model",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "openrich-theme"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "openrich-transform"
-version = "0.1.0"
-dependencies = [
- "openrich-model",
- "proptest",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "openrich-view"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_consumer",
- "openrich-commands",
- "openrich-extensions",
- "openrich-history",
- "openrich-layout",
- "openrich-markup",
- "openrich-model",
- "openrich-state",
- "openrich-text",
- "openrich-theme",
- "openrich-transform",
- "serde_json",
- "skia-safe",
-]
-
-[[package]]
-name = "openrich-web"
-version = "0.1.0"
-dependencies = [
- "openrich-commands",
- "openrich-extensions",
- "openrich-theme",
- "openrich-view",
- "serde_json",
- "skia-safe",
-]
-
-[[package]]
 name = "orbclient"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2429,6 +2255,180 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "rs-editor-android"
+version = "0.1.0"
+dependencies = [
+ "accesskit",
+ "accesskit_android",
+ "boltffi",
+ "jni 0.21.1",
+ "khronos-egl",
+ "ndk",
+ "rs-editor-commands",
+ "rs-editor-extensions",
+ "rs-editor-markup",
+ "rs-editor-model",
+ "rs-editor-theme",
+ "rs-editor-view",
+ "serde_json",
+ "skia-safe",
+]
+
+[[package]]
+name = "rs-editor-commands"
+version = "0.1.0"
+dependencies = [
+ "rs-editor-model",
+ "rs-editor-state",
+ "rs-editor-transform",
+ "serde_json",
+]
+
+[[package]]
+name = "rs-editor-desktop"
+version = "0.1.0"
+dependencies = [
+ "accesskit",
+ "accesskit_winit",
+ "arboard",
+ "bytemuck",
+ "rs-editor-commands",
+ "rs-editor-extensions",
+ "rs-editor-theme",
+ "rs-editor-view",
+ "serde_json",
+ "skia-safe",
+ "softbuffer",
+ "winit",
+]
+
+[[package]]
+name = "rs-editor-extensions"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "regex",
+ "rs-editor-commands",
+ "rs-editor-history",
+ "rs-editor-model",
+ "rs-editor-state",
+ "rs-editor-transform",
+ "serde_json",
+ "thiserror 2.0.21",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "rs-editor-history"
+version = "0.1.0"
+dependencies = [
+ "rs-editor-model",
+ "rs-editor-state",
+ "rs-editor-transform",
+ "serde_json",
+]
+
+[[package]]
+name = "rs-editor-layout"
+version = "0.1.0"
+dependencies = [
+ "rs-editor-model",
+ "rs-editor-text",
+ "rs-editor-theme",
+ "serde_json",
+ "skia-safe",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rs-editor-markup"
+version = "0.1.0"
+dependencies = [
+ "html5gum",
+ "proptest",
+ "rs-editor-extensions",
+ "rs-editor-model",
+ "serde_json",
+]
+
+[[package]]
+name = "rs-editor-model"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rs-editor-state"
+version = "0.1.0"
+dependencies = [
+ "rs-editor-model",
+ "rs-editor-transform",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rs-editor-text"
+version = "0.1.0"
+dependencies = [
+ "rs-editor-model",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "rs-editor-theme"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rs-editor-transform"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rs-editor-model",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rs-editor-view"
+version = "0.1.0"
+dependencies = [
+ "accesskit",
+ "accesskit_consumer",
+ "rs-editor-commands",
+ "rs-editor-extensions",
+ "rs-editor-history",
+ "rs-editor-layout",
+ "rs-editor-markup",
+ "rs-editor-model",
+ "rs-editor-state",
+ "rs-editor-text",
+ "rs-editor-theme",
+ "rs-editor-transform",
+ "serde_json",
+ "skia-safe",
+]
+
+[[package]]
+name = "rs-editor-web"
+version = "0.1.0"
+dependencies = [
+ "rs-editor-commands",
+ "rs-editor-extensions",
+ "rs-editor-theme",
+ "rs-editor-view",
+ "serde_json",
+ "skia-safe",
+]
 
 [[package]]
 name = "rustc-hash"

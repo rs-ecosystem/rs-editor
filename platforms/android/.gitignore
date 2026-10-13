@@ -2,4 +2,4 @@
 build/
 local.properties
 # Written by package-native.py.
-openrich/generated/
+rs-editor/generated/
