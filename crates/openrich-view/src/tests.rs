@@ -643,6 +643,19 @@ mod accessibility {
             .find(|n| n.role() == Role::CheckBox)
             .unwrap();
         assert_eq!(checkbox.toggled(), Some(Toggled::False));
+        assert!(checkbox.bounds().is_some(), "the checkbox has a place");
+        let items: Vec<&AxNode> = tree
+            .0
+            .values()
+            .filter(|n| n.role() == Role::ListItem)
+            .collect();
+        assert_eq!(items.len(), 2);
+        assert!(
+            items
+                .iter()
+                .all(|n| n.bounds().is_some_and(|b| b.height() > 0.0)),
+            "list items have places"
+        );
         // Character geometry is present for laid-out lines.
         let mut runs = Vec::new();
         tree.runs(EDITOR_NODE, &mut runs);

@@ -119,7 +119,10 @@ Sudah:
 
 - `CursorAnchorInfo` (posisi caret dengan baseline, batas tiap karakter komposisi, batas editor untuk tulisan tangan) dikirim saat IME memintanya lewat `requestCursorUpdates`. Keyboard Xiaomi tidak memintanya; belum diuji dengan keyboard yang memakainya.
 - Crate `openrich-markup`: HTML ↔ dokumen. Parser bergaya ProseMirror (selalu menghasilkan dokumen valid; Google Docs, Word, GitHub, tag soup), serializer bergaya Tiptap dengan JSON slice tersemat sehingga salin-tempel di OpenRich sendiri persis. 11 tes termasuk property test tag soup.
-- Salin menghasilkan teks + HTML dan tempel memakai HTML lebih dulu, di desktop (arboard), web (`text/html`) dan Android (`ClipData.newHtmlText`).
+- Salin menghasilkan teks + HTML dan tempel memakai HTML lebih dulu, di desktop (arboard), web (`text/html`) dan Android (`ClipData.newHtmlText`). Di perangkat: kata tebal yang disalin lalu ditempel tetap tebal.
+- TalkBack lewat AccessKit (`accesskit_android`, delegate tertanam sebagai dex). `uiautomator dump` di perangkat menunjukkan editor sebagai `EditText` berisi seluruh teks dokumen, blok sebagai `View`, list sebagai `ListView`, task sebagai `CheckBox` dengan status yang benar, semuanya dengan posisi di layar.
+
+Belum: uji TalkBack langsung (oleh pengguna), `CursorAnchorInfo` dengan keyboard yang memintanya, Samsung Keyboard.
 
 Rencana awal milestone:
 

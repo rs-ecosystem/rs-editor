@@ -14,7 +14,7 @@ use accesskit::{
     Action, ActionData, ActionRequest, Affine, Node as AxNode, NodeId, Rect as AxRect, Role,
     TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
 };
-use openrich_layout::{Affinity, DocumentLayout, TextBox, TextLayout};
+use openrich_layout::{Affinity, BlockBox, Decoration, DocumentLayout, TextBox, TextLayout};
 use openrich_model::Node;
 use openrich_text::TextIndexMap;
 
@@ -117,6 +117,10 @@ struct SubtreeBuilder<'a> {
     next: u64,
     /// Paragraph layouts of this block when it is laid out.
     texts: &'a [TextBox],
+    /// Block boxes and decorations of the laid-out window, for bounds of
+    /// nested nodes (list items, checkboxes).
+    blocks: &'a [BlockBox],
+    decorations: &'a [Decoration],
     /// Document position and y of the block (to make geometry relative).
     origin: (usize, f32),
     nodes: Vec<(NodeId, AxNode)>,
@@ -125,6 +129,11 @@ struct SubtreeBuilder<'a> {
 }
 
 impl SubtreeBuilder<'_> {
+    /// A document rectangle relative to the top-level block.
+    fn relative(&self, rect: openrich_layout::Rect) -> AxRect {
+        ax_rect(rect.x, rect.y - self.origin.1, rect.width, rect.height)
+    }
+
     fn id(&mut self) -> NodeId {
         let id = NodeId(self.base << LOCAL_BITS | self.next);
         self.next += 1;
@@ -156,6 +165,12 @@ impl SubtreeBuilder<'_> {
         if node.type_name() == "taskItem" {
             let id = self.id();
             let mut checkbox = AxNode::new(Role::CheckBox);
+            if let Some(rect) = self.decorations.iter().find_map(|d| match d {
+                Decoration::Checkbox { rect, pos: at, .. } if *at == pos => Some(*rect),
+                _ => None,
+            }) {
+                checkbox.set_bounds(self.relative(rect));
+            }
             let checked = node
                 .attr("checked")
                 .and_then(|v| v.as_bool())
@@ -170,6 +185,13 @@ impl SubtreeBuilder<'_> {
         for child in node.children() {
             let id = self.id();
             let mut ax = AxNode::new(role_of(child));
+            if let Some(block) = self
+                .blocks
+                .iter()
+                .find(|b| b.pos == child_pos && b.node.ptr_eq(child))
+            {
+                ax.set_bounds(self.relative(block.rect));
+            }
             self.fill(child, child_pos, &mut ax);
             self.nodes.push((id, ax));
             children.push(id);
@@ -356,6 +378,16 @@ impl EditorView {
                     base,
                     next: 1,
                     texts,
+                    blocks: if texts.is_empty() {
+                        &[]
+                    } else {
+                        &layout.blocks
+                    },
+                    decorations: if texts.is_empty() {
+                        &[]
+                    } else {
+                        &layout.decorations
+                    },
                     origin: (top.pos, top.y),
                     nodes: Vec::new(),
                     runs: Vec::new(),
