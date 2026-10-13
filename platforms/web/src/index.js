@@ -261,7 +261,11 @@ class Editor {
       textarea.setAttribute("aria-multiline", "true");
       textarea.setAttribute("aria-label", canvas.getAttribute("aria-label") ?? "Editor");
       canvas.setAttribute("aria-hidden", "true");
-      textarea.tabIndex = -1;
+      // Focus must stay in the textarea: a focusable canvas would take it
+      // back right after a click (and the caret would disappear).
+      canvas.removeAttribute("tabindex");
+      canvas.addEventListener("mousedown", (e) => e.preventDefault());
+      textarea.tabIndex = 0;
       textarea.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1em;opacity:0;padding:0;border:0;resize:none;overflow:hidden;white-space:pre;font-size:16px;caret-color:transparent";
       document.body.append(textarea);
       textarea.addEventListener("beforeinput", (e) => {
