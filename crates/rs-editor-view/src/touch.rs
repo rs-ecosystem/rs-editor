@@ -180,6 +180,9 @@ pub(crate) struct TouchState {
     finger: (f32, f32),
     /// Handles are shown (the selection was made by touch).
     pub(crate) active: bool,
+    /// The last pointing was with a finger (not a mouse): the drag handle
+    /// stays with the caret's block, longer than the handles do.
+    pub(crate) finger_used: bool,
     caret_handle_until: u64,
     menu_shown: bool,
     /// Show the menu again once scrolling stops.
@@ -206,6 +209,7 @@ impl EditorView {
 
     /// A touch event in view coordinates.
     pub fn touch(&mut self, phase: TouchPhase, x: f32, y: f32) {
+        self.touch.finger_used = true;
         // Popovers and menus take touches on them first.
         if self.link_touch(phase, x, y)
             || self.slash_touch(phase, x, y)
@@ -229,6 +233,7 @@ impl EditorView {
         // a mouse would be; with a finger the drag handle follows the caret
         // instead, also once keys end touch mode.
         self.forget_pointer();
+        self.touch.finger_used = true;
         self.request_redraw();
     }
 

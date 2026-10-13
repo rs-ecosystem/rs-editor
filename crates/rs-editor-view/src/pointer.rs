@@ -107,6 +107,7 @@ impl EditorView {
 
     pub fn pointer_down(&mut self, event: PointerEvent) -> bool {
         self.end_touch_mode();
+        self.touch.finger_used = false;
         if event.button != PointerButton::Primary {
             return false;
         }
@@ -181,6 +182,7 @@ impl EditorView {
     }
 
     pub fn pointer_move(&mut self, event: PointerEvent) -> bool {
+        self.touch.finger_used = false;
         if self.drag.is_none()
             && let Some(handled) = self
                 .block_pointer_move(event.x, event.y)

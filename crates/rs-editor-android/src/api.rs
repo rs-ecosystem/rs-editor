@@ -6,7 +6,7 @@
 //! (Skia objects are not thread-safe), hence `single_threaded`.
 
 use rs_editor_api::{ApiOptions, EditorApi, Units};
-use rs_editor_view::InteractionProfile;
+use rs_editor_view::{Insets, InteractionProfile};
 
 pub struct NativeEditor {
     pub(crate) api: EditorApi,
@@ -47,6 +47,13 @@ impl NativeEditor {
                 content,
                 markdown,
                 profile: InteractionProfile::android(),
+                // Room at the left for the drag handle a finger presses.
+                padding: Insets {
+                    top: 24.0,
+                    right: 20.0,
+                    bottom: 24.0,
+                    left: 28.0,
+                },
                 character_limit: usize::try_from(character_limit).ok().filter(|&n| n > 0),
                 ..Default::default()
             }),

@@ -20,9 +20,10 @@ use skia_safe::{Canvas, Contains, Paint, RRect};
 use crate::a11y::{OverlayNodes, overlay_ids, overlay_node};
 use crate::{CursorIcon, EditorView, Effect, HapticKind, TouchPhase};
 
-const GRIP_WIDTH: f32 = 20.0;
-const GRIP_HEIGHT: f32 = 24.0;
-const ICON_SIZE: f32 = 16.0;
+/// The grip for a mouse: width, height, icon size.
+const MOUSE_GRIP: (f32, f32, f32) = (20.0, 24.0, 16.0);
+/// The grip for a finger: larger, and reaching further (see `on_grip`).
+const TOUCH_GRIP: (f32, f32, f32) = (24.0, 36.0, 18.0);
 /// How far the pointer moves before a press on the grip becomes a drag.
 const DRAG_SLOP: f32 = 4.0;
 /// Extra reach of the grip for a finger.
@@ -169,21 +170,31 @@ impl EditorView {
         if !self.blocks.enabled
             || !self.editor.is_editable()
             || self.drag.is_some()
-            || self.composition.is_some()
             || self.link_editing()
             || self.slash_menu_shown()
         {
             return None;
         }
-        if self.touch.active {
+        // With a finger, the caret's block (also while a keyboard composes
+        // words, which would otherwise make it blink in and out).
+        if self.touch.finger_used {
             if !self.focused || self.touch_gesture_active() {
                 return None;
             }
-            let head = self.editor.selection().head();
+            // A selected block (one just moved) is the block itself: its
+            // head is after it, in the next block.
+            let selection = self.editor.selection();
+            let head = match selection {
+                Selection::Node(_) => selection.from() + 1,
+                _ => selection.head(),
+            };
             let item = innermost_item(&layout, |b| {
                 b.pos < head && head < b.pos + b.node.node_size()
             });
             return item.or_else(|| top_unit(&layout, layout.top_at_pos(head)?));
+        }
+        if self.composition.is_some() {
+            return None;
         }
         let (x, y) = self.blocks.pointer?;
         if x < 0.0 || x > self.width || y < 0.0 || y > self.visible_height() {
@@ -211,10 +222,20 @@ impl EditorView {
                 let line = t.layout.lines().first()?;
                 Some(t.rect.y + line.top + line.height / 2.0)
             });
-        let center = first_line.unwrap_or(block.rect.y + block.rect.height.min(GRIP_HEIGHT) / 2.0);
+        let (grip_width, grip_height, _) = self.grip_size();
+        let center = first_line.unwrap_or(block.rect.y + block.rect.height.min(grip_height) / 2.0);
         let at = self.to_view(Rect::new(block.rect.x, center, 0.0, 0.0));
-        let x = (at.x - GRIP_WIDTH - 2.0).max(0.0);
-        skia_safe::Rect::from_xywh(x, at.y - GRIP_HEIGHT / 2.0, GRIP_WIDTH, GRIP_HEIGHT)
+        let x = (at.x - grip_width - 2.0).max(0.0);
+        skia_safe::Rect::from_xywh(x, at.y - grip_height / 2.0, grip_width, grip_height)
+    }
+
+    /// The grip's width, height and icon size: larger for a finger.
+    fn grip_size(&self) -> (f32, f32, f32) {
+        if self.touch.finger_used {
+            TOUCH_GRIP
+        } else {
+            MOUSE_GRIP
+        }
     }
 
     /// Brings the grip in line with the pointer, the caret and a drag.
@@ -357,7 +378,13 @@ impl EditorView {
                 }
             }
         }
-        candidates.retain(|c| c.pos < unit.pos || c.pos > unit.end());
+        // Over the block itself it stays: back where it started, a drag
+        // can be given up.
+        if doc_y >= unit.rect.y && doc_y <= unit.rect.bottom() {
+            return None;
+        }
+        // Never inside itself; its own edges are where it already is.
+        candidates.retain(|c| c.pos <= unit.pos || c.pos >= unit.end());
         let nearest = candidates
             .iter()
             .map(|c| (c.y - doc_y).abs())
@@ -397,7 +424,9 @@ impl EditorView {
                 })
                 .copied()
         });
-        Some(kept.unwrap_or(best))
+        let place = kept.unwrap_or(best);
+        // Nearest to where it is: no move (and no line).
+        (place.pos != unit.pos && place.pos != unit.end()).then_some(place)
     }
 
     /// Scroll speed (pixels per frame) for a pointer at view `y` during a
@@ -637,6 +666,12 @@ impl EditorView {
         }
     }
 
+    /// How far the ghost (and the grip with it) sits below the block it
+    /// lifts: the pointer's travel, across scrolling.
+    fn ghost_offset(&self, drag: &BlockDrag) -> f32 {
+        (drag.pointer.1 - drag.start.1) + (self.scroll_y - drag.start_scroll)
+    }
+
     /// A lifted copy of the dragged block under the pointer, on a card
     /// with a shadow: what moves.
     fn paint_block_ghost(
@@ -647,7 +682,7 @@ impl EditorView {
     ) {
         let layout = self.layout();
         let source = drag.unit.rect;
-        let dy = (drag.pointer.1 - drag.start.1) + (self.scroll_y - drag.start_scroll);
+        let dy = self.ghost_offset(drag);
         let right = self.content_width();
         let area = skia_safe::Rect::from_ltrb(
             source.x - 6.0,
@@ -709,14 +744,26 @@ impl EditorView {
         if progress <= 0.0 {
             return;
         }
-        let grip = self.blocks.grip;
+        // During a drag the grip rides along with the ghost of its block.
+        let grip = match self.blocks.drag.filter(|d| d.moved) {
+            Some(drag) => self
+                .blocks
+                .grip
+                .with_offset((0.0, self.ghost_offset(&drag))),
+            None => self.blocks.grip,
+        };
         let active = self.blocks.hovered || self.blocks.drag.is_some();
-        if active {
+        // For a finger the grip always shows as a button to press.
+        let (_, _, icon_size) = self.grip_size();
+        if active || self.touch.finger_used {
             let mut fill = Paint::default();
             fill.set_anti_alias(true);
-            fill.set_color(skia_safe::Color::new(
-                palette.accent.with_alpha(progress).argb(),
-            ));
+            let color = if active {
+                palette.accent
+            } else {
+                palette.muted
+            };
+            fill.set_color(skia_safe::Color::new(color.with_alpha(progress).argb()));
             canvas.draw_rrect(
                 RRect::new_rect_xy(grip, theme.radius.sm, theme.radius.sm),
                 &fill,
@@ -729,9 +776,9 @@ impl EditorView {
         };
         Icon::GripVertical.draw(
             canvas,
-            grip.center_x() - ICON_SIZE / 2.0,
-            grip.center_y() - ICON_SIZE / 2.0,
-            ICON_SIZE,
+            grip.center_x() - icon_size / 2.0,
+            grip.center_y() - icon_size / 2.0,
+            icon_size,
             skia_safe::Color::new(color.with_alpha(progress).argb()),
         );
     }

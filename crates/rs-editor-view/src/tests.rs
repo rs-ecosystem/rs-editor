@@ -2797,3 +2797,132 @@ mod drag_feedback {
         assert_eq!(view.editor().get_text("|"), "dua|satu|tiga|empat");
     }
 }
+
+mod drag_cancel {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    /// Dragged away and brought back to where it was, a block stays: no
+    /// drop line shows there, and letting go changes nothing.
+    #[test]
+    fn bringing_a_block_back_gives_up_the_drag() {
+        let content = doc(vec![p("satu"), p("dua"), p("tiga"), p("empat")]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        let y = view_y_of(&mut view, 7) + 10.0;
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let (gx, gy) = view.blocks.grip_center();
+        view.pointer_down(PointerEvent::at(gx, gy));
+        let below_tiga = view_y_of(&mut view, 18) - 4.0;
+        view.pointer_move(PointerEvent::at(gx, below_tiga));
+        paint(&mut view);
+        assert!(view.drop_line().is_some(), "a place below");
+
+        // Back over "dua" itself, then just above or below it.
+        for y in [
+            gy,
+            view_y_of(&mut view, 7) - 3.0,
+            view_y_of(&mut view, 12) - 3.0,
+        ] {
+            view.pointer_move(PointerEvent::at(gx, y));
+            clock.advance(100);
+            paint(&mut view);
+            assert!(view.drop_line().is_none(), "no place at {y}");
+        }
+        view.pointer_up(PointerEvent::at(gx, gy));
+        assert_eq!(view.editor().get_text("|"), "satu|dua|tiga|empat");
+        assert!(!view.is_dragging_block());
+    }
+}
+
+mod grip_with_finger {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    /// With a finger the grip stays by the caret's block after the caret
+    /// handle times out and while a keyboard composes, and is easier to
+    /// press than the mouse's.
+    #[test]
+    fn the_grip_stays_for_a_finger() {
+        let content = doc(vec![p("satu"), p("dua")]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        let y = view_y_of(&mut view, 7) + 10.0;
+        view.touch(TouchPhase::Down, 100.0, y);
+        view.touch(TouchPhase::Up, 100.0, y);
+        clock.advance(10_000);
+        paint(&mut view);
+        assert!(
+            !view.touch_handles().iter().any(|_| true),
+            "the caret handle went"
+        );
+        assert!(view.drag_handle_shown(), "the grip did not");
+        assert_eq!(view.blocks.block(), Some(6));
+
+        view.set_composition("dua");
+        paint(&mut view);
+        assert!(view.drag_handle_shown(), "composing keeps it");
+        view.commit_composition("dua");
+
+        // A finger reaches it from the screen edge and a little around it.
+        let (_, gy) = view.blocks.grip_center();
+        view.touch(TouchPhase::Down, 1.0, gy + 20.0);
+        assert!(
+            view.is_dragging_block() || view.has_node_selection(),
+            "pressed"
+        );
+        view.touch(TouchPhase::Up, 1.0, gy + 20.0);
+        assert!(view.has_node_selection());
+
+        // A mouse brings back the hover grip.
+        let y = view_y_of(&mut view, 1) + 10.0;
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        assert_eq!(view.blocks.block(), Some(0));
+    }
+}
+
+mod grip_after_move {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    /// Moving the third block up to second place leaves the grip (and the
+    /// selection) on that block in its new place, not on the block after.
+    #[test]
+    fn the_grip_stays_with_the_moved_block() {
+        let content = doc(vec![p("satu"), p("dua"), p("tiga"), p("empat")]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        let y = view_y_of(&mut view, 13) + 10.0;
+        view.touch(TouchPhase::Down, 100.0, y);
+        view.touch(TouchPhase::Up, 100.0, y);
+        clock.advance(400);
+        paint(&mut view);
+        assert_eq!(view.blocks.block(), Some(11), "tiga's grip");
+        let (gx, gy) = view.blocks.grip_center();
+        view.touch(TouchPhase::Down, gx, gy);
+        let above_dua = view_y_of(&mut view, 7) - 4.0;
+        view.touch(TouchPhase::Move, gx, above_dua);
+        view.touch(TouchPhase::Up, gx, above_dua);
+        assert_eq!(view.editor().get_text("|"), "satu|tiga|dua|empat");
+        paint(&mut view);
+        assert_eq!(view.editor().selection().from(), 6, "tiga, now second");
+        assert_eq!(view.blocks.block(), Some(6), "its grip, not dua's");
+    }
+}
