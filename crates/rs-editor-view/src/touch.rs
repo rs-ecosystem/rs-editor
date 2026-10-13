@@ -179,7 +179,7 @@ pub(crate) struct TouchState {
     gesture: Option<Gesture>,
     finger: (f32, f32),
     /// Handles are shown (the selection was made by touch).
-    active: bool,
+    pub(crate) active: bool,
     caret_handle_until: u64,
     menu_shown: bool,
     /// Show the menu again once scrolling stops.

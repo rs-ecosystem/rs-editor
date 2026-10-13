@@ -14,6 +14,7 @@ impl EditorView {
     pub fn paint(&mut self, canvas: &Canvas) {
         self.tick_scroll();
         self.tick_touch();
+        self.update_bubble();
         let theme = self.theme().clone();
         let layout = self.layout().clone();
         let scale = self.scale;
@@ -72,10 +73,11 @@ impl EditorView {
             render::paint_caret(canvas, rect, &theme);
         }
         canvas.restore();
-        // Handles sit above everything, in view coordinates.
+        // Handles and menus sit above everything, in view coordinates.
         canvas.save();
         canvas.scale((scale, scale));
         self.paint_handles(canvas);
+        self.paint_bubble(canvas);
         canvas.restore();
     }
 

@@ -11,7 +11,7 @@
 | P2 | Layout inkremental, render Skia, view, tema shadcn, dev harness desktop | **Selesai** |
 | P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Hampir selesai.** Milestone 1–2 selesai, milestone 3 tinggal uji screen reader sungguhan dan Firefox |
 | P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit, library Kotlin dan Compose | **Selesai.** Navigasi TalkBack dan Samsung Keyboard jadi tugas lanjutan |
-| P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | Belum dimulai |
+| P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | **Berjalan.** Milestone 1 (bubble menu) selesai |
 | P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | Belum dimulai |
 | P7 | Windows dan Linux: winit, IME, AccessKit | Belum dimulai |
 | P8 | Tabel, mention, hardening, API 1.0 | Belum dimulai |
@@ -237,10 +237,40 @@ Rencana awal milestone:
   - Keluar/masuk aplikasi dan background/foreground berjalan tanpa crash.
   - `uiautomator` masih menampilkan `EditText` dan `CheckBox`.
 
+## P5 — UI di dalam canvas dan paritas Tiptap · Berjalan
+
+UI editor digambar Skia di canvas yang sama, sehingga tampilannya identik di semua platform. Toolbar tetap bisa dibuat aplikasi lewat API perintah.
+
+### Milestone 1: komponen UI dan bubble menu · Selesai
+
+- **Crate `rs-editor-ui`:** komponen bergaya shadcn/ui yang digambar Skia.
+  - Ikon Lucide (path SVG → `PathBuilder`), digambar dengan stroke 2 unit dari 24 dengan ujung bulat, seperti aslinya.
+  - `paint_panel`: latar popover, border, radius `md`, dan bayangan blur.
+  - `Toolbar`: tombol 32 px; aktif memakai warna accent, hover memakai muted, nonaktif 50%. Hit test dan pratinjau PNG lewat `RS_EDITOR_UI_PREVIEW` untuk dicek mata.
+  - `Appear`: animasi muncul 150 ms dan hilang 100 ms (ease-out cubic, zoom 0,95 → 1), seperti popover shadcn.
+- **Bubble menu** (`rs-editor-view/src/bubble.rs`), seperti BubbleMenu Tiptap:
+  - Tombol: tebal, miring, garis bawah, coret, kode, sorotan. Status aktif dan nonaktif dihitung ulang hanya saat revisi editor berubah.
+  - Muncul untuk seleksi teks yang dibuat dengan mouse atau trackpad, setelah tombol dilepas. Seleksi sentuh tetap memakai menu seleksi platform, karena itu yang diharapkan pengguna HP.
+  - Berada 8 px di atas seleksi, pindah ke bawah bila tidak muat, dan hilang saat seleksi keluar layar, kosong, atau sedang komposisi IME.
+  - Klik tombol tidak memindahkan seleksi; kursor berubah menjadi pointer di atas tombol.
+  - Bisa dimatikan: `set_bubble_menu(false)` di Rust, opsi `bubbleMenu: false` di web.
+  - Android native belum meneruskan mouse dan trackpad ke editor, jadi di sana menu ini belum pernah muncul. Itu tugas lanjutan.
+- **Uji di Chrome desktop:** klik ganda memilih kata dan menu muncul dengan animasi; B membuat teks tebal dan tombolnya menyala; undo dan klik di tempat lain menyembunyikan menu; seleksi tarik dan tema gelap benar.
+
+### Milestone 2: slash menu dan popover link · Belum
+
+- Palet `/` dengan filter, navigasi keyboard, dan grup (judul, list, kutipan, kode, pemisah).
+- Popover link: buka, salin, ubah, dan hapus link; input URL di dalam canvas.
+
+### Milestone 3: blok dan konten · Belum
+
+- Drag handle dengan drag-and-drop blok, placeholder, text-align, character count, gambar, paste rule, list bertingkat.
+
 ## Berikutnya
 
-1. **P3 (web):** milestone 3 (ARIA, Safari, Firefox).
-2. **Tugas lanjutan Android:** navigasi TalkBack (lihat milestone 2), Samsung Keyboard, `addVisibleLineBounds`, paket AAR/Maven.
-3. **Desktop (P7):** menu klik kanan Potong/Salin/Tempel memakai sinyal `SelectionMenu` yang sama.
+1. **P5:** milestone 2 (slash menu dan popover link).
+2. **P3 (web):** uji screen reader sungguhan (VoiceOver, TalkBack di Chrome Android) dan Firefox.
+3. **Tugas lanjutan Android:** navigasi TalkBack (lihat milestone 2), Samsung Keyboard, `addVisibleLineBounds`, paket AAR/Maven.
+4. **Desktop (P7):** menu klik kanan Potong/Salin/Tempel memakai sinyal `SelectionMenu` yang sama.
 
 Spike web dan Android sudah membuktikan jalurnya: [laporan spike P0](spikes/p0-web-android.md).

@@ -538,6 +538,15 @@ pub unsafe extern "C" fn rse_add_font(
     app.set_result(&added)
 }
 
+/// Shows the formatting menu over mouse selections (1, the default) or not.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_bubble_menu(app_ptr: *mut App, enabled: u32) {
+    unsafe { app(app_ptr) }.api.set_bubble_menu(enabled != 0);
+}
+
 /// Draws emoji from images (see `rse_add_emoji_image`) instead of a font.
 ///
 /// # Safety

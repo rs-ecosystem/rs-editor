@@ -110,6 +110,9 @@ impl EditorView {
         if event.button != PointerButton::Primary {
             return false;
         }
+        if self.bubble_pointer_down(event.x, event.y) {
+            return true;
+        }
         self.stop_scrolling();
         self.set_focused(true);
         self.finish_composition();
@@ -174,6 +177,11 @@ impl EditorView {
     }
 
     pub fn pointer_move(&mut self, event: PointerEvent) -> bool {
+        if self.drag.is_none()
+            && let Some(handled) = self.bubble_pointer_move(event.x, event.y)
+        {
+            return handled;
+        }
         let Some(drag) = self.drag else {
             let cursor = if self.checkbox_at(event.x, event.y).is_some() {
                 CursorIcon::Pointer
@@ -208,8 +216,16 @@ impl EditorView {
         true
     }
 
-    pub fn pointer_up(&mut self, _event: PointerEvent) -> bool {
-        self.drag.take().is_some()
+    pub fn pointer_up(&mut self, event: PointerEvent) -> bool {
+        if self.bubble_pointer_up(event.x, event.y) {
+            return true;
+        }
+        let dragged = self.drag.take().is_some();
+        if dragged {
+            // A finished drag selection may bring up the bubble menu.
+            self.request_redraw();
+        }
+        dragged
     }
 
     /// The selection as text positions, for hosts that render handles.

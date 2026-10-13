@@ -2427,6 +2427,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rs-editor-ui"
+version = "0.1.0"
+dependencies = [
+ "rs-editor-theme",
+ "skia-safe",
+]
+
+[[package]]
 name = "rs-editor-view"
 version = "0.1.0"
 dependencies = [
@@ -2442,6 +2450,7 @@ dependencies = [
  "rs-editor-text",
  "rs-editor-theme",
  "rs-editor-transform",
+ "rs-editor-ui",
  "serde_json",
  "skia-safe",
 ]

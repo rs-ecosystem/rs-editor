@@ -1618,3 +1618,98 @@ fn html_from_copy_pastes_back_exactly_and_other_html_merges_in() {
         "bold"
     );
 }
+
+mod bubble {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn point(view: &mut EditorView, pos: usize) -> (f32, f32) {
+        let rect = view
+            .layout()
+            .caret_rect(pos, Affinity::Downstream, 0.0)
+            .unwrap();
+        let rect = view.to_view(rect);
+        (rect.x, rect.center_y())
+    }
+
+    /// Drags a mouse selection from `from` to `to`.
+    fn drag(view: &mut EditorView, from: usize, to: usize) {
+        let (x0, y0) = point(view, from);
+        let (x1, y1) = point(view, to);
+        view.pointer_down(PointerEvent::at(x0, y0));
+        view.pointer_move(PointerEvent::at(x1, y1));
+        view.pointer_up(PointerEvent::at(x1, y1));
+        paint(view);
+    }
+
+    fn setup() -> (EditorView, Arc<ManualClock>) {
+        let content = doc(vec![p("satu"), p("halo dunia indah"), p("tiga")]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        (view, clock)
+    }
+
+    #[test]
+    fn a_mouse_selection_shows_formatting_buttons_above_it() {
+        let (mut view, clock) = setup();
+        drag(&mut view, 8, 12);
+        assert!(view.bubble_menu_shown());
+        let selection_top = point(&mut view, 8).1;
+        let menu = view.bubble.toolbar_rect();
+        assert!(
+            menu.bottom() < selection_top,
+            "{menu:?} above {selection_top}"
+        );
+        // It fades in over a few frames.
+        assert!(view.next_frame_in().is_some_and(|ms| ms <= FRAME_MS));
+        clock.advance(200);
+        paint(&mut view);
+
+        // Pressing B bolds the selection and keeps it.
+        let (bx, by) = view.bubble.button_center(0);
+        assert!(view.pointer_down(PointerEvent::at(bx, by)));
+        assert!(view.pointer_up(PointerEvent::at(bx, by)));
+        assert_eq!(head(&view), 12);
+        assert_eq!(view.editor().selection().from(), 8);
+        assert!(view.editor().is_active("bold", &Default::default()));
+        paint(&mut view);
+        assert!(view.bubble_menu_shown());
+        assert!(view.bubble.button_active(0), "B shows active");
+
+        // A click in the text (below; the menu covers the line above)
+        // collapses the selection, and the menu goes.
+        let (x, y) = point(&mut view, 22);
+        view.pointer_down(PointerEvent::at(x, y));
+        view.pointer_up(PointerEvent::at(x, y));
+        paint(&mut view);
+        assert!(!view.bubble_menu_shown());
+    }
+
+    #[test]
+    fn touch_selections_get_the_platform_menu_instead() {
+        let (mut view, clock) = setup();
+        let (x, y) = point(&mut view, 10);
+        view.touch(TouchPhase::Down, x, y);
+        clock.advance(600);
+        paint(&mut view);
+        view.touch(TouchPhase::Up, x, y);
+        paint(&mut view);
+        assert!(
+            !view.editor().selection().empty(),
+            "a long press selected a word"
+        );
+        assert!(!view.bubble_menu_shown());
+    }
+
+    #[test]
+    fn the_menu_can_be_turned_off() {
+        let (mut view, _) = setup();
+        view.set_bubble_menu(false);
+        drag(&mut view, 8, 12);
+        assert!(!view.bubble_menu_shown());
+    }
+}

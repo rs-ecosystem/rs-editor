@@ -36,6 +36,8 @@ editor.destroy();
 
 Semua perintah dari extension Rust bisa dipakai sebagai metode chain, dengan argumen yang sama seperti di Tiptap. Tipe TypeScript-nya ada di `src/index.d.ts`.
 
+Saat teks dipilih dengan mouse atau trackpad, editor menampilkan bubble menu (tebal, miring, garis bawah, coret, kode, sorotan) yang digambar di canvas. Matikan dengan `bubbleMenu: false` kalau aplikasi punya menu sendiri. Di HP, seleksi tetap memakai menu Potong/Salin/Tempel.
+
 ## Emoji dan font
 
 Emoji tampil tanpa mengunduh apa pun. Browser menggambar setiap emoji dengan font emoji sistem (Apple di Safari, Segoe di Windows, Noto di Android) ke canvas 2D, lalu editor menempelkannya sebagai gambar di tempat emoji itu, dengan ukuran sekitar 1,2 em. Tampilannya sama dengan emoji di aplikasi lain pada perangkat yang sama, sehingga bisa berbeda antar platform. Caret, seleksi, dan hapus tetap memperlakukan satu emoji (termasuk ZWJ, bendera, dan warna kulit) sebagai satu karakter.

@@ -80,6 +80,12 @@ impl NativeEditor {
         self.api.set_markdown(&markdown)
     }
 
+    /// Shows a formatting menu over text selected with a mouse (on by
+    /// default; touch selections get the system's menu).
+    pub fn set_bubble_menu(&mut self, enabled: bool) {
+        self.api.set_bubble_menu(enabled);
+    }
+
     /// Whether pasted plain text is read as Markdown (off by default).
     pub fn set_markdown_paste(&mut self, markdown: bool) {
         self.api.set_markdown_paste(markdown);

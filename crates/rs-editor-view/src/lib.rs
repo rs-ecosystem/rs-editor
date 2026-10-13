@@ -7,6 +7,7 @@
 //! editor behaves the same everywhere.
 
 mod a11y;
+mod bubble;
 mod ime;
 mod input;
 mod paint;
@@ -192,6 +193,7 @@ pub struct EditorView {
     pub(crate) a11y: a11y::A11y,
     pub(crate) touch: touch::TouchState,
     pub(crate) profile: InteractionProfile,
+    pub(crate) bubble: bubble::Bubble,
 }
 
 impl fmt::Debug for EditorView {
@@ -254,6 +256,7 @@ impl EditorView {
             a11y: a11y::A11y::default(),
             touch: touch::TouchState::default(),
             profile: InteractionProfile::default(),
+            bubble: bubble::Bubble::new(),
         })
     }
 
@@ -574,7 +577,7 @@ impl EditorView {
     /// Milliseconds until the view should draw again without input: the
     /// next animation frame while scrolling, or the next caret blink.
     pub fn next_frame_in(&self) -> Option<u64> {
-        if self.is_scrolling() {
+        if self.is_scrolling() || self.bubble_animating() {
             return Some(FRAME_MS);
         }
         let touch = self.touch_deadline();

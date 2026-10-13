@@ -63,10 +63,10 @@ export async function createEditor(options) {
 }
 
 class Editor {
-  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, fonts = [], accessibility = true, wasmUrl = DEFAULT_WASM, input } = {}) {
+  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, bubbleMenu = true, fonts = [], accessibility = true, wasmUrl = DEFAULT_WASM, input } = {}) {
     if (!element) throw new Error("Rs Editor: `element` is required");
     this.element = element;
-    this._options = { content, contentType, dark, editable, pasteMarkdown, accessibility, wasmUrl, input };
+    this._options = { content, contentType, dark, editable, pasteMarkdown, bubbleMenu, accessibility, wasmUrl, input };
     // Fonts to load when text needs them: { family, url, ranges }.
     this._fonts = fonts.map((font) => ({ ...font, state: "idle" }));
     this._listeners = new Map();
@@ -113,6 +113,7 @@ class Editor {
     if (!this._app) throw new Error("Rs Editor: the editor could not be created");
     if (!this._options.editable) M._rse_set_editable(this._app, 0);
     if (this._options.pasteMarkdown) M._rse_set_markdown_paste(this._app, 1);
+    if (!this._options.bubbleMenu) M._rse_set_bubble_menu(this._app, 0);
     // Emoji come from the system's emoji font through the browser, unless
     // the app brings its own emoji font.
     const emojiFont = this._fonts.some((font) => !font.ranges || font.ranges.some(([a, b]) => a <= 0x1f600 && 0x1f600 <= b));

@@ -22,6 +22,7 @@ rs-editor-layout = { path = "crates/rs-editor-layout" }
 rs-editor-view = { path = "crates/rs-editor-view" }
 rs-editor-markup = { path = "crates/rs-editor-markup" }
 rs-editor-api = { path = "crates/rs-editor-api" }
+rs-editor-ui = { path = "crates/rs-editor-ui" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

@@ -229,6 +229,12 @@ impl EditorApi {
         self.view.add_font(bytes, family).unwrap_or_default()
     }
 
+    /// Shows a formatting menu over text selected with a mouse or trackpad
+    /// (on by default; touch selections get the platform's menu).
+    pub fn set_bubble_menu(&mut self, enabled: bool) {
+        self.view.set_bubble_menu(enabled);
+    }
+
     /// Draws emoji from images the host supplies (`missingEmoji` effect,
     /// [`EditorApi::add_emoji_image`]) instead of a font.
     pub fn set_emoji_images(&mut self, on: bool) {

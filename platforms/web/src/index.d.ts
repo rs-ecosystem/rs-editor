@@ -41,6 +41,12 @@ export interface EditorOptions {
   /** Read pasted plain text as Markdown (off by default). */
   pasteMarkdown?: boolean;
   /**
+   * A formatting menu (bold, italic, underline, strike, code, highlight) over
+   * text selected with a mouse or trackpad, drawn in the canvas (on by
+   * default; touch selections get the selection menu instead).
+   */
+  bubbleMenu?: boolean;
+  /**
    * Fonts loaded on demand when the text has characters the bundled fonts
    * (Latin, Arabic, Devanagari) lack, such as emoji or CJK. See `notoFonts`.
    */
