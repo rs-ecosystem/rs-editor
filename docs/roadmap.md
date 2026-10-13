@@ -11,7 +11,7 @@
 | P2 | Layout inkremental, render Skia, view, tema shadcn, dev harness desktop | **Selesai** |
 | P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Hampir selesai.** Milestone 1–2 selesai, milestone 3 tinggal uji screen reader sungguhan dan Firefox |
 | P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit, library Kotlin dan Compose | **Selesai.** Navigasi TalkBack dan Samsung Keyboard jadi tugas lanjutan |
-| P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | **Berjalan.** Milestone 1–3 selesai (bubble menu, menu blok `/`, popover tautan, drag handle, gambar). Sisa: aksesibilitas menu, drag item list |
+| P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | **Selesai.** Bubble menu, menu blok `/`, popover tautan, drag handle (blok dan item list), gambar, aksesibilitas menu. Uji screen reader sungguhan jadi tugas lanjutan |
 | P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | Belum dimulai |
 | P7 | Windows dan Linux: winit, IME, AccessKit | Belum dimulai |
 | P8 | Tabel, mention, hardening, API 1.0 | Belum dimulai |
@@ -237,7 +237,7 @@ Rencana awal milestone:
   - Keluar/masuk aplikasi dan background/foreground berjalan tanpa crash.
   - `uiautomator` masih menampilkan `EditText` dan `CheckBox`.
 
-## P5 — UI di dalam canvas dan paritas Tiptap · Berjalan
+## P5 — UI di dalam canvas dan paritas Tiptap · Selesai
 
 UI editor digambar Skia di canvas yang sama, sehingga tampilannya identik di semua platform. Toolbar tetap bisa dibuat aplikasi lewat API perintah.
 
@@ -293,7 +293,7 @@ UI editor digambar Skia di canvas yang sama, sehingga tampilannya identik di sem
   - Menarik grip memindahkan blok. Selama ditarik, blok asal diredupkan dan garis menunjukkan posisi jatuhnya. Di dekat tepi atas atau bawah, view ikut scroll. Esc membatalkan. Satu pemindahan menjadi satu langkah undo.
   - Di Android, area grip dikecualikan dari gesture Back sistem (`systemGestureExclusionRects`), karena grip berada di tepi kiri layar.
   - Bisa dimatikan: `set_drag_handle(false)`, `dragHandle: false`, `RsEditorView.dragHandle`.
-  - Yang dipindahkan adalah blok tingkat atas, jadi list berpindah utuh.
+  - Setiap item list punya grip sendiri, di kiri penanda list (lihat milestone 4).
 - **Gambar:**
   - Layout mencatat `src` yang belum punya gambar (efek `MissingImages`). Host mendekode gambar dan memberikan pikselnya lewat `add_image`, atau memanggil `image_failed`. Gambar tanpa atribut `width`/`height` memakai ukuran aslinya, dibatasi lebar kolom. Saat menunggu, gambar tampil sebagai kotak muted; kalau gagal, kotak itu diberi tanda silang. Gambar digambar dengan sudut membulat dan sampling mipmap.
   - Web: browser mendekode gambar (format apa pun yang didukungnya; gambar lintas origin butuh CORS), maksimal 2048 px.
@@ -311,14 +311,32 @@ UI editor digambar Skia di canvas yang sama, sehingga tampilannya identik di sem
   - Golden image placeholder diperbarui.
   - Chrome: gambar SVG dimuat, grip muncul saat hover, blok gambar dipindah lewat drag dengan garis jatuh terlihat, undo.
   - Android (perangkat): gambar `data:` dimuat lewat BitmapFactory, grip muncul untuk blok caret, paragraf dipindah ke bawah list dengan jari (gesture Back tidak terpicu), handle seleksi saling melewati.
+- **Belum** (dikerjakan di milestone 4): menarik item list satu per satu, aksesibilitas menu, gambar di harness desktop.
+
+### Milestone 4: aksesibilitas menu dan item list · Selesai
+
+- **Aksesibilitas menu dan popover** (pohon AccessKit yang sama untuk TalkBack, VoiceOver, dan mirror ARIA di web):
+  - Menu `/` menjadi list box. Baris terpilihnya menjadi *active descendant* editor (pola combobox), sehingga panah atas/bawah membacakan baris tanpa memindahkan fokus dari teks.
+  - Bubble menu menjadi toolbar berisi tombol toggle (status tebal dan lainnya terbaca).
+  - Popover tautan menjadi grup berisi tautan dan tombol-tombolnya. Saat kolom alamat terbuka, fokus pindah ke kolom itu (TextInput dengan nilainya).
+  - Grip menjadi tombol "Pilih atau seret untuk memindahkan blok".
+  - Semua bisa diaktifkan dengan Click dari screen reader, dan labelnya mengikuti bahasa UI.
+  - Mirror web: role ARIA listbox/option/toolbar/button/link/group/textbox, `aria-activedescendant` dan `aria-expanded` pada input yang fokus, nama input berganti menjadi nama kolom alamat saat kolom itu fokus, dan pengumuman baris tidak terdengar saat panah dipakai di menu.
+- **Drag item list:**
+  - Grip muncul di kiri penanda item yang berada di bawah mouse (item terdalam) atau yang berisi caret.
+  - Item bisa dijatuhkan di antara item list lain yang menerima jenisnya (listItem ke list poin/bernomor, taskItem ke daftar tugas), di kedalaman mana pun. Kalau dua list berakhir di tempat yang sama, posisi horizontal pointer menentukan kedalamannya.
+  - Dijatuhkan di antara blok tingkat atas, item menjadi list sendiri dengan jenis list asalnya. Item terakhir sebuah list membawa list itu, sehingga tidak tersisa list kosong.
+  - Di awal atau akhir list, item tetap berada di list itu.
+- **Harness desktop:** gambar dari path atau `file://` didekode Skia (PNG, JPEG, GIF, BMP).
+- **Perbaikan dari uji pengguna — salin/potong di web kosong:** `copy()`/`cut()` juga mengirim efek Clipboard. Akibatnya, setelah event `copy` browser mengisi clipboard, `navigator.clipboard.write` asinkron ikut berjalan dan bisa balapan, lalu clipboard kosong. Menu Salin juga menulis dua kali. Sekarang salinan yang diminta host hanya dikembalikan sebagai nilai; efek Clipboard tersisa untuk salinan dari editor sendiri (tombol salin di popover tautan). Ini berlaku juga di Android dan desktop.
+- **Uji:** 2 tes aksesibilitas menu, 3 tes drag item list, tes salin/potong tanpa efek, dan tes dekode gambar desktop. Di Chrome, mirror ARIA menu `/` (listbox, 11 option, `aria-activedescendant`) dicek dan bersih kembali setelah Esc; event copy dan cut mengisi clipboard tanpa penulisan asinkron.
 - **Belum:**
-  - Menarik item list satu per satu (grip baru ada untuk blok tingkat atas).
-  - Aksesibilitas menu, popover, dan grip.
-  - Gambar di harness desktop (masih tampil sebagai gagal).
+  - Uji dengan screen reader sungguhan (VoiceOver, NVDA, TalkBack).
+  - Uji drag item list di perangkat Android: build berhenti karena disk hampir penuh.
 
 ## Berikutnya
 
-1. **P5 sisa:** aksesibilitas menu, popover, dan grip; drag item list. Setelah itu P6 (iOS dan macOS).
+1. **P6:** iOS dan macOS (UITextInput, NSTextInputClient, Metal).
 2. **P3 (web):** uji screen reader sungguhan (VoiceOver, TalkBack di Chrome Android) dan Firefox.
 3. **Tugas lanjutan Android:** navigasi TalkBack (lihat milestone 2), Samsung Keyboard, `addVisibleLineBounds`, paket AAR/Maven.
 4. **Desktop (P7):** menu klik kanan Potong/Salin/Tempel memakai sinyal `SelectionMenu` yang sama.

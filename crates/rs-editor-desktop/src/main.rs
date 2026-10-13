@@ -514,10 +514,14 @@ impl Shell {
                         let _ = clipboard.set_html(content.html, Some(content.text));
                     }
                 }
-                // The dev harness loads no images yet: they show as broken.
                 Effect::MissingImages(sources) => {
                     for src in sources {
-                        self.view.image_failed(&src);
+                        match load_image(&src) {
+                            Some((rgba, width, height)) => {
+                                self.view.add_image(&src, &rgba, width, height, 1.0, false);
+                            }
+                            None => self.view.image_failed(&src),
+                        }
                     }
                 }
                 // Touch-only effects; the desktop shell has no touch input.
@@ -531,6 +535,36 @@ impl Shell {
             }
         }
     }
+}
+
+/// Decodes an image file (a path or a `file://` URL; PNG, JPEG, GIF, BMP)
+/// with Skia into unpremultiplied RGBA. The harness reads no network
+/// addresses.
+fn load_image(src: &str) -> Option<(Vec<u8>, u32, u32)> {
+    let path = src.strip_prefix("file://").unwrap_or(src);
+    if path.contains("://") || path.starts_with("data:") {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let image = skia_safe::Image::from_encoded(skia_safe::Data::new_copy(&bytes))?;
+    let (width, height) = (image.width(), image.height());
+    let info = skia_safe::ImageInfo::new(
+        (width, height),
+        skia_safe::ColorType::RGBA8888,
+        skia_safe::AlphaType::Unpremul,
+        None,
+    );
+    let row = width as usize * 4;
+    let mut rgba = vec![0u8; row * height as usize];
+    image
+        .read_pixels(
+            &info,
+            &mut rgba,
+            row,
+            (0, 0),
+            skia_safe::image::CachingHint::Allow,
+        )
+        .then_some((rgba, width as u32, height as u32))
 }
 
 fn modifiers(state: ModifiersState) -> Modifiers {
@@ -582,5 +616,30 @@ fn main() {
     if let Err(error) = event_loop.run_app(&mut app) {
         eprintln!("{error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::load_image;
+
+    #[test]
+    fn image_files_decode_to_rgba() {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((4, 2)).unwrap();
+        surface
+            .canvas()
+            .clear(skia_safe::Color::from_argb(255, 10, 20, 30));
+        let png = surface
+            .image_snapshot()
+            .encode(None, skia_safe::EncodedImageFormat::PNG, None)
+            .unwrap();
+        let path = std::env::temp_dir().join(format!("rs-editor-image-{}.png", std::process::id()));
+        std::fs::write(&path, png.as_bytes()).unwrap();
+        let src = format!("file://{}", path.display());
+        let (rgba, width, height) = load_image(&src).expect("decoded");
+        std::fs::remove_file(&path).ok();
+        assert_eq!((width, height), (4, 2));
+        assert_eq!(&rgba[..4], &[10, 20, 30, 255]);
+        assert!(load_image("https://rs-editor.dev/a.png").is_none());
     }
 }

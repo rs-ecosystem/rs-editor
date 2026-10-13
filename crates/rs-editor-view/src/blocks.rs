@@ -4,10 +4,14 @@
 //! moves the block, with a line showing where it will land and the view
 //! scrolling near its edges.
 //!
-//! Blocks are the document's top-level blocks: a list moves as a whole.
+//! A block is a list item when the pointer (or caret) is in a list, else
+//! a top-level block. List items land between items of lists that take
+//! them, at any depth (moving the pointer right picks the deeper of two
+//! lists ending together), or between top-level blocks as a list of their
+//! own.
 
 use accesskit::{Action, NodeId, Role};
-use rs_editor_layout::{Rect, TopBlock};
+use rs_editor_layout::{DocumentLayout, Rect};
 use rs_editor_model::Fragment;
 use rs_editor_state::{NodeSelection, Selection, TextSelection};
 use rs_editor_ui::{Appear, Icon};
@@ -26,25 +30,51 @@ const TOUCH_SLACK: f32 = 10.0;
 /// Pointers this close to the top or bottom edge scroll the view.
 const EDGE: f32 = 40.0;
 
+/// What a grip moves: a top-level block or a list item.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Unit {
+    /// Position before the node and its size.
+    pos: usize,
+    size: usize,
+    /// Its box, in document coordinates.
+    rect: Rect,
+    item: bool,
+}
+
+impl Unit {
+    fn end(&self) -> usize {
+        self.pos + self.size
+    }
+}
+
+/// Where a dragged block would land.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Drop {
+    /// A position between siblings.
+    pos: usize,
+    /// The line showing it (document coordinates).
+    y: f32,
+    left: f32,
+    /// Between top-level blocks: a list item lands in a list of its own.
+    top_level: bool,
+}
+
 /// A block being dragged by its grip.
 #[derive(Debug, Clone, Copy)]
 struct BlockDrag {
-    /// The block: position before it and its size.
-    pos: usize,
-    size: usize,
+    unit: Unit,
     start: (f32, f32),
     pointer: (f32, f32),
     moved: bool,
-    /// Where the block would land: a position between top-level blocks.
-    drop: Option<usize>,
+    drop: Option<Drop>,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct BlockHandle {
     pub enabled: bool,
     appear: Appear,
-    /// The block the grip belongs to (position before it).
-    block: Option<usize>,
+    /// The block the grip belongs to.
+    block: Option<Unit>,
     /// The grip, in view coordinates.
     grip: skia_safe::Rect,
     /// The mouse over the view, for the block under it.
@@ -106,11 +136,11 @@ impl EditorView {
         }
     }
 
-    /// The top-level block the grip should show for, if any.
-    fn handle_block(&mut self) -> Option<TopBlock> {
+    /// The block the grip should show for, if any.
+    fn handle_block(&mut self) -> Option<Unit> {
         let layout = self.layout();
         if let Some(drag) = self.blocks.drag {
-            return layout.tops.get(layout.top_at_pos(drag.pos)?);
+            return Some(drag.unit);
         }
         if !self.blocks.enabled
             || !self.editor.is_editable()
@@ -126,21 +156,28 @@ impl EditorView {
                 return None;
             }
             let head = self.editor.selection().head();
-            return layout.tops.get(layout.top_at_pos(head)?);
+            let item = innermost_item(&layout, |b| {
+                b.pos < head && head < b.pos + b.node.node_size()
+            });
+            return item.or_else(|| top_unit(&layout, layout.top_at_pos(head)?));
         }
         let (x, y) = self.blocks.pointer?;
         if x < 0.0 || x > self.width || y < 0.0 || y > self.visible_height() {
             return None;
         }
         let (_, doc_y) = self.to_document(x, y);
-        let block = layout.tops.get(layout.top_at_y(doc_y)?)?;
+        let item = innermost_item(&layout, |b| b.rect.y <= doc_y && doc_y < b.rect.bottom());
+        if item.is_some() {
+            return item;
+        }
+        let block = top_unit(&layout, layout.top_at_y(doc_y)?)?;
         // Below the last block is not beside it.
-        (doc_y <= block.bottom() + self.theme().spacing.block_gap).then_some(block)
+        (doc_y <= block.rect.bottom() + self.theme().spacing.block_gap).then_some(block)
     }
 
-    /// Where the grip goes for `block`: in the left margin, centered on the
-    /// block's first line (view coordinates).
-    fn grip_rect(&mut self, block: &TopBlock) -> skia_safe::Rect {
+    /// Where the grip goes for `block`: left of it (of a list item's
+    /// marker), centered on its first line (view coordinates).
+    fn grip_rect(&mut self, block: &Unit) -> skia_safe::Rect {
         let layout = self.layout();
         let first_line = layout
             .texts
@@ -150,10 +187,10 @@ impl EditorView {
                 let line = t.layout.lines().first()?;
                 Some(t.rect.y + line.top + line.height / 2.0)
             });
-        let center = first_line.unwrap_or(block.y + block.height.min(GRIP_HEIGHT) / 2.0);
-        let center = self.to_view(Rect::new(0.0, center, 0.0, 0.0)).y;
-        let x = (self.padding.left - GRIP_WIDTH - 2.0).max(0.0);
-        skia_safe::Rect::from_xywh(x, center - GRIP_HEIGHT / 2.0, GRIP_WIDTH, GRIP_HEIGHT)
+        let center = first_line.unwrap_or(block.rect.y + block.rect.height.min(GRIP_HEIGHT) / 2.0);
+        let at = self.to_view(Rect::new(block.rect.x, center, 0.0, 0.0));
+        let x = (at.x - GRIP_WIDTH - 2.0).max(0.0);
+        skia_safe::Rect::from_xywh(x, at.y - GRIP_HEIGHT / 2.0, GRIP_WIDTH, GRIP_HEIGHT)
     }
 
     /// Brings the grip in line with the pointer, the caret and a drag.
@@ -165,7 +202,7 @@ impl EditorView {
             self.blocks.grip = grip;
             grip.bottom() > 0.0 && grip.top < self.visible_height()
         });
-        self.blocks.block = block.map(|b| b.pos);
+        self.blocks.block = block;
         if !wanted {
             self.blocks.hovered = false;
         }
@@ -184,13 +221,14 @@ impl EditorView {
     }
 
     /// Whether `(x, y)` is on the grip, reaching `slack` further up, down
-    /// and left (never into the text, where taps place the caret).
+    /// and left (barely right: the text starts there, and taps on it place
+    /// the caret).
     fn on_grip(&self, x: f32, y: f32, slack: f32) -> bool {
         let grip = self.blocks.grip;
         let area = skia_safe::Rect::from_ltrb(
             grip.left - slack,
             grip.top - slack,
-            (grip.right + slack).min(self.padding.left).max(grip.right),
+            grip.right + slack.min(2.0),
             grip.bottom + slack,
         );
         self.blocks.appear.target() && area.contains(skia_safe::Point::new(x, y))
@@ -199,23 +237,19 @@ impl EditorView {
     /// Starts a press on the grip: the block is selected, and moving makes
     /// it a drag.
     fn start_block_drag(&mut self, x: f32, y: f32) -> bool {
-        let Some(pos) = self.blocks.block else {
+        let Some(unit) = self.blocks.block else {
             return false;
         };
         let doc = self.editor.doc().clone();
-        let Some(node) = doc.node_at(pos) else {
-            return false;
-        };
         self.finish_composition();
         self.set_focused(true);
-        if let Ok(selection) = NodeSelection::create(&doc, pos) {
+        if let Ok(selection) = NodeSelection::create(&doc, unit.pos) {
             let mut tr = self.editor.state().tr();
             tr.set_selection(selection);
             self.dispatch(tr);
         }
         self.blocks.drag = Some(BlockDrag {
-            pos,
-            size: node.node_size(),
+            unit,
             start: (x, y),
             pointer: (x, y),
             moved: false,
@@ -233,27 +267,98 @@ impl EditorView {
         drag.pointer = (x, y);
         drag.moved |= (x - drag.start.0).hypot(y - drag.start.1) > DRAG_SLOP;
         if drag.moved {
-            drag.drop = self.drop_target(&drag, y);
+            drag.drop = self.drop_target(&drag.unit, x, y);
         }
         self.blocks.drag = Some(drag);
         self.request_redraw();
     }
 
-    /// The boundary between top-level blocks nearest to view `y`, unless
-    /// dropping there would leave the block where it is.
-    fn drop_target(&mut self, drag: &BlockDrag, y: f32) -> Option<usize> {
-        let (_, doc_y) = self.to_document(0.0, y);
+    /// The place nearest to the pointer at view `(x, y)` where `unit` can
+    /// land, unless that would leave it where it is.
+    fn drop_target(&mut self, unit: &Unit, x: f32, y: f32) -> Option<Drop> {
+        let (doc_x, doc_y) = self.to_document(x, y);
         let layout = self.layout();
-        let tops: Vec<TopBlock> = layout.tops.iter().collect();
-        let index = tops
+        let doc = self.editor.doc().clone();
+        let spacing = self.theme().spacing;
+        let mut candidates: Vec<Drop> = Vec::new();
+        // Between top-level blocks.
+        let tops: Vec<_> = layout.tops.iter().collect();
+        for (index, block) in tops.iter().enumerate() {
+            let gap = if index == 0 {
+                0.0
+            } else {
+                spacing.block_gap / 2.0
+            };
+            candidates.push(Drop {
+                pos: block.pos,
+                y: block.y - gap,
+                left: 0.0,
+                top_level: true,
+            });
+        }
+        if let Some(last) = tops.last() {
+            candidates.push(Drop {
+                pos: last.end(),
+                y: last.bottom() + spacing.block_gap / 2.0,
+                left: 0.0,
+                top_level: true,
+            });
+        }
+        // Between the items of lists that take this item.
+        if unit.item {
+            let kind = doc.node_at(unit.pos).map(|n| n.type_name().to_owned());
+            for item in layout
+                .blocks
+                .iter()
+                .filter(|b| Some(b.node.type_name()) == kind.as_deref())
+            {
+                let gap = spacing.list_item_gap / 2.0;
+                candidates.push(Drop {
+                    pos: item.pos,
+                    y: item.rect.y - gap,
+                    left: item.rect.x,
+                    top_level: false,
+                });
+                let end = item.pos + item.node.node_size();
+                let last = doc.resolve(end).is_ok_and(|at| at.end(at.depth()) == end);
+                if last {
+                    candidates.push(Drop {
+                        pos: end,
+                        y: item.rect.bottom() + gap,
+                        left: item.rect.x,
+                        top_level: false,
+                    });
+                }
+            }
+        }
+        candidates.retain(|c| c.pos < unit.pos || c.pos > unit.end());
+        let nearest = candidates
             .iter()
-            .take_while(|b| b.y + b.height / 2.0 < doc_y)
-            .count();
-        let boundary = match tops.get(index) {
-            Some(block) => block.pos,
-            None => tops.last()?.end(),
-        };
-        (boundary != drag.pos && boundary != drag.pos + drag.size).then_some(boundary)
+            .map(|c| (c.y - doc_y).abs())
+            .fold(f32::INFINITY, f32::min);
+        // Of places about as near, the deepest the pointer reaches; where
+        // a list and the top level meet (a list's first or last item), the
+        // list keeps its item.
+        let close = candidates
+            .iter()
+            .filter(|c| (c.y - doc_y).abs() <= nearest + 6.0);
+        let reached = close
+            .clone()
+            .filter(|c| c.left <= doc_x + 8.0)
+            .max_by(|a, b| {
+                a.left
+                    .total_cmp(&b.left)
+                    .then(b.top_level.cmp(&a.top_level))
+            });
+        reached
+            .or_else(|| {
+                close.min_by(|a, b| {
+                    a.left
+                        .total_cmp(&b.left)
+                        .then(a.top_level.cmp(&b.top_level))
+                })
+            })
+            .copied()
     }
 
     /// Scroll speed (pixels per frame) for a pointer at view `y` during a
@@ -291,25 +396,58 @@ impl EditorView {
             return;
         };
         if let (true, Some(drop)) = (drag.moved, drag.drop) {
-            self.move_block(drag.pos, drag.size, drop);
+            self.move_block(&drag.unit, &drop);
         }
         self.request_redraw();
     }
 
-    /// Moves the top-level block at `pos` (`size` long) to boundary `to`,
-    /// as one undo step, and selects it there.
-    fn move_block(&mut self, pos: usize, size: usize, to: usize) -> bool {
+    /// Moves `unit` to `drop` as one undo step and selects it there. A
+    /// list item dropped between top-level blocks goes in a list like the
+    /// one it left; a list left empty goes away.
+    fn move_block(&mut self, unit: &Unit, drop: &Drop) -> bool {
         let doc = self.editor.doc().clone();
-        let Some(node) = doc.node_at(pos) else {
+        let Some(node) = doc.node_at(unit.pos) else {
             return false;
         };
+        let Ok(at) = doc.resolve(unit.pos) else {
+            return false;
+        };
+        let parent = at.parent().clone();
+        // The removed range: the item, or its list when it was the only one.
+        let (from, to) = if unit.item && parent.child_count() == 1 {
+            let list = at.before(at.depth());
+            (list, list + parent.node_size())
+        } else {
+            (unit.pos, unit.end())
+        };
+        let content = if unit.item && drop.top_level {
+            match parent.node_type().create(
+                Some(parent.attrs()),
+                Fragment::from_node(node),
+                Default::default(),
+            ) {
+                Ok(list) => list,
+                Err(_) => return false,
+            }
+        } else {
+            node
+        };
         let mut tr = self.editor.state().tr();
-        let target = if to > pos { to - size } else { to };
-        if tr.delete(pos, pos + size).is_err()
-            || tr.insert(target, Fragment::from_node(node)).is_err()
+        let target = if drop.pos > from {
+            drop.pos - (to - from)
+        } else {
+            drop.pos
+        };
+        if tr.delete(from, to).is_err() || tr.insert(target, Fragment::from_node(content)).is_err()
         {
             return false;
         }
+        // Select the moved block itself, inside a list made for it.
+        let target = if unit.item && drop.top_level {
+            target + 1
+        } else {
+            target
+        };
         let selection = match NodeSelection::create(&tr.doc, target) {
             Ok(selection) => selection,
             Err(_) => match tr.doc.resolve(target + 1) {
@@ -432,32 +570,24 @@ impl EditorView {
         let theme = self.theme().clone();
         let palette = &theme.palette;
         if let Some(drag) = self.blocks.drag.filter(|d| d.moved) {
-            let layout = self.layout();
-            let left = self.padding.left;
             let right = self.width - self.padding.right;
-            if let Some(block) = layout.top_at_pos(drag.pos).and_then(|i| layout.tops.get(i)) {
-                let rect = self.to_view(Rect::new(0.0, block.y, 0.0, block.height));
-                let mut veil = Paint::default();
-                veil.set_color(skia_safe::Color::new(
-                    palette.background.with_alpha(0.6).argb(),
-                ));
-                canvas.draw_rect(
-                    skia_safe::Rect::from_ltrb(
-                        left - 4.0,
-                        rect.y - 2.0,
-                        right + 4.0,
-                        rect.bottom() + 2.0,
-                    ),
-                    &veil,
-                );
-            }
+            let rect = self.to_view(drag.unit.rect);
+            let mut veil = Paint::default();
+            veil.set_color(skia_safe::Color::new(
+                palette.background.with_alpha(0.6).argb(),
+            ));
+            canvas.draw_rect(
+                skia_safe::Rect::from_ltrb(
+                    rect.x - 4.0,
+                    rect.y - 2.0,
+                    right + 4.0,
+                    rect.bottom() + 2.0,
+                ),
+                &veil,
+            );
             if let Some(drop) = drag.drop {
-                let gap = theme.spacing.block_gap / 2.0;
-                let y = match layout.top_at_pos(drop).and_then(|i| layout.tops.get(i)) {
-                    Some(block) if block.pos == drop => block.y - gap,
-                    _ => layout.tops.iter().last().map_or(0.0, |b| b.bottom() + gap),
-                };
-                let y = self.to_view(Rect::new(0.0, y, 0.0, 0.0)).y;
+                let at = self.to_view(Rect::new(drop.left, drop.y, 0.0, 0.0));
+                let (left, y) = (at.x, at.y);
                 let mut line = Paint::default();
                 line.set_anti_alias(true);
                 line.set_color(skia_safe::Color::new(palette.primary.argb()));
@@ -504,6 +634,35 @@ impl EditorView {
     }
 }
 
+/// The deepest list item whose box `pick` accepts.
+fn innermost_item(
+    layout: &DocumentLayout,
+    pick: impl Fn(&rs_editor_layout::BlockBox) -> bool,
+) -> Option<Unit> {
+    layout
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.node.type_name(), "listItem" | "taskItem") && pick(b))
+        .max_by_key(|b| b.depth)
+        .map(|b| Unit {
+            pos: b.pos,
+            size: b.node.node_size(),
+            rect: b.rect,
+            item: true,
+        })
+}
+
+/// The top-level block at index `index` of the layout's tops.
+fn top_unit(layout: &DocumentLayout, index: usize) -> Option<Unit> {
+    let block = layout.tops.get(index)?;
+    Some(Unit {
+        pos: block.pos,
+        size: block.size,
+        rect: Rect::new(0.0, block.y, layout.width, block.height),
+        item: false,
+    })
+}
+
 #[cfg(test)]
 impl BlockHandle {
     pub(crate) fn grip_center(&self) -> (f32, f32) {
@@ -511,6 +670,6 @@ impl BlockHandle {
     }
 
     pub(crate) fn block(&self) -> Option<usize> {
-        self.block
+        self.block.map(|b| b.pos)
     }
 }

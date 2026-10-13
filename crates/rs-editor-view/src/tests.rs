@@ -2528,3 +2528,112 @@ mod overlay_a11y {
         assert_eq!(view.editor().selection().from(), 12);
     }
 }
+
+mod list_drag {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn item(text: &str) -> Value {
+        json!({"type": "listItem", "content": [p(text)]})
+    }
+
+    fn setup() -> (EditorView, Arc<ManualClock>) {
+        let content = doc(vec![
+            json!({"type": "bulletList", "content": [item("satu"), item("dua"), item("tiga")]}),
+            p("akhir"),
+        ]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        (view, clock)
+    }
+
+    /// Hovers the text at `pos` and presses the grip that shows.
+    fn grab(view: &mut EditorView, clock: &ManualClock, pos: usize) -> (f32, f32) {
+        let y = view_y_of(view, pos) + 10.0;
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(view);
+        clock.advance(200);
+        paint(view);
+        let (gx, gy) = view.blocks.grip_center();
+        assert!(view.pointer_down(PointerEvent::at(gx, gy)));
+        (gx, gy)
+    }
+
+    fn shape(view: &EditorView) -> String {
+        fn walk(node: &Value, out: &mut String) {
+            match node["type"].as_str() {
+                Some("text") => out.push_str(node["text"].as_str().unwrap_or("")),
+                Some("bulletList") => {
+                    out.push('[');
+                    for child in node["content"].as_array().into_iter().flatten() {
+                        walk(child, out);
+                        out.push(',');
+                    }
+                    out.push(']');
+                }
+                _ => {
+                    for child in node["content"].as_array().into_iter().flatten() {
+                        walk(child, out);
+                    }
+                }
+            }
+        }
+        let mut out = String::new();
+        for block in view.editor().get_json()["content"].as_array().unwrap() {
+            walk(block, &mut out);
+            out.push('|');
+        }
+        out
+    }
+
+    #[test]
+    fn a_list_item_has_its_own_grip_and_moves_within_its_list() {
+        let (mut view, clock) = setup();
+        assert_eq!(shape(&view), "[satu,dua,tiga,]|akhir|");
+        // "dua" is the second item: its grip, not the list's.
+        let (gx, _) = grab(&mut view, &clock, 12);
+        assert!(view.has_node_selection());
+        assert_eq!(view.editor().selection().from(), 9, "the item is selected");
+        let top = view_y_of(&mut view, 3) - 4.0;
+        view.pointer_move(PointerEvent::at(gx, top));
+        view.pointer_up(PointerEvent::at(gx, top));
+        assert_eq!(shape(&view), "[dua,satu,tiga,]|akhir|");
+    }
+
+    #[test]
+    fn a_list_item_dropped_outside_lists_becomes_a_list_of_its_own() {
+        let (mut view, clock) = setup();
+        let (gx, _) = grab(&mut view, &clock, 12);
+        let below = view_y_of(&mut view, 27) + 40.0;
+        view.pointer_move(PointerEvent::at(gx, below));
+        view.pointer_up(PointerEvent::at(gx, below));
+        assert_eq!(shape(&view), "[satu,tiga,]|akhir|[dua,]|");
+        view.run("undo", &Value::Null).unwrap();
+        assert_eq!(shape(&view), "[satu,dua,tiga,]|akhir|");
+    }
+
+    #[test]
+    fn the_last_item_takes_its_list_along() {
+        let content = doc(vec![
+            p("awal"),
+            json!({"type": "bulletList", "content": [item("sendiri")]}),
+        ]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        let (gx, _) = grab(&mut view, &clock, 9);
+        let top = view_y_of(&mut view, 1) - 6.0;
+        view.pointer_move(PointerEvent::at(gx, top));
+        view.pointer_up(PointerEvent::at(gx, top));
+        assert_eq!(
+            shape(&view),
+            "[sendiri,]|awal|",
+            "no empty list is left behind"
+        );
+    }
+}
