@@ -414,6 +414,21 @@ fn can_reports_applicability_without_changing_anything() {
 }
 
 #[test]
+fn can_judges_compound_commands_as_they_would_run() {
+    // Bullet list to task list clears the list, then wraps again: the
+    // second step only applies after the first.
+    let mut editor = editor_with(doc(vec![json!({"type": "bulletList", "content": [
+        {"type": "listItem", "content": [p("satu")]},
+    ]})]));
+    editor.select(3, 3);
+    let before = editor.get_json();
+    assert!(editor.can("toggleTaskList", &Value::Null));
+    assert_eq!(editor.get_json(), before);
+    assert!(editor.run("toggleTaskList", &Value::Null).unwrap());
+    assert_eq!(content(&editor)[0]["type"], "taskList");
+}
+
+#[test]
 fn a_chain_is_a_single_undo_step() {
     let mut editor = editor_with(doc(vec![p("text")]));
     editor.select(1, 5);

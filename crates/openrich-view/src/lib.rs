@@ -173,6 +173,9 @@ pub struct EditorView {
     pub(crate) composition: Option<Composition>,
     next_composition: u64,
     scroll_seen: u64,
+    /// Bumped by every transaction, so hosts can tell when to refresh
+    /// toolbar state.
+    revision: u64,
     effects: Vec<Effect>,
     pub(crate) a11y: a11y::A11y,
     pub(crate) touch: touch::TouchState,
@@ -231,6 +234,7 @@ impl EditorView {
             composition: None,
             next_composition: 1,
             scroll_seen,
+            revision: 0,
             effects: Vec::new(),
             a11y: a11y::A11y::default(),
             touch: touch::TouchState::default(),
@@ -245,7 +249,13 @@ impl EditorView {
     /// Mutable access for running commands; the view re-syncs afterwards.
     pub fn editor_mut(&mut self) -> &mut Editor {
         self.request_redraw();
+        self.revision += 1;
         &mut self.editor
+    }
+
+    /// Changes whenever the document or selection may have changed.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn state(&self) -> &EditorState {
@@ -492,6 +502,7 @@ impl EditorView {
         } else {
             mapped
         };
+        self.revision += 1;
         self.after_change();
         true
     }
@@ -517,6 +528,38 @@ impl EditorView {
     pub fn run(&mut self, name: &str, args: &serde_json::Value) -> Result<bool, ExtensionError> {
         let command = self.editor.manager().command(name, args)?;
         Ok(self.run_command(&command))
+    }
+
+    /// Runs named commands as one transaction, like Tiptap's
+    /// `chain()…run()`; `true` only if every command applied.
+    pub fn run_chain(
+        &mut self,
+        steps: &[(String, serde_json::Value)],
+    ) -> Result<bool, ExtensionError> {
+        let command = self.chain_of(steps)?;
+        Ok(self.run_command(&command))
+    }
+
+    /// Whether [`EditorView::run_chain`] would apply every command.
+    pub fn can_chain(
+        &mut self,
+        steps: &[(String, serde_json::Value)],
+    ) -> Result<bool, ExtensionError> {
+        let command = self.chain_of(steps)?;
+        let context = ViewQuery::new(self);
+        Ok(command(self.editor.state(), None, Some(&context)))
+    }
+
+    fn chain_of(
+        &self,
+        steps: &[(String, serde_json::Value)],
+    ) -> Result<openrich_state::Command, ExtensionError> {
+        let manager = self.editor.manager();
+        let commands = steps
+            .iter()
+            .map(|(name, args)| manager.command(name, args))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(openrich_extensions::helpers::chain(commands))
     }
 
     pub(crate) fn after_change(&mut self) {

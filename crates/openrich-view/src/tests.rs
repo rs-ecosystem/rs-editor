@@ -159,6 +159,32 @@ fn enter_and_backspace_use_the_extension_keymap() {
 }
 
 #[test]
+fn a_chain_runs_as_one_undo_step_and_bumps_the_revision() {
+    let (mut view, _) = view_with(doc(vec![p("abcd")]), KeyPlatform::Other);
+    view.select_text(1, 5, Affinity::Downstream);
+    let steps = vec![
+        ("toggleBold".to_string(), Value::Null),
+        ("toggleHeading".to_string(), json!({"level": 2})),
+    ];
+    let before = view.revision();
+    assert!(view.can_chain(&steps).unwrap());
+    assert_eq!(view.revision(), before, "a dry run changes nothing");
+    assert!(view.run_chain(&steps).unwrap());
+    assert!(view.revision() > before);
+    let editor = view.editor();
+    assert!(editor.is_active("bold", &Default::default()));
+    assert!(editor.is_active("heading", json!({"level": 2}).as_object().unwrap()));
+    assert!(view.run("undo", &Value::Null).unwrap());
+    let editor = view.editor();
+    assert!(!editor.is_active("bold", &Default::default()));
+    assert!(!editor.is_active("heading", &Default::default()));
+    assert!(
+        view.run_chain(&[("noSuchCommand".to_string(), Value::Null)])
+            .is_err()
+    );
+}
+
+#[test]
 fn clicks_select_positions_words_and_blocks() {
     let (mut view, _) = view_with(doc(vec![p("halo dunia indah")]), KeyPlatform::Other);
     let caret = {

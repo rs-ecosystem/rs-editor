@@ -1,22 +1,29 @@
 [package]
 name = "openrich-android"
-description = "Shell Android OpenRich: Skia GL di SurfaceView, gesture sentuh dan InputConnection lewat JNI"
+description = "Shell Android OpenRich: Skia GL di SurfaceView, gesture sentuh dan InputConnection; binding Kotlin lewat BoltFFI"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish = false
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+# platforms/android/package-native.py links the staticlib with the generated JNI glue.
+crate-type = ["staticlib", "rlib"]
 
-# Only Android builds carry the shell; elsewhere the library is empty so the
-# workspace still builds everywhere.
-[target.'cfg(target_os = "android")'.dependencies]
+[dependencies]
+# Must match the installed boltffi_cli exactly (same as rs-organizer).
+boltffi = "=0.29.3"
 openrich-commands.workspace = true
 openrich-extensions.workspace = true
+openrich-markup.workspace = true
+openrich-model.workspace = true
 openrich-theme.workspace = true
 openrich-view.workspace = true
 serde_json.workspace = true
+
+# The surface and accessibility halves only exist on Android; the API
+# builds everywhere, so bindings are generated and tested on the host.
+[target.'cfg(target_os = "android")'.dependencies]
 skia-safe = { version = "=0.153.3", features = ["gl", "textlayout"] }
 jni = "0.21"
 ndk = "0.9"

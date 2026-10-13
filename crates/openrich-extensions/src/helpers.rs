@@ -235,13 +235,26 @@ fn merge_transaction(target: &mut Transaction, sub: Transaction) -> bool {
 /// Runs `commands` in order as one transaction, like Tiptap's
 /// `chain()...run()`: each sees the state left by the previous ones, all
 /// changes are dispatched together, and the result is `true` only if every
-/// command applied. A dry run (`dispatch = None`) checks each command
-/// against the unchanged state.
+/// command applied. A dry run (`dispatch = None`) applies the commands to a
+/// scratch state in the same way, so a command that depends on an earlier
+/// one (`clearNodes` then `wrapInList`) is judged as it would run.
 pub fn chain(commands: Vec<Command>) -> Command {
     Arc::new(
         move |state: &EditorState, dispatch: Dispatch, view: Option<&dyn ViewContext>| {
             let Some(dispatch) = dispatch else {
-                return commands.iter().all(|cmd| cmd(state, None, view));
+                if let [command] = commands.as_slice() {
+                    return command(state, None, view);
+                }
+                let mut current = state.clone();
+                let mut all = true;
+                for cmd in &commands {
+                    let mut produced: Option<Transaction> = None;
+                    all &= cmd(&current, Some(&mut |tr| produced = Some(tr)), view);
+                    if let Some(next) = produced.and_then(|tr| current.apply(tr).ok()) {
+                        current = next;
+                    }
+                }
+                return all;
             };
             let mut current = state.clone();
             let mut combined = state.tr();

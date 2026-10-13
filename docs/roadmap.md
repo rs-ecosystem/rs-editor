@@ -9,8 +9,8 @@
 | P0 | Kerangka workspace, CI, ADR, spike Skia (WASM, Android) | **Selesai.** Lihat [laporan spike](spikes/p0-web-android.md). |
 | P1 | Core headless: model, transform, state, history, command, extension, StarterKit | **Selesai** |
 | P2 | Layout inkremental, render Skia, view, tema shadcn, dev harness desktop | **Selesai** |
-| P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | Pondasi dari spike; dikerjakan **setelah P4** |
-| P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit | **Berikutnya.** Pondasi dari spike |
+| P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Berikutnya.** Pondasi dari spike |
+| P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit, library Kotlin dan Compose | **Selesai.** Navigasi TalkBack dan Samsung Keyboard jadi tugas lanjutan |
 | P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | Belum dimulai |
 | P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | Belum dimulai |
 | P7 | Windows dan Linux: winit, IME, AccessKit | Belum dimulai |
@@ -67,7 +67,7 @@ Catatan yang dibawa ke fase berikutnya:
 - Pohon aksesibilitas dibangun ulang dalam O(jumlah blok) per update saat teknologi bantu aktif. Ini cukup untuk 10.000 blok, belum untuk 100.000.
 - Mengetik lewat `AXSelectedText` di macOS belum didukung adapter AccessKit. Screen reader tetap bisa membaca, memindahkan seleksi, dan mengetik lewat keyboard biasa.
 
-## P4 — Android · Berikutnya
+## P4 — Android · Selesai
 
 Target: editor terasa seperti kolom teks bawaan Android, bukan sekadar tampil benar.
 
@@ -127,7 +127,7 @@ Belum: Samsung Keyboard (tidak ada di perangkat uji), `addVisibleLineBounds` (AP
 **Tugas lanjutan: TalkBack.** Uji langsung di perangkat (TalkBack 17.0.1, 2026-10-13):
 
 - Berjalan: editor dibacakan sebagai kolom edit berisi seluruh teks; struktur (judul, paragraf, list, checkbox dengan statusnya) dan posisinya terekspos.
-- Probe debug yang meniru TalkBack (`adb shell am broadcast -a dev.openrich.demo.A11Y_PROBE --ei granularity 4`) memindahkan kursor per baris dengan benar. Pemetaan posisi di batas paragraf sudah diperbaiki, dan algoritma traversal AccessKit diuji di `screen_reader_line_steps_move_forward_through_every_line`.
+- Probe debug yang meniru TalkBack (`adb shell am broadcast -a dev.openrich.demo.A11Y_PROBE --ei granularity 4`, ada di demo Java lama sampai commit fefb288) memindahkan kursor per baris dengan benar. Pemetaan posisi di batas paragraf sudah diperbaiki, dan algoritma traversal AccessKit diuji di `screen_reader_line_steps_move_forward_through_every_line`.
 - Belum berjalan: dengan kontrol membaca "Lines", usapan TalkBack di perangkat tidak mengirim `ACTION_NEXT_AT_MOVEMENT_GRANULARITY` (log hanya menunjukkan lepas/pasang fokus), sehingga pengguna tidak bisa bergerak per baris. Juga, usap kanan/kiri tidak berpindah per judul/paragraf karena semuanya berada di dalam satu kolom edit.
 - Arah: pelajari cara Chrome mengekspos `contenteditable` ke TalkBack (navigasi per paragraf dan judul tanpa membaca dua kali) dan terapkan lewat AccessKit; cari tahu kenapa TalkBack tidak mengirim aksi granularitas ke node kita.
 
@@ -138,15 +138,35 @@ Rencana awal milestone:
 - Clipboard kaya (HTML) dan tempel dari aplikasi lain.
 - AccessKit untuk TalkBack.
 
-### Milestone 3: paket library
+### Milestone 3: paket library · Selesai
 
-- Binding Kotlin (BoltFFI) menggantikan JNI tangan, modul Gradle `openrich-android`, dan contoh aplikasi Compose.
-- API `chain/can/isActive` dari Kotlin.
+- **Binding Kotlin lewat BoltFFI 0.29.3** (sama dengan rs-organizer):
+  - `crates/openrich-android/src/api.rs` mengekspor kelas `NativeEditor`, yang mencakup konten (JSON, HTML, teks), perintah, sentuhan, IME, dan clipboard. Nilai terstruktur dikirim sebagai string JSON.
+  - API ini juga dibangun di host, sehingga bisa dites dengan `cargo test -p openrich-android`. Salah satu tesnya memastikan setiap perintah di `OpenRichChain` Kotlin benar-benar ada.
+  - JNI tangan hanya tersisa untuk hal yang butuh objek Java (`shell.rs`): Surface/EGL dan AccessKit.
+- **Packaging:** `platforms/android/package-native.py` menyalin pendekatan rs-organizer. Skrip ini menjalankan build binding-expansion, mengompilasi `jni_glue.c`, lalu me-link staticlib dengan clang++ tanpa whole-archive (menghindari simbol HarfBuzz ganda dari Skia), plus `-z max-page-size=16384`.
+  - BoltFFI membaca metadata dari build host memakai variabel lingkungan yang tidak dilacak Cargo. Karena itu skrip memakai target dir terpisah (`target/boltffi-metadata`).
+- **Proyek Gradle (Kotlin DSL, versi sama dengan rs-organizer):**
+  - `:openrich` berisi `OpenRichEditorView` dengan API ala Tiptap:
+    - konten: `json`, `html`, `text`, `isEditable`;
+    - perintah: `chain().focus().toggleBold().run()`, `can()…run()`, `isActive`, `getAttributes`;
+    - `OnChangeListener` yang dipicu oleh `revision`.
+    - Konten awal diberikan lewat konstruktor, sehingga undo tidak bisa mengosongkan dokumen.
+  - `:openrich-compose` berisi `OpenRichEditor` dan `rememberOpenRichEditorState`. Pembacaan seperti `isActive` bersifat observable, jadi toolbar ikut berubah saat seleksi berpindah.
+  - `:sample` adalah aplikasi Compose dengan toolbar di atas keyboard. Tombol menyala saat aktif dan nonaktif bila `can()` bernilai false.
+- **Perbaikan inti yang ditemukan lewat toolbar:** dry run `chain` sebelumnya memeriksa setiap perintah terhadap state awal. Akibatnya `can()` untuk perintah gabungan (misalnya bullet list → task list, yaitu `clearNodes` lalu `wrapInList`) salah bernilai false. Sekarang dry run mensimulasikan rantainya, sama seperti Tiptap.
+- **Uji di perangkat (Gboard):**
+  - B/I membuat kata terpilih tebal-miring dan kedua tombolnya menyala; keyboard tetap terbuka.
+  - Mengetik lalu undo dari toolbar berfungsi, dan redo menjadi aktif.
+  - Paragraf menjadi list, dan list item menjadi task item.
+  - H2 dan kutipan nonaktif di dalam list item, sesuai skema.
+  - Keluar/masuk aplikasi dan background/foreground berjalan tanpa crash.
+  - `uiautomator` masih menampilkan `EditText` dan `CheckBox`.
 
 ## Berikutnya
 
-1. **P4 (Android):** milestone di atas, dimulai dari seleksi sentuh.
-2. **P3 (web):** paket `@openrich/web`, clipboard HTML/Markdown, DOM ARIA dari pohon aksesibilitas, font emoji/CJK yang dimuat bertahap, uji di Safari, Firefox dan Chrome Android. Seleksi sentuh untuk web di HP memakai inti dari P4.
+1. **P3 (web):** paket `@openrich/web`, clipboard HTML/Markdown, DOM ARIA dari pohon aksesibilitas, font emoji/CJK yang dimuat bertahap, uji di Safari, Firefox dan Chrome Android. Seleksi sentuh untuk web di HP memakai inti dari P4.
+2. **Tugas lanjutan Android:** navigasi TalkBack (lihat milestone 2), Samsung Keyboard, `addVisibleLineBounds`, paket AAR/Maven.
 3. **Desktop (P7):** menu klik kanan Potong/Salin/Tempel memakai sinyal `SelectionMenu` yang sama.
 
 Spike web dan Android sudah membuktikan jalurnya: [laporan spike P0](spikes/p0-web-android.md).

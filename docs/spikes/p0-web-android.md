@@ -32,7 +32,7 @@
   - Java memegang `SurfaceView`, loop `Choreographer`, dan `InputConnection`.
   - Rust memegang EGL (ES 3), Skia Ganesh GL, gesture sentuh (tap, ketuk ganda/tiga, tekan lama untuk memilih kata, scroll + fling dengan `VelocityTracker`), dan editing.
 - **Build:**
-  - Library: `platforms/android/build-native.sh` (NDK 27.1, API 26, `-z max-page-size=16384`).
+  - Library: `platforms/android/build-native.sh` (NDK 27.1, API 26, `-z max-page-size=16384`). Sejak P4 milestone 3 diganti `platforms/android/package-native.py` (BoltFFI).
   - APK: Gradle 8.13 + AGP 8.13.2, offline.
   - `libc++` ter-link statis. Dependensinya hanya library sistem (`libEGL`, `libGLESv2`, `libandroid`, `liblog`).
 - **Bug lifecycle yang ditemukan:**
