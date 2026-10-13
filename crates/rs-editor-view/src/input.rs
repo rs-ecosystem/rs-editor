@@ -32,6 +32,10 @@ impl EditorView {
         if !self.editor.is_editable() && !is_navigation(&event.key) {
             return false;
         }
+        if self.composition.is_some() && event.key == "Enter" && self.slash_menu_shown() {
+            // An Enter sent before the IME commits its word still picks.
+            self.finish_composition();
+        }
         if self.composition.is_some() {
             // The IME owns keys while composing.
             return false;
@@ -95,6 +99,12 @@ impl EditorView {
 
     /// Text typed or pasted as plain characters, replacing the selection.
     pub fn insert_text(&mut self, text: &str) -> bool {
+        self.type_text(text, true)
+    }
+
+    /// Inserts `text`; `typed` is false for pastes, which never open the
+    /// slash menu.
+    fn type_text(&mut self, text: &str, typed: bool) -> bool {
         self.end_touch_mode();
         if let Some(handled) = self.field_input(FieldInput::Insert(text)) {
             return handled;
@@ -113,6 +123,9 @@ impl EditorView {
         if ok {
             self.goal_x = None;
             self.affinity = Affinity::Downstream;
+            if typed {
+                self.arm_slash(text.encode_utf16().count());
+            }
             self.after_change();
         }
         ok
@@ -407,8 +420,16 @@ impl EditorView {
             let selection = Selection::Text(TextSelection::new(caret.clone(), caret));
             tr.set_selection(selection);
         }
+        let previous = self.composition;
         self.composition = (!text.is_empty()).then_some(Composition { id, from, to: end });
-        self.dispatch(tr)
+        if !self.dispatch(tr) {
+            // Refused (a character limit): the text the composition would
+            // have covered is the user's, not the IME's.
+            self.composition = previous;
+            return false;
+        }
+        self.arm_slash(end - from);
+        true
     }
 
     /// Commits the composition with `text` (often equal to the preedit).
@@ -558,11 +579,11 @@ impl EditorView {
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         let lines: Vec<&str> = text.split('\n').collect();
         if lines.len() == 1 {
-            return self.insert_text(&text);
+            return self.type_text(&text, false);
         }
         let schema = self.editor.schema().clone();
         let Ok(paragraph) = schema.node_type("paragraph") else {
-            return self.insert_text(&text);
+            return self.type_text(&text, false);
         };
         let mut blocks = Vec::new();
         for line in &lines {

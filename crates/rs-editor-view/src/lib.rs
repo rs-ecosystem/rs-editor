@@ -732,7 +732,8 @@ impl EditorView {
                 .and_then(|current| self.anchor_in(&current.layout))
         });
         let mapped = anchor.map(|(pos, offset)| (tr.mapping.map(pos, Assoc::After), offset));
-        if self.editor.dispatch(tr).is_err() {
+        // A plugin may refuse it (a character limit): nothing changed.
+        if !matches!(self.editor.dispatch(tr), Ok(applied) if !applied.is_empty()) {
             self.pending_anchor = anchor;
             return false;
         }

@@ -1829,9 +1829,75 @@ mod slash {
         type_text(&mut view, " /");
         assert!(view.slash_menu_shown(), "after a space");
         type_text(&mut view, " ");
-        assert!(!view.slash_menu_shown(), "a space ends the query");
+        assert!(
+            !view.slash_menu_shown(),
+            "a space right after the slash ends it"
+        );
         type_text(&mut view, "/zzz");
-        assert!(!view.slash_menu_shown(), "nothing matches");
+        assert!(view.slash_menu_shown(), "no match: 'No results' shows");
+        assert!(view.slash_menu_items().is_empty());
+        // Enter with nothing to pick is a plain Enter.
+        assert!(key(&mut view, "Enter", plain()));
+        assert_eq!(view.editor().get_text("|"), "a/b / /zzz|");
+        assert!(!view.slash_menu_shown());
+    }
+
+    /// Only a slash just typed opens the menu: the caret moving into
+    /// existing text such as a path never does, so Enter there is Enter.
+    #[test]
+    fn existing_slashes_never_open_the_menu() {
+        let (mut view, _) = setup(vec![p("Lihat /docs untuk detail")]);
+        view.select_text(10, 10, Affinity::Downstream);
+        paint(&mut view);
+        assert!(!view.slash_menu_shown(), "clicked into /docs");
+        assert!(key(&mut view, "Enter", plain()));
+        assert_eq!(view.editor().get_text("|"), "Lihat /do|cs untuk detail");
+
+        // Pasted text with a slash neither.
+        let (mut view, _) = setup(vec![p("")]);
+        view.paste_text("/h1");
+        paint(&mut view);
+        assert!(!view.slash_menu_shown());
+    }
+
+    /// Queries take spaces ("/judul 2"); a pick removes the whole word the
+    /// caret is in, and what is typed next is its own undo step.
+    #[test]
+    fn queries_with_spaces_and_whole_words() {
+        let (mut view, clock) = setup(vec![p("")]);
+        view.set_locale("id");
+        type_text(&mut view, "/judul 2");
+        assert_eq!(view.slash_menu_items(), ["Judul 2"]);
+        assert!(key(&mut view, "Enter", plain()));
+        assert_eq!(first_block(&view)["attrs"]["level"], 2);
+
+        let (mut view, _) = setup(vec![p("")]);
+        type_text(&mut view, "/heading");
+        for _ in 0..4 {
+            key(&mut view, "ArrowLeft", plain());
+        }
+        paint(&mut view);
+        assert!(view.slash_menu_shown(), "the caret is still in the query");
+        assert!(key(&mut view, "Enter", plain()));
+        assert_eq!(view.editor().get_text(""), "", "no 'ing' left behind");
+
+        type_text(&mut view, "Judul");
+        clock.advance(100);
+        view.run("undo", &Value::Null).unwrap();
+        assert_eq!(view.editor().get_text(""), "", "the typing undoes alone");
+        assert_eq!(first_block(&view)["type"], "heading");
+
+        // Shift-Enter keeps its line break; a list row hides in a list.
+        let content = json!({"type": "bulletList", "content": [
+            {"type": "listItem", "content": [p("")]}
+        ]});
+        let (mut view, _) = setup(vec![content]);
+        type_text(&mut view, "/");
+        assert!(!view.slash_menu_items().contains(&"Bullet list"));
+        key(&mut view, "Enter", shift());
+        paint(&mut view);
+        assert!(view.editor().get_json().to_string().contains("hardBreak"));
+        assert!(!view.slash_menu_shown());
     }
 
     #[test]

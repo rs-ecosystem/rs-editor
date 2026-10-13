@@ -1,16 +1,18 @@
 //! The slash menu: typing `/` at the start of a block or after a space
 //! opens a list of blocks to turn the line into, filtered by what follows
-//! the slash (`/hea` → headings), like Notion and Tiptap's slash command
-//! template.
+//! the slash (`/hea` → headings, `/judul 2`), like Notion and Tiptap's
+//! slash command template.
 //!
-//! The menu is derived from the document, as Tiptap's Suggestion plugin
-//! does: it shows while the text between a qualifying `/` and the caret
-//! is a query, so typing, deleting, undo and IME input all keep it right
-//! without tracking keystrokes.
+//! Only a slash just typed (or committed by an IME) arms the menu; moving
+//! the caret into existing text such as `/docs` never opens it. While the
+//! caret stays in the query the menu follows the document, so typing,
+//! deleting and IME composition keep it right; leaving the query disarms
+//! it. A query that matches nothing shows "No results", and once it holds
+//! a space with no match the slash is just text again.
 
 use rs_editor_layout::{Affinity, UiText};
 use rs_editor_state::Selection;
-use rs_editor_ui::{Appear, Icon, Menu, MenuItem};
+use rs_editor_ui::{Appear, ITEM_HEIGHT, Icon, Menu, MenuItem, PANEL_PADDING};
 use serde_json::{Value, json};
 use skia_safe::Canvas;
 
@@ -25,8 +27,8 @@ const GAP: f32 = 4.0;
 /// Space kept from the view's edges.
 const MARGIN: f32 = 8.0;
 const WIDTH: f32 = 256.0;
-/// Room for every row (ten of 32 pixels, and the panel's padding).
-const MAX_HEIGHT: f32 = 328.0;
+/// Room for every row and the panel's padding.
+const MAX_HEIGHT: f32 = ITEMS.len() as f32 * ITEM_HEIGHT + 2.0 * PANEL_PADDING;
 /// A longer query is a word that happens to follow a slash.
 const MAX_QUERY: usize = 24;
 
@@ -171,7 +173,15 @@ struct Trigger {
     from: usize,
     /// The caret.
     to: usize,
+    /// The end of the word the caret is in: a pick deletes up to here.
+    end: usize,
     query: String,
+}
+
+/// Slashes that start a query (Chinese and Japanese IMEs type the
+/// full-width one).
+fn is_slash(c: char) -> bool {
+    c == '/' || c == '\u{ff0f}'
 }
 
 /// What the rows were built for.
@@ -190,6 +200,9 @@ struct MenuTouch {
     start: (f32, f32),
     last_y: f32,
     moved: bool,
+    /// The row pressed: a tap picks this one, not whatever is under the
+    /// finger by the time it lifts.
+    row: Option<usize>,
 }
 
 #[derive(Debug, Default)]
@@ -206,6 +219,11 @@ pub(crate) struct Slash {
     dismissed: Option<usize>,
     pressed: Option<usize>,
     touch: Option<MenuTouch>,
+    /// The slash just typed that the menu belongs to.
+    armed: Option<usize>,
+    /// Arrow keys chose the row: a mouse resting over the menu does not
+    /// take the choice over until it moves (from where it was first seen).
+    keyboard: Option<Option<(f32, f32)>>,
 }
 
 impl Slash {
@@ -241,43 +259,93 @@ impl EditorView {
             .collect()
     }
 
-    /// The slash before the caret that starts a query, if any.
+    /// The query of the armed slash, while the caret is in it.
     fn find_trigger(&self) -> Option<Trigger> {
+        let from = self.slash.armed?;
         let selection = self.editor.selection();
         if !matches!(selection, Selection::Text(_)) || !selection.empty() {
             return None;
         }
+        let caret = selection.head();
+        let head = selection.head_pos();
+        let block = head.parent();
+        let start = head.start(head.depth());
+        if !block.is_textblock() || block.node_type().spec().code || from < start || caret <= from {
+            return None;
+        }
+        let units: Vec<u16> = rs_editor_text::textblock_text(block)
+            .encode_utf16()
+            .collect();
+        let (slash, offset) = (from - start, caret - start);
+        if offset > units.len()
+            || !char::decode_utf16([units[slash]])
+                .next()?
+                .is_ok_and(is_slash)
+        {
+            return None;
+        }
+        let query = String::from_utf16(&units[slash + 1..offset]).ok()?;
+        if query.chars().count() > MAX_QUERY
+            || query.starts_with(char::is_whitespace)
+            || query.contains(['\n', '\u{fffc}'])
+            || query.chars().any(is_slash)
+        {
+            return None;
+        }
+        // The rest of the word after the caret goes with the query.
+        let rest = String::from_utf16_lossy(&units[offset..]);
+        let word: usize = rest
+            .chars()
+            .take_while(|&c| !c.is_whitespace() && !is_slash(c) && c != '\u{fffc}')
+            .map(char::len_utf16)
+            .sum();
+        Some(Trigger {
+            from,
+            to: caret,
+            end: caret + word,
+            query,
+        })
+    }
+
+    /// After typing: a slash just typed (within the last `typed` UTF-16
+    /// units before the caret), at the start of a block or after a space
+    /// and outside code, arms the menu.
+    pub(crate) fn arm_slash(&mut self, typed: usize) {
+        if !self.slash.enabled {
+            return;
+        }
+        let selection = self.editor.selection();
+        if !matches!(selection, Selection::Text(_)) || !selection.empty() {
+            return;
+        }
         let head = selection.head_pos();
         let block = head.parent();
         if !block.is_textblock() || block.node_type().spec().code {
-            return None;
+            return;
+        }
+        // Inline code takes slashes as code too.
+        if head.marks().iter().any(|m| m.mark_type().name() == "code") {
+            return;
         }
         let start = head.start(head.depth());
         let offset = selection.head() - start;
         let units: Vec<u16> = rs_editor_text::textblock_text(block)
             .encode_utf16()
             .collect();
-        let before = &units[..offset.min(units.len())];
-        let slash = before.iter().rposition(|&unit| unit == u16::from(b'/'))?;
-        let query = String::from_utf16(&before[slash + 1..]).ok()?;
-        if query.chars().count() > MAX_QUERY
-            || query
-                .chars()
-                .any(|c| c.is_whitespace() || c == '/' || c == '\u{fffc}')
-        {
-            return None;
+        let before = String::from_utf16_lossy(&units[..offset.min(units.len())]);
+        let Some((index, _)) = before.char_indices().rev().find(|&(_, c)| is_slash(c)) else {
+            return;
+        };
+        let slash = before[..index].encode_utf16().count();
+        if slash + typed < offset {
+            return;
         }
-        if slash > 0 {
-            let previous = char::from_u32(u32::from(before[slash - 1]));
-            if !previous.is_some_and(char::is_whitespace) {
-                return None;
-            }
+        let previous = before[..index].chars().last();
+        if previous.is_some_and(|c| !c.is_whitespace()) {
+            return;
         }
-        Some(Trigger {
-            from: start + slash,
-            to: start + offset,
-            query,
-        })
+        self.slash.armed = Some(start + slash);
+        self.slash.dismissed = None;
     }
 
     fn slash_allowed(&self) -> bool {
@@ -295,6 +363,10 @@ impl EditorView {
         } else {
             None
         };
+        if trigger.is_none() && self.slash_allowed() {
+            // The caret left the query (or the slash went): it is text now.
+            self.slash.armed = None;
+        }
         if self.slash.dismissed.is_some()
             && trigger.as_ref().map(|t| t.from) != self.slash.dismissed
         {
@@ -304,14 +376,24 @@ impl EditorView {
         let mut wanted = false;
         if let Some(trigger) = &trigger {
             self.build_slash_rows(trigger);
-            wanted = !self.slash.shown.is_empty() && self.place_slash(trigger);
+            let words = trigger.query.contains(char::is_whitespace);
+            if self.slash.shown.is_empty() && words {
+                // "/bullet lists" with no match: the slash is just text.
+                self.slash.armed = None;
+            } else {
+                wanted = self.place_slash(trigger);
+            }
         }
-        self.slash.trigger = trigger;
+        self.slash.trigger = trigger.filter(|_| self.slash.armed.is_some());
+        if self.slash.trigger.is_none() {
+            wanted = false;
+        }
         if wanted != self.slash.appear.target() {
             self.slash.appear.set(wanted, self.clock.now_ms());
             if !wanted {
                 self.slash.pressed = None;
                 self.slash.touch = None;
+                self.slash.keyboard = None;
             }
             self.request_redraw();
         }
@@ -319,24 +401,44 @@ impl EditorView {
 
     /// The rows matching the query that can turn this block into theirs.
     fn build_slash_rows(&mut self, trigger: &Trigger) {
-        let palette = self.theme().palette.clone();
         let built = Built {
             from: trigger.from,
             query: trigger.query.clone(),
             revision: self.revision(),
-            color: palette.popover_foreground.argb(),
+            color: self.theme().palette.popover_foreground.argb(),
             strings: self.strings,
         };
         if self.slash.built.as_ref() == Some(&built) {
             return;
         }
+        let palette = self.theme().palette.clone();
         let new_query = self
             .slash
             .built
             .as_ref()
             .is_none_or(|b| b.from != built.from || b.query != built.query);
-        let query = trigger.query.to_lowercase();
+        let query = trigger.query.trim_end().to_lowercase();
         let strings = self.strings;
+        // A list or quote row would undo the list or quote the caret is in.
+        let head = self.editor.selection().head_pos().clone();
+        let ancestors: Vec<String> = (0..=head.depth())
+            .map(|depth| head.node(depth).type_name().to_owned())
+            .collect();
+        let active: Vec<Label> = [
+            (Label::BulletList, "bulletList"),
+            (Label::NumberedList, "orderedList"),
+            (Label::TaskList, "taskList"),
+            (Label::Quote, "blockquote"),
+        ]
+        .into_iter()
+        .filter(|(_, name)| ancestors.iter().any(|a| a == name))
+        .map(|(label, _)| label)
+        .collect();
+        let already = |label: Label| {
+            active
+                .iter()
+                .any(|a| std::mem::discriminant(a) == std::mem::discriminant(&label))
+        };
         let mut scored: Vec<(u8, usize)> = ITEMS
             .iter()
             .enumerate()
@@ -359,6 +461,9 @@ impl EditorView {
         scored.sort();
         let mut shown = Vec::new();
         for (_, index) in scored {
+            if already(ITEMS[index].label) {
+                continue;
+            }
             let steps = slash_steps(trigger, index);
             if self.can_chain(&steps).unwrap_or(false) {
                 shown.push(index);
@@ -385,8 +490,14 @@ impl EditorView {
                 }
             })
             .collect();
+        let empty = self.engine.ui_label(
+            strings.no_results,
+            &UiText::small(palette.muted_foreground),
+            None,
+        );
         let menu = &mut self.slash.menu;
         menu.items = items;
+        menu.empty = Some(empty);
         if new_query {
             menu.selected = (!shown.is_empty()).then_some(0);
             menu.scroll = 0.0;
@@ -461,6 +572,7 @@ impl EditorView {
         self.finish_composition();
         // Its own undo step: undo brings the typed query back.
         self.close_history_now();
+        self.slash.armed = None;
         if matches!(ITEMS[index].label, Label::Image) {
             // The query goes; the picture comes from the host's picker or
             // an address typed into the field.
@@ -473,6 +585,8 @@ impl EditorView {
         } else {
             let _ = self.run_chain(&slash_steps(&trigger, index));
         }
+        // What is typed next is its own undo step too.
+        self.close_history_now();
         self.update_slash();
     }
 
@@ -481,12 +595,33 @@ impl EditorView {
     pub(crate) fn slash_key(&mut self, event: &KeyEvent) -> bool {
         self.update_slash();
         let m = event.modifiers;
-        if !self.slash.appear.target() || m.ctrl || m.meta || m.alt {
+        // Shift-Enter (a line break) and Shift-Tab (outdent) keep theirs.
+        if !self.slash.appear.target() || m.ctrl || m.meta || m.alt || m.shift {
             return false;
         }
+        let rows = self.slash.shown.len();
         match event.key.as_str() {
-            "ArrowDown" => self.slash.menu.select_by(1),
-            "ArrowUp" => self.slash.menu.select_by(-1),
+            "ArrowDown" | "ArrowUp" | "Home" | "End" | "PageDown" | "PageUp" if rows > 0 => {
+                let menu = &mut self.slash.menu;
+                match event.key.as_str() {
+                    "ArrowDown" => menu.select_by(1),
+                    "ArrowUp" => menu.select_by(-1),
+                    "Home" => menu.select_by(-(menu.selected.unwrap_or(0) as i32)),
+                    "End" => menu.select_by(rows as i32 - 1 - menu.selected.unwrap_or(0) as i32),
+                    "PageDown" => {
+                        menu.select_by(5.min(rows as i32 - 1 - menu.selected.unwrap_or(0) as i32))
+                    }
+                    _ => menu.select_by(-(5.min(menu.selected.unwrap_or(0) as i32))),
+                }
+                // The keyboard chose: a mouse resting on the menu waits.
+                self.slash.keyboard = Some(None);
+            }
+            "Enter" | "Tab" if rows == 0 => {
+                // Nothing to pick: the key does what it always does.
+                self.slash.armed = None;
+                self.update_slash();
+                return false;
+            }
             "Enter" | "Tab" => {
                 let row = self.slash.menu.selected.unwrap_or(0);
                 self.pick_slash(row);
@@ -501,7 +636,8 @@ impl EditorView {
     /// A line break typed while the menu shows (an IME's Enter) picks.
     pub(crate) fn slash_newline(&mut self) -> bool {
         self.update_slash();
-        if !self.slash.appear.target() {
+        if !self.slash.appear.target() || self.slash.shown.is_empty() {
+            self.slash.armed = None;
             return false;
         }
         let row = self.slash.menu.selected.unwrap_or(0);
@@ -530,6 +666,7 @@ impl EditorView {
             return false;
         }
         if self.slash.menu.contains(x, y) {
+            self.stop_scrolling();
             self.slash.pressed = self.slash.menu.item_at(x, y);
             return true;
         }
@@ -541,6 +678,16 @@ impl EditorView {
     pub(crate) fn slash_pointer_move(&mut self, x: f32, y: f32) -> Option<bool> {
         if !self.slash_at(x, y) {
             return None;
+        }
+        // After arrow keys, the pointer must really move to choose.
+        match self.slash.keyboard {
+            Some(None) => {
+                self.slash.keyboard = Some(Some((x, y)));
+                return Some(true);
+            }
+            Some(Some(seen)) if (x - seen.0).hypot(y - seen.1) < 3.0 => return Some(true),
+            Some(Some(_)) => self.slash.keyboard = None,
+            None => {}
         }
         let row = self.slash.menu.item_at(x, y);
         if row.is_some() && row != self.slash.menu.selected {
@@ -624,13 +771,17 @@ impl EditorView {
                 if !self.slash_at(x, y) {
                     return false;
                 }
+                // A fling of the document stops, so rows hold still.
+                self.stop_scrolling();
+                let row = self.slash.menu.item_at(x, y);
                 self.slash.touch = Some(MenuTouch {
                     start: (x, y),
                     last_y: y,
                     moved: false,
+                    row,
                 });
-                if let Some(row) = self.slash.menu.item_at(x, y) {
-                    self.slash.menu.selected = Some(row);
+                if row.is_some() {
+                    self.slash.menu.selected = row;
                 }
                 true
             }
@@ -654,7 +805,8 @@ impl EditorView {
                     return false;
                 };
                 if !touch.moved
-                    && let Some(row) = self.slash.menu.item_at(x, y)
+                    && let Some(row) = touch.row
+                    && self.slash.menu.item_at(x, y) == Some(row)
                 {
                     self.pick_slash(row);
                 }
@@ -669,7 +821,7 @@ impl EditorView {
 fn slash_steps(trigger: &Trigger, index: usize) -> Vec<(String, Value)> {
     let mut steps = vec![step(
         "deleteRange",
-        json!({"from": trigger.from, "to": trigger.to}),
+        json!({"from": trigger.from, "to": trigger.end}),
     )];
     steps.extend((ITEMS[index].steps)());
     steps

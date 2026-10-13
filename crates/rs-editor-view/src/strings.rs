@@ -30,6 +30,7 @@ pub(crate) struct Strings {
     pub remove_link: &'static str,
     pub apply: &'static str,
     pub move_block: &'static str,
+    pub no_results: &'static str,
 }
 
 const ENGLISH: Strings = Strings {
@@ -64,6 +65,7 @@ const ENGLISH: Strings = Strings {
     remove_link: "Remove link",
     apply: "Apply",
     move_block: "Select or drag to move the block",
+    no_results: "No results",
 };
 
 const INDONESIAN: Strings = Strings {
@@ -98,6 +100,7 @@ const INDONESIAN: Strings = Strings {
     remove_link: "Hapus tautan",
     apply: "Terapkan",
     move_block: "Pilih atau seret untuk memindahkan blok",
+    no_results: "Tidak ada hasil",
 };
 
 /// The strings for a BCP 47 language tag (`"id-ID"`, `"en"`); English

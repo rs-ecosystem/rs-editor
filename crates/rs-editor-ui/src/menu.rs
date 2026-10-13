@@ -34,6 +34,8 @@ pub struct Menu {
     pub selected: Option<usize>,
     /// How far the rows are scrolled up.
     pub scroll: f32,
+    /// Shown, muted, in place of rows when there are none ("No results").
+    pub empty: Option<TextLayout>,
 }
 
 impl Default for Menu {
@@ -45,13 +47,14 @@ impl Default for Menu {
             max_height: 320.0,
             selected: None,
             scroll: 0.0,
+            empty: None,
         }
     }
 }
 
 impl Menu {
     fn rows_height(&self) -> f32 {
-        self.items.len() as f32 * ITEM_HEIGHT
+        self.items.len().max(usize::from(self.empty.is_some())) as f32 * ITEM_HEIGHT
     }
 
     /// Width and height of the panel.
@@ -95,6 +98,18 @@ impl Menu {
         }
         let index = ((y - viewport.top + self.scroll) / ITEM_HEIGHT).floor();
         (index >= 0.0 && (index as usize) < self.items.len()).then_some(index as usize)
+    }
+
+    /// Paints `text` in the first row's place, for a menu without rows.
+    fn paint_empty(&self, canvas: &Canvas, text: &TextLayout, progress: f32) {
+        let row = self.item_rect(0);
+        paint_text(
+            canvas,
+            text,
+            row.left + INSET,
+            row.center_y() - text.height() / 2.0,
+            progress,
+        );
     }
 
     pub fn max_scroll(&self) -> f32 {
@@ -148,6 +163,11 @@ impl Menu {
         let viewport = self.viewport();
         canvas.save();
         canvas.clip_rect(viewport, None, true);
+        if self.items.is_empty()
+            && let Some(empty) = &self.empty
+        {
+            self.paint_empty(canvas, empty, progress);
+        }
         for (index, item) in self.items.iter().enumerate() {
             let row = self.item_rect(index);
             if row.bottom() < viewport.top || row.top > viewport.bottom() {
@@ -189,6 +209,34 @@ impl Menu {
             }
         }
         canvas.restore();
+        // More rows above or below: the edge fades into the panel.
+        let fade = |canvas: &Canvas, top: f32, down: bool| {
+            // Strips from opaque at the edge to clear inward.
+            const STRIPS: usize = 8;
+            let height = ITEM_HEIGHT * 0.75;
+            let strip = height / STRIPS as f32;
+            for i in 0..STRIPS {
+                let from_edge = if down { STRIPS - 1 - i } else { i };
+                let opacity = 1.0 - (from_edge as f32 + 0.5) / STRIPS as f32;
+                let mut paint = Paint::default();
+                paint.set_color(with_alpha(sk(theme.palette.popover), progress * opacity));
+                canvas.draw_rect(
+                    Rect::from_xywh(
+                        viewport.left,
+                        top + i as f32 * strip,
+                        viewport.width(),
+                        strip,
+                    ),
+                    &paint,
+                );
+            }
+        };
+        if self.scroll > 0.5 {
+            fade(canvas, viewport.top, false);
+        }
+        if self.scroll < self.max_scroll() - 0.5 {
+            fade(canvas, viewport.bottom() - ITEM_HEIGHT * 0.75, true);
+        }
         canvas.restore();
     }
 }
