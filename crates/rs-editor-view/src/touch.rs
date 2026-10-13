@@ -777,6 +777,12 @@ impl EditorView {
         }
     }
 
+    /// Shows `menu` (the link field's own, for instance).
+    pub(crate) fn show_menu_at(&mut self, menu: SelectionMenu) {
+        self.touch.menu_shown = true;
+        self.push_effect(Effect::SelectionMenu(Some(menu)));
+    }
+
     pub(crate) fn hide_menu(&mut self) {
         if self.touch.menu_shown {
             self.touch.menu_shown = false;
@@ -802,6 +808,9 @@ impl EditorView {
         html: Option<&str>,
     ) -> Option<ClipboardContent> {
         self.hide_menu();
+        if let Some(copied) = self.field_menu_action(item, text) {
+            return copied;
+        }
         match item {
             MenuItem::Copy => {
                 let copied = self.copy()?;

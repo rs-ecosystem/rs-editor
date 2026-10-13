@@ -86,6 +86,9 @@ struct Line {
     at_ms: u64,
 }
 
+/// Custom accessibility actions of the grip.
+const GRIP_MOVE_UP: i32 = 1;
+const GRIP_MOVE_DOWN: i32 = 2;
 /// The tallest the ghost of a dragged block gets.
 const GHOST_HEIGHT: f32 = 160.0;
 /// How quickly the drop line catches up (milliseconds to cover ~63%).
@@ -108,6 +111,10 @@ pub(crate) struct BlockHandle {
     hovered: bool,
     drag: Option<BlockDrag>,
     line: Option<Line>,
+    /// A block a screen reader moved with the grip's actions: the grip
+    /// stays on it (not on what slid under the mouse) until the pointer
+    /// moves or the document changes otherwise.
+    pub(crate) pinned: Option<usize>,
 }
 
 impl BlockHandle {
@@ -181,6 +188,14 @@ impl EditorView {
             || self.slash_menu_shown()
         {
             return None;
+        }
+        if let Some(pos) = self.blocks.pinned {
+            let unit = innermost_item(&layout, |b| b.pos == pos).or_else(|| {
+                top_unit(&layout, layout.top_at_pos(pos + 1)?).filter(|u| u.pos == pos)
+            });
+            if unit.is_some() {
+                return unit;
+            }
         }
         // With a finger, the caret's block (also while a keyboard composes
         // words, which would otherwise make it blink in and out).
@@ -383,13 +398,17 @@ impl EditorView {
                 top_level: true,
             });
         }
-        // Between the items of lists that take this item.
-        if unit.item {
-            let kind = doc.node_at(unit.pos).map(|n| n.type_name().to_owned());
+        // Between the items of lists: an item of any list (it takes the
+        // kind of the list it lands in), or a paragraph (it becomes one).
+        let into_lists = unit.item
+            || doc
+                .node_at(unit.pos)
+                .is_some_and(|n| n.type_name() == "paragraph");
+        if into_lists {
             for item in layout
                 .blocks
                 .iter()
-                .filter(|b| Some(b.node.type_name()) == kind.as_deref())
+                .filter(|b| matches!(b.node.type_name(), "listItem" | "taskItem"))
             {
                 let gap = spacing.list_item_gap / 2.0;
                 candidates.push(Drop {
@@ -564,7 +583,8 @@ impl EditorView {
         } else {
             (unit.pos, unit.end())
         };
-        let content = if unit.item && drop.top_level {
+        let wrapped = unit.item && drop.top_level;
+        let content = if wrapped {
             match parent.node_type().create(
                 Some(parent.attrs()),
                 Fragment::from_node(node),
@@ -572,6 +592,12 @@ impl EditorView {
             ) {
                 Ok(list) => list,
                 Err(_) => return false,
+            }
+        } else if !drop.top_level {
+            // Into a list: as an item of its kind.
+            match self.as_item_of(&doc, drop.pos, &node) {
+                Some(item) => item,
+                None => return false,
             }
         } else {
             node
@@ -586,13 +612,32 @@ impl EditorView {
         {
             return false;
         }
-        // The moved block, inside a list made for it: the caret goes to
-        // its end (typing goes on there), an image stays selected.
-        let target = if unit.item && drop.top_level {
-            target + 1
-        } else {
-            target
-        };
+        // The moved block, inside a list made for it.
+        let mut target = if wrapped { target + 1 } else { target };
+        // An item taken out beside a list of its kind joins it (a numbered
+        // list goes on counting): the later join first, so the earlier
+        // position holds.
+        if wrapped {
+            let list = target - 1;
+            let size = tr.doc.node_at(list).map_or(0, |n| n.node_size());
+            let kind = parent.type_name();
+            let after = list + size;
+            let next = tr.doc.resolve(after).ok().and_then(|at| at.node_after());
+            if next.is_some_and(|n| n.type_name() == kind)
+                && rs_editor_transform::can_join(&tr.doc, after)
+            {
+                let _ = tr.join(after, 1);
+            }
+            let previous = tr.doc.resolve(list).ok().and_then(|at| at.node_before());
+            if previous.is_some_and(|n| n.type_name() == kind)
+                && rs_editor_transform::can_join(&tr.doc, list)
+                && tr.join(list, 1).is_ok()
+            {
+                target -= 2;
+            }
+        }
+        // The caret goes to its end (typing goes on there), an image stays
+        // selected.
         let moved = tr.doc.node_at(target);
         let selection = match moved {
             Some(node) if node.is_leaf() => NodeSelection::create(&tr.doc, target).ok(),
@@ -612,6 +657,35 @@ impl EditorView {
         }
         self.reveal_block(target);
         true
+    }
+
+    /// `node` as an item of the list at `pos` (a boundary between its
+    /// items): an item of the other kind converts (a task item becomes a
+    /// list item and back), a paragraph is wrapped.
+    fn as_item_of(
+        &self,
+        doc: &rs_editor_model::Node,
+        pos: usize,
+        node: &rs_editor_model::Node,
+    ) -> Option<rs_editor_model::Node> {
+        let list = doc.resolve(pos).ok()?.parent().clone();
+        let kind = match list.type_name() {
+            "taskList" => "taskItem",
+            _ => "listItem",
+        };
+        if node.type_name() == kind {
+            return Some(node.clone());
+        }
+        let item = self.editor.schema().node_type(kind).ok()?;
+        match node.type_name() {
+            "listItem" | "taskItem" => item
+                .create(None, node.content().clone(), Default::default())
+                .ok(),
+            "paragraph" => item
+                .create(None, Fragment::from_node(node.clone()), Default::default())
+                .ok(),
+            _ => None,
+        }
     }
 
     /// Scrolls (smoothly) so the block at `pos` shows whole above whatever
@@ -654,42 +728,47 @@ impl EditorView {
         if !self.editor.is_editable() {
             return false;
         }
-        let selection = self.editor.selection().clone();
-        let head = selection.head();
+        let head = self.editor.selection().head();
         let layout = self.layout();
         let unit = innermost_item(&layout, |b| {
             b.pos < head && head < b.pos + b.node.node_size()
         })
         .or_else(|| top_unit(&layout, layout.top_at_pos(head)?));
-        let Some(unit) = unit else {
-            return false;
-        };
+        match unit {
+            Some(unit) => self.move_unit_by(unit, up).is_some(),
+            None => false,
+        }
+    }
+
+    /// Moves `unit` one place up or down among its siblings.
+    /// Moves `unit` past its previous or next sibling; returns where it
+    /// went.
+    fn move_unit_by(&mut self, unit: Unit, up: bool) -> Option<usize> {
+        let selection = self.editor.selection().clone();
         let doc = self.editor.doc().clone();
-        let Ok(at) = doc.resolve(unit.pos) else {
-            return false;
-        };
+        let at = doc.resolve(unit.pos).ok()?;
         let parent = at.parent();
         let index = at.index(at.depth());
         let target = if up {
-            let Some(previous) = index.checked_sub(1).map(|i| parent.child(i)) else {
-                return false;
-            };
+            let previous = parent.child(index.checked_sub(1)?);
             unit.pos - previous.node_size()
         } else {
             if index + 1 >= parent.child_count() {
-                return false;
+                return None;
             }
             unit.end() + parent.child(index + 1).node_size()
         };
+        // Among its siblings: a list's items stay items, blocks stay as
+        // they are.
         let drop = Drop {
             pos: target,
             y: 0.0,
             left: 0.0,
-            top_level: false,
+            top_level: !unit.item,
         };
         self.finish_composition();
         if !self.move_block(&unit, &drop) {
-            return false;
+            return None;
         }
         // The caret (or selection) keeps its place inside the block.
         let moved_to = if up { target } else { target - unit.size };
@@ -698,7 +777,7 @@ impl EditorView {
             let (anchor, head) = (shift(selection.anchor()), shift(selection.head()));
             self.select_text(anchor, head, self.affinity);
         }
-        true
+        Some(moved_to)
     }
 
     /// Typing over a selected block (a click on its grip) goes on at the
@@ -729,8 +808,39 @@ impl EditorView {
         let id = NodeId(overlay_ids::GRIP);
         let mut node = overlay_node(Role::Button, self.blocks.grip, self.strings.move_block);
         node.add_action(Action::Click);
+        // Screen readers move blocks with these instead of dragging.
+        node.add_action(Action::CustomAction);
+        node.set_custom_actions(vec![
+            accesskit::CustomAction {
+                id: GRIP_MOVE_UP,
+                description: self.strings.move_up.to_owned(),
+            },
+            accesskit::CustomAction {
+                id: GRIP_MOVE_DOWN,
+                description: self.strings.move_down.to_owned(),
+            },
+        ]);
         out.nodes.push((id, node));
         out.roots.push(id);
+    }
+
+    /// A screen reader's custom action on the grip: moving its block.
+    pub(crate) fn grip_custom_action(&mut self, id: i32) -> bool {
+        let Some(unit) = self.blocks.block else {
+            return false;
+        };
+        let moved = match id {
+            GRIP_MOVE_UP => self.move_unit_by(unit, true),
+            GRIP_MOVE_DOWN => self.move_unit_by(unit, false),
+            _ => None,
+        };
+        let Some(pos) = moved else {
+            return false;
+        };
+        // The grip, and the screen reader's focus on it, go along.
+        self.blocks.pinned = Some(pos);
+        self.update_block_handle();
+        true
     }
 
     /// A screen reader activated the grip: the block is selected.
@@ -756,6 +866,7 @@ impl EditorView {
     /// A press on the grip; true when it took the press.
     pub(crate) fn block_pointer_down(&mut self, x: f32, y: f32) -> bool {
         self.blocks.pointer = Some((x, y));
+        self.blocks.pinned = None;
         self.on_grip(x, y, 0.0) && self.start_block_drag(x, y)
     }
 
@@ -768,6 +879,9 @@ impl EditorView {
             return Some(true);
         }
         let before = (self.blocks.block, self.blocks.hovered);
+        if self.blocks.pointer != Some((x, y)) {
+            self.blocks.pinned = None;
+        }
         self.blocks.pointer = Some((x, y));
         self.update_block_handle();
         self.blocks.hovered = self.on_grip(x, y, 0.0);

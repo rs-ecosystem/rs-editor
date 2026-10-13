@@ -25,6 +25,15 @@ impl Images {
         self.loaded.insert(src.to_owned(), (image, scale.max(0.01)));
     }
 
+    /// Forgets the pictures of sources not in `live` (images deleted from
+    /// the document, or a document replaced).
+    pub fn retain(&mut self, live: &HashSet<String>) {
+        self.loaded.retain(|src, _| live.contains(src));
+        self.failed.retain(|src| live.contains(src));
+        self.requested.retain(|src| live.contains(src));
+        self.missing.retain(|src| live.contains(src));
+    }
+
     pub fn fail(&mut self, src: &str) {
         self.requested.remove(src);
         self.missing.remove(src);

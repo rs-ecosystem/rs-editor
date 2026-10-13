@@ -3306,7 +3306,10 @@ mod drop_in_sight {
         let moved = view.editor().get_text("|");
         assert!(moved.starts_with("baris 8|baris 0"), "{moved}");
         let top = view_y_of(&mut view, 1);
-        assert!((0.0..100.0).contains(&top), "the moved block shows at {top}");
+        assert!(
+            (0.0..100.0).contains(&top),
+            "the moved block shows at {top}"
+        );
     }
 }
 
@@ -3349,5 +3352,267 @@ mod character_limit {
         assert!(!view.insert_text("x"));
         assert!(view.take_effects().contains(&Effect::LimitReached));
         assert_eq!(view.editor().get_text(""), "halo dunia");
+    }
+}
+
+mod drop_into_lists {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn item(kind: &str, text: &str) -> Value {
+        json!({"type": kind, "content": [p(text)]})
+    }
+
+    fn setup(blocks: Vec<Value>) -> (EditorView, Arc<ManualClock>) {
+        let (mut view, clock) = view_with(doc(blocks), KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        (view, clock)
+    }
+
+    /// Hovers the text at `pos`, presses the grip that shows and drops the
+    /// block at `(x, y)`.
+    fn drag(view: &mut EditorView, clock: &ManualClock, pos: usize, x: Option<f32>, y: f32) {
+        let at = view_y_of(view, pos) + 10.0;
+        view.pointer_move(PointerEvent::at(300.0, at));
+        paint(view);
+        clock.advance(200);
+        paint(view);
+        let (gx, gy) = view.blocks.grip_center();
+        assert!(view.pointer_down(PointerEvent::at(gx, gy)));
+        let x = x.unwrap_or(gx);
+        view.pointer_move(PointerEvent::at(x, y));
+        view.pointer_up(PointerEvent::at(x, y));
+    }
+
+    /// Lists as brackets: `[…]` bullets, `(…)` numbers, `{…}` tasks.
+    fn shape(view: &EditorView) -> String {
+        fn walk(node: &Value, out: &mut String) {
+            let brackets = match node["type"].as_str() {
+                Some("text") => return out.push_str(node["text"].as_str().unwrap_or("")),
+                Some("bulletList") => Some(('[', ']')),
+                Some("orderedList") => Some(('(', ')')),
+                Some("taskList") => Some(('{', '}')),
+                _ => None,
+            };
+            if let Some((open, _)) = brackets {
+                out.push(open);
+            }
+            for child in node["content"].as_array().into_iter().flatten() {
+                walk(child, out);
+                if brackets.is_some() {
+                    out.push(',');
+                }
+            }
+            if let Some((_, close)) = brackets {
+                out.push(close);
+            }
+        }
+        let mut out = String::new();
+        for block in view.editor().get_json()["content"].as_array().unwrap() {
+            walk(block, &mut out);
+            out.push('|');
+        }
+        out
+    }
+
+    #[test]
+    fn a_task_dropped_into_a_bullet_list_becomes_its_item() {
+        let (mut view, clock) = setup(vec![
+            json!({"type": "bulletList", "content": [item("listItem", "satu"), item("listItem", "dua")]}),
+            json!({"type": "taskList", "content": [item("taskItem", "tugas")]}),
+            p("akhir"),
+        ]);
+        let between = view_y_of(&mut view, 11) - 4.0;
+        drag(&mut view, &clock, 21, None, between);
+        assert_eq!(shape(&view), "[satu,tugas,dua,]|akhir|");
+        let json = view.editor().get_json();
+        assert_eq!(json["content"][0]["content"][1]["type"], "listItem");
+        view.run("undo", &Value::Null).unwrap();
+        assert_eq!(shape(&view), "[satu,dua,]|{tugas,}|akhir|");
+    }
+
+    #[test]
+    fn a_paragraph_dropped_into_a_task_list_becomes_a_task() {
+        let (mut view, clock) = setup(vec![
+            json!({"type": "taskList", "content": [item("taskItem", "a"), item("taskItem", "b")]}),
+            p("baru"),
+            p("akhir"),
+        ]);
+        let between = view_y_of(&mut view, 8) - 4.0;
+        drag(&mut view, &clock, 14, None, between);
+        assert_eq!(shape(&view), "{a,baru,b,}|akhir|");
+        let task = &view.editor().get_json()["content"][0]["content"][1];
+        assert_eq!(task["type"], "taskItem");
+        assert_eq!(task["attrs"]["checked"], false);
+    }
+
+    #[test]
+    fn an_item_taken_out_beside_a_list_of_its_kind_joins_it() {
+        let (mut view, clock) = setup(vec![
+            json!({"type": "orderedList", "content": [item("listItem", "satu"), item("listItem", "dua")]}),
+            p("tengah"),
+            json!({"type": "orderedList", "content": [item("listItem", "tiga")]}),
+        ]);
+        // Far left, between "tengah" and the second list: the top level.
+        let above = view_y_of(&mut view, 28) - 8.0;
+        drag(&mut view, &clock, 4, Some(2.0), above);
+        assert_eq!(
+            shape(&view),
+            "(dua,)|tengah|(satu,tiga,)|",
+            "one list, counting on"
+        );
+        assert_eq!(view.editor().get_text("|"), "dua|tengah|satu|tiga");
+        view.run("undo", &Value::Null).unwrap();
+        assert_eq!(shape(&view), "(satu,dua,)|tengah|(tiga,)|");
+    }
+}
+
+mod audit_batch6 {
+    use accesskit::{Action, ActionData, ActionRequest, NodeId, TreeId};
+
+    use super::*;
+    use crate::a11y::overlay_ids;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn menu_items(effects: &[Effect]) -> Option<Vec<MenuItem>> {
+        effects.iter().rev().find_map(|e| match e {
+            Effect::SelectionMenu(menu) => {
+                Some(menu.as_ref().map(|m| m.items.clone()).unwrap_or_default())
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn a_screen_reader_moves_a_block_with_the_grips_actions() {
+        let (mut view, clock) = view_with(
+            doc(vec![p("satu"), p("dua"), p("tiga")]),
+            KeyPlatform::Other,
+        );
+        view.set_focused(true);
+        view.accessibility_tree();
+        let y = view_y_of(&mut view, 8) + 10.0;
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let update = view.accessibility_update().unwrap();
+        let grip = update
+            .nodes
+            .iter()
+            .find(|(id, _)| id.0 == overlay_ids::GRIP)
+            .map(|(_, node)| node.clone())
+            .expect("the grip");
+        assert_eq!(grip.custom_actions().len(), 2, "move up and move down");
+        let act = |view: &mut EditorView, id: i32| {
+            view.accessibility_action(&ActionRequest {
+                action: Action::CustomAction,
+                target_tree: TreeId::ROOT,
+                target_node: NodeId(overlay_ids::GRIP),
+                data: Some(ActionData::CustomAction(id)),
+            })
+        };
+        assert!(act(&mut view, 2));
+        assert_eq!(view.editor().get_text("|"), "satu|tiga|dua");
+        let json = view.editor().get_json();
+        assert!(
+            json["content"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|block| block["type"] == "paragraph"),
+            "still paragraphs: {json}"
+        );
+        paint(&mut view);
+        assert!(act(&mut view, 1), "the grip went along with its block");
+        assert_eq!(view.editor().get_text("|"), "satu|dua|tiga");
+    }
+
+    #[test]
+    fn a_long_press_or_double_tap_in_the_link_field_offers_its_menu() {
+        let (mut view, clock) = view_with(doc(vec![p("halo")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.select_text(1, 5, Affinity::Downstream);
+        assert!(view.edit_link());
+        view.insert_text("rs-editor.dev");
+        paint(&mut view);
+        let (fx, fy) = view.link.field_center();
+
+        // A long press: Paste and Select all, the caret where it was.
+        view.take_effects();
+        view.touch(TouchPhase::Down, fx, fy);
+        clock.advance(1_000);
+        view.touch(TouchPhase::Up, fx, fy);
+        let items = menu_items(&view.take_effects()).expect("a menu");
+        assert!(items.contains(&MenuItem::Paste) && items.contains(&MenuItem::SelectAll));
+        assert!(!items.contains(&MenuItem::Copy), "nothing selected to copy");
+        assert!(view.menu_action(MenuItem::SelectAll, None, None).is_none());
+        let copied = view.menu_action(MenuItem::Cut, None, None).unwrap();
+        assert_eq!(copied.text, "rs-editor.dev");
+        assert_eq!(view.link_field().unwrap().0, "");
+        view.menu_action(MenuItem::Paste, Some("contoh.com"), None);
+        assert_eq!(view.link_field().unwrap().0, "contoh.com");
+        assert_eq!(
+            view.editor().get_text(""),
+            "halo",
+            "the document never changed"
+        );
+
+        // A double tap selects the address and offers Copy.
+        clock.advance(1_000);
+        paint(&mut view);
+        let (fx, fy) = view.link.field_center();
+        view.take_effects();
+        for _ in 0..2 {
+            view.touch(TouchPhase::Down, fx, fy);
+            clock.advance(60);
+            view.touch(TouchPhase::Up, fx, fy);
+            clock.advance(60);
+        }
+        let (text, anchor, head) = view.link_field().unwrap();
+        assert_eq!((anchor.min(head), anchor.max(head)), (0, text.len()));
+        let items = menu_items(&view.take_effects()).expect("a menu");
+        assert!(items.contains(&MenuItem::Copy));
+        assert!(view.link_editing(), "the field stays open");
+    }
+
+    #[test]
+    fn pictures_of_deleted_images_are_released() {
+        let image = |src: &str| json!({"type": "image", "attrs": {"src": src}});
+        let (mut view, _) = view_with(
+            doc(vec![p("a"), image("x.png"), p("b")]),
+            KeyPlatform::Other,
+        );
+        view.set_focused(true);
+        paint(&mut view);
+        let rgba = vec![255u8; 4 * 4 * 4];
+        assert!(view.add_image("x.png", &rgba, 4, 4, 1.0, false));
+        paint(&mut view);
+        view.take_effects();
+
+        // The image goes; the next picture loaded lets its pixels go.
+        view.run_chain(&[
+            ("setNodeSelection".into(), json!({"pos": 3})),
+            ("deleteSelection".into(), Value::Null),
+        ])
+        .unwrap();
+        assert_eq!(view.editor().get_text("|"), "a|b");
+        assert!(view.add_image("y.png", &rgba, 4, 4, 1.0, false));
+        // Undone, it is asked for again.
+        view.run("undo", &Value::Null).unwrap();
+        paint(&mut view);
+        assert!(
+            view.take_effects()
+                .contains(&Effect::MissingImages(vec!["x.png".into()]))
+        );
     }
 }

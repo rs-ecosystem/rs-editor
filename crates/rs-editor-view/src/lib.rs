@@ -557,6 +557,18 @@ impl EditorView {
         else {
             return false;
         };
+        // Pictures of images no longer in the document go first.
+        let mut live = std::collections::HashSet::new();
+        live.insert(src.to_owned());
+        self.editor.doc().descendants(&mut |node, _, _, _| {
+            if node.type_name() == "image"
+                && let Some(src) = node.attr("src").and_then(|v| v.as_str())
+            {
+                live.insert(src.to_owned());
+            }
+            true
+        });
+        self.engine.retain_images(&live);
         self.engine.add_image(src, image, scale);
         self.relayout_keeping_place();
         true
@@ -814,6 +826,7 @@ impl EditorView {
         if !self.editor.doc().ptr_eq(&before) {
             self.doc_revision += 1;
             self.map_link(&mapping);
+            self.blocks.pinned = None;
         }
         self.after_change();
         true

@@ -572,6 +572,11 @@ impl EditorView {
             (Action::Click, _) if request.target_node.0 >> LOCAL_BITS == 0 => {
                 self.overlay_click(request.target_node.0)
             }
+            (Action::CustomAction, Some(ActionData::CustomAction(id)))
+                if request.target_node.0 == overlay_ids::GRIP =>
+            {
+                self.grip_custom_action(*id)
+            }
             (Action::Click, _) => {
                 // In the document, task checkboxes are the clickable nodes.
                 let base = request.target_node.0 >> LOCAL_BITS;

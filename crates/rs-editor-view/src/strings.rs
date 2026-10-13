@@ -36,6 +36,8 @@ pub(crate) struct Strings {
     pub remove_link: &'static str,
     pub apply: &'static str,
     pub move_block: &'static str,
+    pub move_up: &'static str,
+    pub move_down: &'static str,
     pub no_results: &'static str,
 }
 
@@ -75,6 +77,8 @@ const ENGLISH: Strings = Strings {
     remove_link: "Remove link",
     apply: "Apply",
     move_block: "Select or drag to move the block",
+    move_up: "Move up",
+    move_down: "Move down",
     no_results: "No results",
 };
 
@@ -114,6 +118,8 @@ const INDONESIAN: Strings = Strings {
     remove_link: "Hapus tautan",
     apply: "Terapkan",
     move_block: "Pilih atau seret untuk memindahkan blok",
+    move_up: "Pindah ke atas",
+    move_down: "Pindah ke bawah",
     no_results: "Tidak ada hasil",
 };
 

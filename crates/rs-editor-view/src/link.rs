@@ -93,6 +93,10 @@ pub(crate) struct LinkPopover {
     touch: Option<(f32, f32)>,
     /// A finger down elsewhere while the field is open.
     outside: Option<(f32, f32)>,
+    /// When the finger on the popover came down.
+    touch_at: u64,
+    /// The last tap on the field (a second one soon after selects all).
+    last_tap: u64,
 }
 
 /// One edit to the address field (see [`EditorView::field_input`]).
@@ -989,6 +993,54 @@ impl EditorView {
         true
     }
 
+    /// The selection menu over the field (a long press, a double tap).
+    fn show_field_menu(&mut self) {
+        let Some(editing) = &self.link.editing else {
+            return;
+        };
+        let mut items = Vec::new();
+        if !editing.field.range().is_empty() {
+            items.extend([crate::MenuItem::Cut, crate::MenuItem::Copy]);
+        }
+        items.push(crate::MenuItem::Paste);
+        if !editing.field.is_empty() {
+            items.push(crate::MenuItem::SelectAll);
+        }
+        let field = self.link.field_rect;
+        self.show_menu_at(crate::SelectionMenu {
+            rect: Rect::new(field.left, field.top, field.width(), field.height()),
+            items,
+        });
+    }
+
+    /// The field takes the selection menu's choices while it is open.
+    pub(crate) fn field_menu_action(
+        &mut self,
+        item: crate::MenuItem,
+        text: Option<&str>,
+    ) -> Option<Option<ClipboardContent>> {
+        if !self.link_editing() {
+            return None;
+        }
+        Some(match item {
+            crate::MenuItem::Copy => self.copy(),
+            crate::MenuItem::Cut => self.cut(),
+            crate::MenuItem::Paste => {
+                if let Some(text) = text.filter(|t| !t.is_empty()) {
+                    self.paste_text(text);
+                }
+                None
+            }
+            crate::MenuItem::SelectAll => {
+                if let Some(editing) = &mut self.link.editing {
+                    editing.field.select_all();
+                }
+                self.after_field_change();
+                None
+            }
+        })
+    }
+
     fn press_link_part(&mut self, part: Part) {
         match part {
             Part::Url => self.run_link_action(Action::Open),
@@ -1009,6 +1061,7 @@ impl EditorView {
                 if self.link.appear.target() && self.link.rect.contains(skia_safe::Point::new(x, y))
                 {
                     self.link.touch = Some((x, y));
+                    self.link.touch_at = self.clock.now_ms();
                     return true;
                 }
                 // A finger elsewhere may only be scrolling to look: the
@@ -1031,12 +1084,29 @@ impl EditorView {
                     && let Some(part) = self.link_part_at(x, y)
                 {
                     if part == Part::Field {
+                        let now = self.clock.now_ms();
+                        let held =
+                            now.saturating_sub(self.link.touch_at) >= self.profile.long_press_ms;
+                        let double = now.saturating_sub(self.link.last_tap) <= 300;
+                        self.link.last_tap = if double { 0 } else { now };
                         if let Some(offset) = self.field_offset_at(x)
                             && let Some(editing) = &mut self.link.editing
                         {
-                            editing.field.move_to(offset, false);
+                            if double {
+                                // A double tap selects the whole address.
+                                editing.field.select_all();
+                            } else if !held {
+                                editing.field.move_to(offset, false);
+                            }
                         }
                         self.after_field_change();
+                        if held || double {
+                            // As in platform fields: Paste, Select all (and
+                            // Cut/Copy for selected text).
+                            self.show_field_menu();
+                        } else {
+                            self.hide_menu();
+                        }
                         self.push_effect(Effect::ShowKeyboard);
                     } else {
                         self.press_link_part(part);

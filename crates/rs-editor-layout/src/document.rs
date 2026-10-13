@@ -405,6 +405,11 @@ impl LayoutEngine {
         self.reset();
     }
 
+    /// Releases the pictures of image sources not in `live`.
+    pub fn retain_images(&mut self, live: &std::collections::HashSet<String>) {
+        self.shaper.images.borrow_mut().retain(live);
+    }
+
     /// The host could not load `src`: it stays a placeholder.
     pub fn image_failed(&mut self, src: &str) {
         self.shaper.images.borrow_mut().fail(src);

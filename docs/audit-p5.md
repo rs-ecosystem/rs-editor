@@ -93,6 +93,18 @@
 - **`localhost:3000` dilengkapi `http://`,** dan `host:port` tidak lagi dianggap skema.
 - **Ghost drag dibatasi tingginya 160 px.**
 
+### Batch 6
+
+- **Tujuan drop baru:**
+  - Item tugas yang di-drop ke bullet list atau numbered list menjadi item biasa, dan sebaliknya.
+  - Paragraf bisa di-drop di antara item list dan menjadi item list tersebut.
+  - Item yang dikeluarkan ke samping list sejenis langsung bergabung dengan list itu, sehingga numbered list tetap melanjutkan nomornya. Undo mengembalikannya dalam satu langkah.
+- **Screen reader bisa memindah blok:** grip punya aksi "Pindah ke atas" dan "Pindah ke bawah" (TalkBack, VoiceOver). Grip tetap menempel pada blok yang dipindah.
+- **Kolom tautan di layar sentuh:**
+  - Tekan lama memunculkan menu Tempel dan Pilih semua.
+  - Ketuk ganda memilih seluruh alamat, lalu muncul juga Potong dan Salin.
+- **Gambar yang sudah dihapus dilepas dari memori** saat gambar berikutnya selesai dimuat.
+
 ### Laporan pengguna sebelumnya
 
 - **Menu `/`:** bisa di-scroll, sorotan menempel pada opsi yang ditekan, dan tidak kembali ke opsi pertama (`42452a9`, `1e80343`).
@@ -108,17 +120,12 @@
 
 ### Sedang
 
-1. **Memori gambar:**
-   - Gambar yang dihapus belum dilepas dari memori.
-   - Setiap gambar yang selesai dimuat memicu layout ulang seluruh dokumen.
-2. **Kolom tautan di layar sentuh** belum mendukung tekan lama untuk Tempel, ketuk ganda, dan magnifier.
-3. **Aksi a11y "pindah ke atas/bawah"** untuk screen reader belum ada (memindah blok dengan keyboard sudah bisa).
-4. **Tujuan drop belum lengkap:**
-   - Item list ↔ item tugas.
+1. **Setiap gambar yang selesai dimuat memicu layout ulang seluruh dokumen.**
+2. **Tujuan drop yang belum ada:**
    - Masuk sebagai anak item yang belum punya sublist.
-   - Paragraf ke dalam list atau kutipan.
-   - Penggabungan list sejenis yang bersebelahan.
-5. **Gambar dari situs lain tanpa header CORS** tampil gagal di web, karena browser tidak mengizinkan pikselnya dibaca.
+   - Paragraf ke dalam kutipan.
+3. **Magnifier di kolom tautan** belum ada.
+4. **Gambar dari situs lain tanpa header CORS** tampil gagal di web, karena browser tidak mengizinkan pikselnya dibaca.
 
 ### Rendah
 
