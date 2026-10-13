@@ -126,6 +126,15 @@ export class SelectionUi {
       ({ text, html } = await readClipboard());
       if (text === null && html === null) return;
     }
+    if (item === "cut") {
+      // The selection goes only once the clipboard holds it: without a
+      // clipboard (plain HTTP) or permission, Cut must not lose the text.
+      const copied = editor._json(M._rse_copy(editor._app, 0));
+      if (!(await this.writeClipboard(copied.text, copied.html))) {
+        this.haptic("reject");
+        return;
+      }
+    }
     const strings = [item, text, html].map((value) => value === null ? null : new TextEncoder().encode(value));
     const pointers = strings.map((bytes) => {
       if (!bytes) return 0;
@@ -143,24 +152,37 @@ export class SelectionUi {
     } finally {
       pointers.forEach((ptr, i) => { if (ptr) M._rse_free(ptr, strings[i].length); });
     }
-    if (result) {
+    if (result && item !== "cut") {
       const copied = JSON.parse(result);
       this.writeClipboard(copied.text, copied.html);
     }
     editor._afterInput();
   }
 
-  /** Puts copied content on the clipboard, as HTML with a plain text fallback. */
-  writeClipboard(text, html) {
-    if (!text && !html) return;
+  /**
+   * Puts copied content on the clipboard, as HTML with a plain text
+   * fallback. Resolves to whether the clipboard took it.
+   */
+  async writeClipboard(text, html) {
+    if (!text && !html) return false;
     const clipboard = navigator.clipboard;
-    if (html && clipboard?.write && typeof ClipboardItem !== "undefined") {
-      clipboard.write([new ClipboardItem({
-        "text/plain": new Blob([text], { type: "text/plain" }),
-        "text/html": new Blob([html], { type: "text/html" }),
-      })]).catch(() => clipboard.writeText(text).catch(() => {}));
-    } else {
-      clipboard?.writeText(text).catch(() => {});
+    if (!clipboard) return false;
+    if (html && clipboard.write && typeof ClipboardItem !== "undefined") {
+      try {
+        await clipboard.write([new ClipboardItem({
+          "text/plain": new Blob([text], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        })]);
+        return true;
+      } catch {
+        // Fall back to plain text.
+      }
+    }
+    try {
+      await clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -206,7 +228,7 @@ export class SelectionUi {
     // shorter than about 10 ms are too weak to feel on many phones; Chrome
     // vibrates only after the page had a user gesture, and silent mode may
     // mute it.
-    navigator.vibrate?.(kind === "longPress" ? 25 : 10);
+    navigator.vibrate?.(kind === "longPress" ? 25 : kind === "reject" ? [12, 40, 12] : 10);
   }
 
   destroy() {

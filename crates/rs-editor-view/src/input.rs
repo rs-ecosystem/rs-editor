@@ -8,7 +8,7 @@ use rs_editor_state::{NodeSelection, Selection, TextSelection, meta};
 use serde_json::Value;
 
 use crate::link::FieldInput;
-use crate::{ClipboardContent, Composition, EditorView, ViewQuery};
+use crate::{ClipboardContent, Composition, EditorView, Effect, ViewQuery};
 
 /// How far a deletion or caret movement reaches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,9 +124,12 @@ impl EditorView {
         self.collapse_block_selection();
         self.finish_composition();
         let selection = self.editor.selection().clone();
+        let before = self.editor.doc().clone();
         let ok = self
             .editor
-            .handle_text_input(selection.from(), selection.to(), text);
+            .handle_text_input(selection.from(), selection.to(), text)
+            // A plugin (a character limit) may have refused it.
+            && !self.editor.doc().ptr_eq(&before);
         if ok {
             self.goal_x = None;
             self.affinity = Affinity::Downstream;
@@ -134,6 +137,8 @@ impl EditorView {
                 self.arm_slash(text.encode_utf16().count());
             }
             self.after_change();
+        } else {
+            self.note_limit();
         }
         ok
     }
@@ -491,7 +496,7 @@ impl EditorView {
 
     /// The selection as plain text, HTML (for other apps) and a JSON slice.
     /// The caller puts it on the clipboard (a browser's `copy` event,
-    /// Android's clipboard); no [`crate::Effect::Clipboard`] follows, since a
+    /// Android's clipboard); no [`Effect::Clipboard`] follows, since a
     /// second, asynchronous write could race the first and leave the
     /// clipboard empty.
     pub fn copy(&mut self) -> Option<ClipboardContent> {
@@ -612,7 +617,28 @@ impl EditorView {
         if self.markdown_paste {
             return self.paste_markdown(text);
         }
-        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let mut text = text.replace("\r\n", "\n").replace('\r', "\n");
+        // Past a character limit, as much as fits goes in (as in Tiptap).
+        if let Some(room) = self.character_room() {
+            use unicode_segmentation::UnicodeSegmentation;
+            let mut kept = 0;
+            let cut = text
+                .grapheme_indices(true)
+                .find(|(_, g)| {
+                    if *g != "\n" {
+                        kept += 1;
+                    }
+                    kept > room
+                })
+                .map(|(at, _)| at);
+            if let Some(at) = cut {
+                text.truncate(at);
+                self.push_effect(Effect::LimitReached);
+                if text.is_empty() {
+                    return false;
+                }
+            }
+        }
         let lines: Vec<&str> = text.split('\n').collect();
         if lines.len() == 1 {
             return self.type_text(&text, false);

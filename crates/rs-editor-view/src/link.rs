@@ -1057,12 +1057,17 @@ fn step(name: &str, args: Value) -> (String, Value) {
 /// `https://rs-editor.dev` and `me@example.com` a `mailto:` link.
 pub(crate) fn normalize_href(text: &str) -> String {
     let lower = text.to_ascii_lowercase();
-    let has_scheme = lower.split_once(':').is_some_and(|(scheme, _)| {
+    // `localhost:3000` and `example.com:8080` are a host and a port, not a
+    // scheme: only letters (and + - .) before a colon not followed by a
+    // port make one.
+    let has_scheme = lower.split_once(':').is_some_and(|(scheme, rest)| {
         !scheme.is_empty()
             && scheme
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
             && !scheme.contains('.')
+            && scheme != "localhost"
+            && !rest.chars().next().is_some_and(|c| c.is_ascii_digit())
     });
     if has_scheme || text.starts_with('#') || text.starts_with('/') || text.starts_with('.') {
         return text.to_owned();
@@ -1070,7 +1075,12 @@ pub(crate) fn normalize_href(text: &str) -> String {
     if text.contains('@') && !text.contains('/') {
         return format!("mailto:{text}");
     }
-    format!("https://{text}")
+    let scheme = if lower.starts_with("localhost") {
+        "http"
+    } else {
+        "https"
+    };
+    format!("{scheme}://{text}")
 }
 
 /// `href` if it is safe to open: web, mail and phone addresses, and

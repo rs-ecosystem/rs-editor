@@ -2455,6 +2455,7 @@ dependencies = [
  "rs-editor-ui",
  "serde_json",
  "skia-safe",
+ "unicode-segmentation",
 ]
 
 [[package]]

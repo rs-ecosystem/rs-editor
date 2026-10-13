@@ -17,6 +17,8 @@ const MOD_SHIFT = 1, MOD_CTRL = 2, MOD_ALT = 4, MOD_META = 8;
 const LINE_HEIGHT = 40;
 /** Images are decoded at most this many pixels on their longer side. */
 const MAX_IMAGE = 2048;
+/** Images decoded at the same time. */
+const IMAGE_LOADS = 3;
 const DEFAULT_WASM = new URL("../dist/rs-editor-web.js", import.meta.url).href;
 
 function mods(e) {
@@ -352,7 +354,11 @@ class Editor {
     target.addEventListener("paste", (e) => {
       e.preventDefault();
       const images = imageFiles(e.clipboardData);
-      if (images.length && this._options.uploadImage) {
+      const html = e.clipboardData.getData("text/html");
+      // Docs and Word put their images as files beside the HTML: the HTML
+      // (text and images) wins when it holds any text.
+      const htmlText = html ? new DOMParser().parseFromString(html, "text/html").body.textContent.trim() : "";
+      if (images.length && this._options.uploadImage && !htmlText) {
         for (const file of images) this._insertImageFile(file);
         return;
       }
@@ -459,6 +465,7 @@ class Editor {
         case "missingEmoji": this._drawEmoji(effect.emoji); break;
         case "missingImages": for (const src of effect.sources) this._loadImage(src); break;
         case "pickImage": this._pickImage(); break;
+        case "limitReached": this._ui.haptic("reject"); this._emit("characterLimit", { editor: this }); break;
       }
     }
   }
@@ -491,23 +498,49 @@ class Editor {
    * gives the editor its pixels. Images from other origins need CORS
    * headers; without them the image shows as broken.
    */
-  async _loadImage(src) {
+  _loadImage(src) {
+    // A few at a time: each decode holds a full-size copy of the pixels.
+    (this._imageQueue ??= []).push(src);
+    this._pumpImages();
+  }
+
+  _pumpImages() {
+    this._imagesLoading ??= 0;
+    while (this._imagesLoading < IMAGE_LOADS && this._imageQueue.length) {
+      const src = this._imageQueue.shift();
+      this._imagesLoading++;
+      this._decodeImage(src, src).finally(() => {
+        this._imagesLoading--;
+        this._pumpImages();
+      });
+    }
+  }
+
+  /**
+   * Decodes the image at `url` and gives the editor its pixels for image
+   * nodes showing `src`. Returns whether it worked.
+   */
+  async _decodeImage(src, url) {
     const M = this._M;
+    let ok = false;
     try {
       const image = new Image();
       image.crossOrigin = "anonymous";
       image.decoding = "async";
-      image.src = src;
+      image.src = url;
       await image.decode();
       // SVGs without a size report 0; browsers draw those at 300 × 150.
       const natural = [image.naturalWidth || 300, image.naturalHeight || 150];
-      const fit = Math.min(1, MAX_IMAGE / Math.max(...natural));
+      // Never more pixels than the column can show, nor than MAX_IMAGE.
+      const column = Math.ceil(this._size.width * this._size.dpr);
+      const limit = Math.min(MAX_IMAGE, Math.max(column, 256));
+      const fit = Math.min(1, limit / natural[0], MAX_IMAGE / natural[1]);
       const [width, height] = natural.map((n) => Math.max(1, Math.round(n * fit)));
       const canvas = Object.assign(document.createElement("canvas"), { width, height });
       const context = canvas.getContext("2d", { willReadFrequently: true });
       context.drawImage(image, 0, 0, width, height);
       const pixels = context.getImageData(0, 0, width, height).data;
-      if (this._destroyed) return;
+      if (this._destroyed) return false;
       const ptr = M._rse_alloc(pixels.length);
       M.HEAPU8.set(pixels, ptr);
       try {
@@ -515,11 +548,13 @@ class Editor {
       } finally {
         M._rse_free(ptr, pixels.length);
       }
+      ok = true;
     } catch {
-      if (this._destroyed) return;
+      if (this._destroyed) return false;
       this._withString(src, (ptr, len) => M._rse_image_failed(this._app, ptr, len));
     }
     this._afterInput();
+    return ok;
   }
 
   /** The `/` menu's Image row with `uploadImage`: the browser's file picker. */
@@ -533,16 +568,31 @@ class Editor {
   }
 
   /** Uploads `file` with the app's `uploadImage` and inserts the image at the caret. */
+  /**
+   * Inserts `file` at the caret at once (from a local `blob:` address)
+   * while the app's `uploadImage` stores it; the stored address then takes
+   * over without a reload. A failed upload removes the image and emits
+   * `uploadError`.
+   */
   async _insertImageFile(file) {
+    const M = this._M;
+    const local = URL.createObjectURL(file);
+    this.chain().focus().setImage({ src: local, alt: null }).run();
     let src;
     try {
       src = await this._options.uploadImage(file);
     } catch (error) {
-      console.error("Rs Editor: uploadImage failed", error);
-      return;
+      src = null;
+      this._emit("uploadError", { editor: this, file, error });
     }
-    if (!src || this._destroyed) return;
-    this.chain().focus().setImage({ src, alt: file.name || null }).run();
+    if (this._destroyed) return;
+    if (src) {
+      // The stored address shows the pixels already decoded.
+      await this._decodeImage(src, local);
+    }
+    this._withStrings(local, src ?? "", (op, ol, np, nl) => M._rse_replace_image_src(this._app, op, ol, np, nl));
+    URL.revokeObjectURL(local);
+    this._afterInput();
   }
 
   // --- fonts ------------------------------------------------------------------
@@ -810,6 +860,12 @@ class Editor {
       if (touchId !== null || e.pointerType === "touch") return;
       const [x, y] = local(e);
       this._focusInput();
+      if (this.selection.empty) {
+        // Paste goes where the click was, as in other editors.
+        M._rse_pointer(app, 0, x, y, 1, 0);
+        M._rse_pointer(app, 2, x, y, 1, 0);
+        this._afterInput();
+      }
       const items = this.selection.empty ? ["paste", "selectAll"] : ["cut", "copy", "paste", "selectAll"];
       this._ui.showMenu({ rect: [x, y, x, y], items }, { atPoint: true });
     });

@@ -149,6 +149,8 @@ impl EditorApi {
         };
         let extensions = || {
             let mut extensions = rs_editor_extensions::starter_kit::starter_kit();
+            // A line to type into after an image, a list or a quote at the end.
+            extensions.push(Arc::new(rs_editor_extensions::starter_kit::TrailingNode));
             if let Some(limit) = options.character_limit {
                 extensions.retain(|e| e.name() != "characterCount");
                 extensions.push(Arc::new(CharacterCount {
@@ -315,6 +317,13 @@ impl EditorApi {
     ) -> bool {
         self.view
             .add_image(src, rgba, width, height, scale, premultiplied)
+    }
+
+    /// Points images showing `old` at `new` (an upload finished), or removes
+    /// them when `new` is empty (it failed). Not an undo step.
+    pub fn replace_image_src(&mut self, old: &str, new: &str) -> bool {
+        self.view
+            .replace_image_src(old, (!new.is_empty()).then_some(new))
     }
 
     /// `src` could not be loaded; the image shows as broken.
@@ -567,6 +576,7 @@ impl EditorApi {
                     json!({"type": "missingImages", "sources": sources})
                 }
                 Effect::PickImage => json!({"type": "pickImage"}),
+                Effect::LimitReached => json!({"type": "limitReached"}),
                 Effect::Clipboard(content) => {
                     json!({"type": "clipboard", "text": content.text, "html": content.html})
                 }

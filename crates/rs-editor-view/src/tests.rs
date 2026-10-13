@@ -2238,6 +2238,15 @@ mod link {
     fn addresses_are_made_absolute() {
         use crate::link::normalize_href;
         assert_eq!(normalize_href("rs-editor.dev"), "https://rs-editor.dev");
+        assert_eq!(
+            normalize_href("localhost:3000/x"),
+            "http://localhost:3000/x"
+        );
+        assert_eq!(
+            normalize_href("example.com:8080"),
+            "https://example.com:8080"
+        );
+        assert_eq!(normalize_href("tel:+62812"), "tel:+62812");
         assert_eq!(normalize_href("http://a.b"), "http://a.b");
         assert_eq!(normalize_href("me@a.b"), "mailto:me@a.b");
         assert_eq!(normalize_href("mailto:me@a.b"), "mailto:me@a.b");
@@ -3255,5 +3264,90 @@ mod audit_more {
         let copied = view.menu_action(MenuItem::Cut, None, None).unwrap();
         assert_eq!(copied.text, "x.png");
         assert_eq!(view.editor().get_text("|"), "a|b");
+    }
+}
+
+mod drop_in_sight {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    /// A block dropped at the very top ends up in sight: the view does not
+    /// keep the old first block in place and leave the moved one above it.
+    #[test]
+    fn a_block_dropped_at_the_top_stays_in_sight() {
+        let blocks: Vec<Value> = (0..30).map(|i| p(&format!("baris {i}"))).collect();
+        let (mut view, clock) = view_with(doc(blocks), KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        // Take hold of a block near the bottom of the view.
+        let pos = view.editor().doc().content().size() / 30 * 8 + 3;
+        let y = view_y_of(&mut view, pos) + 10.0;
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let (gx, gy) = view.blocks.grip_center();
+        view.pointer_down(PointerEvent::at(gx, gy));
+        // To the top edge: the view scrolls up as far as it goes.
+        view.pointer_move(PointerEvent::at(gx, 2.0));
+        for _ in 0..200 {
+            clock.advance(16);
+            paint(&mut view);
+        }
+        view.pointer_up(PointerEvent::at(gx, 2.0));
+        for _ in 0..60 {
+            clock.advance(16);
+            paint(&mut view);
+        }
+        let moved = view.editor().get_text("|");
+        assert!(moved.starts_with("baris 8|baris 0"), "{moved}");
+        let top = view_y_of(&mut view, 1);
+        assert!((0.0..100.0).contains(&top), "the moved block shows at {top}");
+    }
+}
+
+mod character_limit {
+    use std::sync::Arc;
+
+    use rs_editor_extensions::starter_kit::{CharacterCount, starter_kit};
+
+    use super::*;
+
+    fn limited(limit: usize) -> EditorView {
+        let mut extensions = starter_kit();
+        extensions.retain(|e| e.name() != "characterCount");
+        extensions.push(Arc::new(CharacterCount {
+            limit: Some(limit),
+            ..Default::default()
+        }));
+        EditorView::new(ViewOptions {
+            editor: EditorOptions {
+                content: Some(doc(vec![p("halo")])),
+                extensions,
+                ..Default::default()
+            },
+            system_fonts: false,
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_paste_past_the_limit_is_cut_and_reported() {
+        let mut view = limited(10);
+        view.select_text(5, 5, Affinity::Downstream);
+        assert_eq!(view.character_room(), Some(6));
+        view.take_effects();
+        assert!(view.paste_text(" dunia indah"));
+        assert_eq!(view.editor().get_text(""), "halo dunia");
+        assert!(view.take_effects().contains(&Effect::LimitReached));
+        // Typing at the limit is refused, and says so.
+        assert!(!view.insert_text("x"));
+        assert!(view.take_effects().contains(&Effect::LimitReached));
+        assert_eq!(view.editor().get_text(""), "halo dunia");
     }
 }

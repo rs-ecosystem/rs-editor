@@ -531,7 +531,8 @@ impl Shell {
                 | Effect::ShowKeyboard
                 | Effect::MissingCharacters(_)
                 | Effect::MissingEmoji(_)
-                | Effect::PickImage => {}
+                | Effect::PickImage
+                | Effect::LimitReached => {}
             }
         }
     }

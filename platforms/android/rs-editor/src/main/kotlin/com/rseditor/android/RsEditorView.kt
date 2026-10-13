@@ -371,6 +371,8 @@ class RsEditorView private constructor(
 
     override fun onConfigurationChanged(config: Configuration) {
         super.onConfigurationChanged(config)
+        // The system language may have changed: the editor's menus follow.
+        if (!released) native.setLocale(java.util.Locale.getDefault().toLanguageTag())
         if (dark == null && !released) {
             native.setDark(systemDark())
             scheduleFrame()

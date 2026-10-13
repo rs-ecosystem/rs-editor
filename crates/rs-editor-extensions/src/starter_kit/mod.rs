@@ -9,7 +9,7 @@ mod util;
 use std::sync::Arc;
 
 pub use functionality::{
-    CharacterCount, Core, CountMode, History, Placeholder, TextAlign, Typography,
+    CharacterCount, Core, CountMode, History, Placeholder, TextAlign, TrailingNode, Typography,
 };
 pub use marks::{
     Bold, Code, Highlight, Italic, Link, PREVENT_AUTOLINK, Strike, Subscript, Superscript,

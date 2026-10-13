@@ -86,6 +86,8 @@ struct Line {
     at_ms: u64,
 }
 
+/// The tallest the ghost of a dragged block gets.
+const GHOST_HEIGHT: f32 = 160.0;
 /// How quickly the drop line catches up (milliseconds to cover ~63%).
 const LINE_EASE_MS: f32 = 60.0;
 /// A new drop place must be this much nearer than the current one to
@@ -605,7 +607,44 @@ impl EditorView {
             return false;
         };
         tr.set_selection(selection);
-        self.dispatch(tr)
+        if !self.dispatch(tr) {
+            return false;
+        }
+        self.reveal_block(target);
+        true
+    }
+
+    /// Scrolls (smoothly) so the block at `pos` shows whole above whatever
+    /// covers the bottom (a soft keyboard), or its top when it is taller
+    /// than the view: a block dropped at the top or the bottom stays in
+    /// sight, as the caret does when a keyboard opens over it.
+    fn reveal_block(&mut self, pos: usize) {
+        let layout = self.layout();
+        let rect = layout
+            .blocks
+            .iter()
+            .find(|b| b.pos == pos)
+            .map(|b| b.rect)
+            .or_else(|| {
+                let top = layout.tops.get(layout.top_at_pos(pos)?)?;
+                Some(Rect::new(0.0, top.y, layout.width, top.height))
+            });
+        let Some(rect) = rect else {
+            return;
+        };
+        let rect = self.to_view(rect);
+        let margin = 24.0;
+        let visible = self.visible_height();
+        let shift = if rect.y < margin || rect.height > visible - margin * 2.0 {
+            rect.y - margin
+        } else if rect.bottom() > visible - margin {
+            rect.bottom() - (visible - margin)
+        } else {
+            0.0
+        };
+        if shift.abs() > 0.5 {
+            self.scroll_smooth_by(shift);
+        }
     }
 
     /// Moves the block with the caret (a list item in a list) one place
@@ -837,11 +876,13 @@ impl EditorView {
         let source = drag.unit.rect;
         let dy = self.ghost_offset(drag);
         let right = self.content_width();
+        // A tall block (a long code block, an image) shows its top only, so
+        // the ghost never hides where it is going.
         let area = skia_safe::Rect::from_ltrb(
             source.x - 6.0,
             source.y - 4.0,
             right + 6.0,
-            source.bottom() + 4.0,
+            (source.bottom() + 4.0).min(source.y + GHOST_HEIGHT),
         );
         canvas.save();
         canvas.translate((self.padding.left, self.padding.top - self.scroll_y + dy));

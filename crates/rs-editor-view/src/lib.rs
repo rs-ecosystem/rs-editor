@@ -109,6 +109,9 @@ pub enum Effect {
     /// Image sources laid out without a picture: load each and give it to
     /// [`EditorView::add_image`] (or [`EditorView::image_failed`]).
     MissingImages(Vec<String>),
+    /// An edit was refused because the document holds as many characters
+    /// as its limit allows (Tiptap's CharacterCount `limit`).
+    LimitReached,
     /// The user chose to insert an image: show the app's image picker and
     /// insert the result (`setImage`) at the caret. Only with
     /// [`EditorView::set_image_picker`].
@@ -565,6 +568,39 @@ impl EditorView {
         self.relayout_keeping_place();
     }
 
+    /// Points every image showing `old` at `new` (an upload finished and
+    /// the temporary `blob:` address gives way to the stored one), or
+    /// removes those images when `new` is `None` (the upload failed). Not
+    /// an undo step of its own. Returns whether any image changed.
+    pub fn replace_image_src(&mut self, old: &str, new: Option<&str>) -> bool {
+        let mut found = Vec::new();
+        self.editor.doc().descendants(&mut |node, pos, _, _| {
+            if node.type_name() == "image" && node.attr("src").and_then(|v| v.as_str()) == Some(old)
+            {
+                found.push((pos, node.node_size()));
+            }
+            true
+        });
+        if found.is_empty() {
+            return false;
+        }
+        let mut tr = self.editor.state().tr();
+        // From the end, so earlier positions hold.
+        for &(pos, size) in found.iter().rev() {
+            let done = match new {
+                Some(src) => tr
+                    .set_node_attribute(pos, "src", serde_json::Value::String(src.to_owned()))
+                    .is_ok(),
+                None => tr.delete(pos, pos + size).is_ok(),
+            };
+            if !done {
+                return false;
+            }
+        }
+        tr.set_meta(rs_editor_state::meta::ADD_TO_HISTORY, false);
+        self.dispatch(tr)
+    }
+
     /// Whether the app shows its own image picker ([`Effect::PickImage`])
     /// when the user inserts an image; otherwise the editor asks for an
     /// address.
@@ -582,6 +618,33 @@ impl EditorView {
 
     pub(crate) fn placeholder_override(&self) -> Option<&str> {
         self.placeholder.as_deref()
+    }
+
+    /// How many more characters the document takes, or `None` without a
+    /// limit (the selection's characters count as room: they get replaced).
+    pub fn character_room(&self) -> Option<usize> {
+        let count = self
+            .editor
+            .manager()
+            .extension::<rs_editor_extensions::starter_kit::CharacterCount>("characterCount")?;
+        let limit = count.limit?;
+        let doc = self.editor.doc();
+        let selection = self.editor.selection();
+        let selected = doc.text_between(selection.from(), selection.to(), Some("\n"), Some(" "));
+        let selected =
+            unicode_segmentation::UnicodeSegmentation::graphemes(selected.as_str(), true)
+                .filter(|g| *g != "\n")
+                .count();
+        Some((limit + selected).saturating_sub(count.characters(doc)))
+    }
+
+    /// Tells the host when an edit was refused at the character limit.
+    pub(crate) fn note_limit(&mut self) {
+        if self.character_room().is_some_and(|room| room == 0)
+            && !self.effects.contains(&Effect::LimitReached)
+        {
+            self.push_effect(Effect::LimitReached);
+        }
     }
 
     /// Lays out again (fonts or images changed sizes) with the block at the
@@ -734,8 +797,12 @@ impl EditorView {
         let mapped = anchor.map(|(pos, offset)| (tr.mapping.map(pos, Assoc::After), offset));
         let mapping = tr.mapping.clone();
         // A plugin may refuse it (a character limit): nothing changed.
+        let edits = tr.doc_changed();
         if !matches!(self.editor.dispatch(tr), Ok(applied) if !applied.is_empty()) {
             self.pending_anchor = anchor;
+            if edits {
+                self.note_limit();
+            }
             return false;
         }
         self.pending_anchor = if self.editor.doc().ptr_eq(&before) {

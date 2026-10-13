@@ -51,6 +51,7 @@ internal class SelectionUi(private val view: RsEditorView) : ActionMode.Callback
                     for (j in 0 until sources.length()) view.loadImage(sources.optString(j))
                 }
                 "pickImage" -> view.pickImage()
+                "limitReached" -> haptic("reject")
             }
         }
     }
@@ -65,6 +66,9 @@ internal class SelectionUi(private val view: RsEditorView) : ActionMode.Callback
     private fun haptic(kind: String) {
         val constant = when {
             kind == "longPress" -> HapticFeedbackConstants.LONG_PRESS
+            // A refused edit (the character limit).
+            kind == "reject" && Build.VERSION.SDK_INT >= 30 -> HapticFeedbackConstants.REJECT
+            kind == "reject" -> HapticFeedbackConstants.LONG_PRESS
             Build.VERSION.SDK_INT >= 27 -> HapticFeedbackConstants.TEXT_HANDLE_MOVE
             else -> HapticFeedbackConstants.CLOCK_TICK
         }

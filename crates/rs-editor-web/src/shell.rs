@@ -665,6 +665,23 @@ pub unsafe extern "C" fn rse_add_image(
     u32::from(app.api.add_image(&src, rgba, width, height, scale, false))
 }
 
+/// Points images showing `old` at `new`, or removes them when `new` is
+/// empty (an upload finished or failed). Returns 1 when any changed.
+///
+/// # Safety
+/// `app` must be live; the strings must point to their lengths in bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_replace_image_src(
+    app_ptr: *mut App,
+    old: *const u8,
+    old_len: usize,
+    new: *const u8,
+    new_len: usize,
+) -> u32 {
+    let (old, new) = unsafe { (read(old, old_len), read(new, new_len)) };
+    u32::from(unsafe { app(app_ptr) }.api.replace_image_src(&old, &new))
+}
+
 /// The image at `src` could not be loaded; it shows as broken.
 ///
 /// # Safety

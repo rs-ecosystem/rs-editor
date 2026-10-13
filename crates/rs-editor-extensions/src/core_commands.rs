@@ -539,6 +539,10 @@ pub fn insert_content(nodes: Vec<Node>) -> Command {
     })
 }
 
+/// Meta key on the transaction of [`set_content`]: the document was
+/// replaced as a whole (plugins that tidy up after edits leave it alone).
+pub const SET_CONTENT: &str = "setContent";
+
 /// Replaces the whole document.
 pub fn set_content(doc: Node) -> Command {
     Arc::new(
@@ -554,6 +558,7 @@ pub fn set_content(doc: Node) -> Command {
                 }
                 let start = Selection::at_start(&tr.doc);
                 tr.set_selection(start);
+                tr.set_meta(SET_CONTENT, true);
                 dispatch(tr);
             }
             true

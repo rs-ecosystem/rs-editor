@@ -135,6 +135,10 @@ export interface EditorEvents {
   update: { editor: Editor };
   /** Only the selection changed. */
   selectionUpdate: { editor: Editor };
+  /** An edit was refused (or a paste cut short) at the `characterLimit`. */
+  characterLimit: { editor: Editor };
+  /** `uploadImage` failed: the image it was storing is removed again. */
+  uploadError: { editor: Editor; file: File; error: unknown };
   focus: {};
   blur: {};
 }

@@ -251,3 +251,21 @@ fn accessibility_updates_send_only_what_changed() {
     assert!(changed < 10, "{changed} of {all}");
     assert!(update["selection"]["focus"][0].is_string());
 }
+
+/// Content set as a whole stays as given; an edit that leaves the document
+/// ending in a list (or an image, a rule, a quote) gets a paragraph after
+/// it to type into.
+#[test]
+fn edits_keep_a_line_after_a_closing_list() {
+    let list = json!({"type": "doc", "content": [
+        {"type": "bulletList", "content": [{"type": "listItem", "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "a"}]}
+        ]}]}
+    ]});
+    let mut api = editor(json!({"type": "doc", "content": [{"type": "paragraph"}]}));
+    assert!(api.set_json(&list.to_string()));
+    assert_eq!(api.get_html(), "<ul><li><p>a</p></li></ul>", "as given");
+    assert!(api.run_chain(r#"[{"name": "setTextSelection", "args": {"from": 4}}]"#));
+    assert!(api.insert_text("b"));
+    assert_eq!(api.get_html(), "<ul><li><p>ab</p></li></ul><p></p>");
+}

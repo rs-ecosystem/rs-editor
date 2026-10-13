@@ -641,6 +641,72 @@ impl Plugin for CharacterLimit {
     }
 }
 
+/// Keeps a paragraph at the end of the document when it would otherwise
+/// end with something that is not a textblock (an image, a rule, a list,
+/// a quote), so there is always a line to click into and type below it,
+/// like Tiptap's TrailingNode.
+#[derive(Debug, Clone, Default)]
+pub struct TrailingNode;
+
+impl Extension for TrailingNode {
+    fn name(&self) -> &str {
+        "trailingNode"
+    }
+
+    fn plugins(&self, _ctx: &ExtensionContext) -> Vec<Arc<dyn Plugin>> {
+        vec![Arc::new(TrailingParagraph)]
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Debug)]
+struct TrailingParagraph;
+
+impl Plugin for TrailingParagraph {
+    fn key(&self) -> &str {
+        "trailingNode$"
+    }
+
+    fn append_transaction(
+        &self,
+        transactions: &[Transaction],
+        _old: &EditorState,
+        new: &EditorState,
+    ) -> Option<Transaction> {
+        // Edits only: content set as a whole stays exactly as given.
+        if !transactions.iter().any(|tr| tr.doc_changed())
+            || transactions.iter().any(|tr| {
+                tr.get_meta::<bool>(crate::core_commands::SET_CONTENT)
+                    .is_some()
+            })
+        {
+            return None;
+        }
+        let doc = new.doc();
+        if doc.last_child().is_none_or(|last| last.is_textblock()) {
+            return None;
+        }
+        let paragraph = new.schema().node_type("paragraph").ok()?;
+        let empty = paragraph
+            .create(None, rs_editor_model::Fragment::empty(), Default::default())
+            .ok()?;
+        let mut tr = new.tr();
+        tr.insert(
+            doc.content().size(),
+            rs_editor_model::Fragment::from_node(empty),
+        )
+        .ok()?;
+        Some(tr)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
 /// Placeholder text for empty documents or empty blocks. The view draws
 /// it; this extension only holds the configuration.
 #[derive(Debug, Clone)]
