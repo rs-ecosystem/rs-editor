@@ -77,7 +77,7 @@
 - **Drag:**
   - Ada ghost dan garis jatuh yang bergerak halus.
   - Tempat jatuh lebih stabil.
-  - Grip lebih besar untuk jari.
+  - Grip lebih besar untuk jari, tanpa latar sampai disentuh atau ditarik.
   - Drag bisa dibatalkan dengan kembali ke tempat asal.
   - Grip ikut ghost dan menempel pada blok yang dipindah (`ea73538`, `783b227`).
 - **Salin/potong di web** tidak lagi kosong (`00feff1`). Handle seleksi bisa saling melewati seperti di Android (`569d50b`).

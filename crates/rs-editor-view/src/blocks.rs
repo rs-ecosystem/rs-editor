@@ -906,17 +906,14 @@ impl EditorView {
             None => self.blocks.grip,
         };
         let active = self.blocks.hovered || self.blocks.drag.is_some();
-        // For a finger the grip always shows as a button to press.
+        // Only the six dots until it is hovered, pressed or dragged.
         let (_, _, icon_size) = self.grip_size();
-        if active || self.touch.finger_used {
+        if active {
             let mut fill = Paint::default();
             fill.set_anti_alias(true);
-            let color = if active {
-                palette.accent
-            } else {
-                palette.muted
-            };
-            fill.set_color(skia_safe::Color::new(color.with_alpha(progress).argb()));
+            fill.set_color(skia_safe::Color::new(
+                palette.accent.with_alpha(progress).argb(),
+            ));
             canvas.draw_rrect(
                 RRect::new_rect_xy(grip, theme.radius.sm, theme.radius.sm),
                 &fill,
