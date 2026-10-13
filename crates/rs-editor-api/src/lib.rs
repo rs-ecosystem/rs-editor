@@ -860,10 +860,23 @@ impl EditorApi {
             if let Some(toggled) = node.toggled() {
                 out.insert("checked".into(), json!(toggled == Toggled::True));
             }
+            if let Some(selected) = node.is_selected() {
+                out.insert("selected".into(), json!(selected));
+            }
+            if node.is_disabled() {
+                out.insert("disabled".into(), json!(true));
+            }
+            if let Some(active) = node.active_descendant() {
+                out.insert("active".into(), json!(active.0.to_string()));
+            }
+            if let Some(url) = node.url() {
+                out.insert("url".into(), json!(url));
+            }
             Value::Object(out)
         };
         let mut out = Map::new();
         out.insert("root".into(), json!(root.0.to_string()));
+        out.insert("focus".into(), json!(update.focus.0.to_string()));
         let selection = update
             .nodes
             .iter()

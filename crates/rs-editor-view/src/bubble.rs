@@ -4,11 +4,13 @@
 //! selection menu instead (see `touch.rs`), which is what users of phones
 //! expect.
 
+use accesskit::{Action, NodeId, Role, Toggled};
 use rs_editor_state::Selection;
 use rs_editor_ui::{Appear, Icon, Toolbar, ToolbarButton, ToolbarEntry};
 use serde_json::{Map, Value};
 use skia_safe::Canvas;
 
+use crate::a11y::{OverlayNodes, overlay_ids, overlay_node};
 use crate::{CursorIcon, EditorView, Effect};
 
 /// Space between the selection and the menu.
@@ -187,6 +189,56 @@ impl EditorView {
         let progress = self.bubble.appear.value(self.clock.now_ms());
         if progress > 0.0 {
             self.bubble.toolbar.paint(canvas, self.theme(), progress);
+        }
+    }
+
+    /// The menu as a toolbar of toggle buttons for screen readers.
+    pub(crate) fn bubble_a11y(&self, out: &mut OverlayNodes) {
+        if !self.bubble.appear.target() {
+            return;
+        }
+        let toolbar = &self.bubble.toolbar;
+        let mut children = Vec::new();
+        for (index, (entry, rect)) in toolbar
+            .entries
+            .iter()
+            .zip(toolbar.entry_rects())
+            .enumerate()
+        {
+            let ToolbarEntry::Button(button) = entry else {
+                continue;
+            };
+            let id = NodeId(overlay_ids::BUBBLE_BUTTON + index as u64);
+            let label = self.strings.marks.get(index).copied().unwrap_or_default();
+            let mut node = overlay_node(Role::Button, rect, label);
+            node.set_toggled(Toggled::from(button.active));
+            if button.enabled {
+                node.add_action(Action::Click);
+            } else {
+                node.set_disabled();
+            }
+            out.nodes.push((id, node));
+            children.push(id);
+        }
+        let id = NodeId(overlay_ids::BUBBLE_BAR);
+        let mut bar = overlay_node(Role::Toolbar, toolbar.rect(), self.strings.formatting);
+        bar.set_children(children);
+        out.nodes.push((id, bar));
+        out.roots.push(id);
+    }
+
+    /// A screen reader pressed button `index`.
+    pub(crate) fn bubble_click(&mut self, index: usize) -> bool {
+        if !self.bubble.appear.target() {
+            return false;
+        }
+        let Some(item) = ITEMS.get(index) else {
+            return false;
+        };
+        if item.command == LINK {
+            self.edit_link()
+        } else {
+            self.run(item.command, &Value::Null).unwrap_or(false)
         }
     }
 

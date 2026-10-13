@@ -16,6 +16,20 @@ pub(crate) struct Strings {
     pub image_placeholder: &'static str,
     /// Shown in an empty line with the caret.
     pub placeholder: &'static str,
+    // Names for screen readers.
+    pub blocks_menu: &'static str,
+    pub formatting: &'static str,
+    /// Bubble menu buttons: bold, italic, underline, strike, code,
+    /// highlight, link.
+    pub marks: [&'static str; 7],
+    pub link_menu: &'static str,
+    pub link_address: &'static str,
+    pub open_link: &'static str,
+    pub copy_link: &'static str,
+    pub edit_link: &'static str,
+    pub remove_link: &'static str,
+    pub apply: &'static str,
+    pub move_block: &'static str,
 }
 
 const ENGLISH: Strings = Strings {
@@ -31,6 +45,25 @@ const ENGLISH: Strings = Strings {
     image: "Image",
     image_placeholder: "Paste an image link",
     placeholder: "Write, or type \u{201c}/\u{201d} for commands",
+    blocks_menu: "Blocks",
+    formatting: "Formatting",
+    marks: [
+        "Bold",
+        "Italic",
+        "Underline",
+        "Strikethrough",
+        "Code",
+        "Highlight",
+        "Link",
+    ],
+    link_menu: "Link",
+    link_address: "Link address",
+    open_link: "Open link",
+    copy_link: "Copy link",
+    edit_link: "Edit link",
+    remove_link: "Remove link",
+    apply: "Apply",
+    move_block: "Select or drag to move the block",
 };
 
 const INDONESIAN: Strings = Strings {
@@ -46,6 +79,25 @@ const INDONESIAN: Strings = Strings {
     image: "Gambar",
     image_placeholder: "Tempel tautan gambar",
     placeholder: "Tulis, atau ketik \u{201c}/\u{201d} untuk perintah",
+    blocks_menu: "Blok",
+    formatting: "Format",
+    marks: [
+        "Tebal",
+        "Miring",
+        "Garis bawah",
+        "Coret",
+        "Kode",
+        "Sorotan",
+        "Tautan",
+    ],
+    link_menu: "Tautan",
+    link_address: "Alamat tautan",
+    open_link: "Buka tautan",
+    copy_link: "Salin tautan",
+    edit_link: "Ubah tautan",
+    remove_link: "Hapus tautan",
+    apply: "Terapkan",
+    move_block: "Pilih atau seret untuk memindahkan blok",
 };
 
 /// The strings for a BCP 47 language tag (`"id-ID"`, `"en"`); English

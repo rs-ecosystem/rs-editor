@@ -14,6 +14,9 @@ use rs_editor_ui::{Appear, Icon, Menu, MenuItem};
 use serde_json::{Value, json};
 use skia_safe::Canvas;
 
+use accesskit::{Action, NodeId, Role};
+
+use crate::a11y::{OverlayNodes, overlay_ids, overlay_node};
 use crate::strings::Strings;
 use crate::{CursorIcon, EditorView, Effect, KeyEvent, TouchPhase};
 
@@ -558,6 +561,49 @@ impl EditorView {
         if self.slash.menu.item_at(x, y) == Some(pressed) {
             self.pick_slash(pressed);
         }
+        true
+    }
+
+    /// The menu as a list box for screen readers; its chosen row becomes
+    /// the editor's active descendant.
+    pub(crate) fn slash_a11y(&self, out: &mut OverlayNodes) {
+        if !self.slash.appear.target() {
+            return;
+        }
+        let menu = &self.slash.menu;
+        let count = self.slash.shown.len();
+        let mut children = Vec::with_capacity(count);
+        for (row, &index) in self.slash.shown.iter().enumerate() {
+            let id = NodeId(overlay_ids::SLASH_OPTION + row as u64);
+            let mut option = overlay_node(
+                Role::ListBoxOption,
+                menu.item_rect(row),
+                ITEMS[index].label.text(&self.strings),
+            );
+            option.set_selected(menu.selected == Some(row));
+            option.set_position_in_set(row + 1);
+            option.set_size_of_set(count);
+            option.add_action(Action::Click);
+            out.nodes.push((id, option));
+            children.push(id);
+        }
+        let list_id = NodeId(overlay_ids::SLASH_LIST);
+        let mut list = overlay_node(Role::ListBox, menu.rect(), self.strings.blocks_menu);
+        list.set_children(children);
+        out.nodes.push((list_id, list));
+        out.roots.push(list_id);
+        out.active = menu
+            .selected
+            .map(|row| NodeId(overlay_ids::SLASH_OPTION + row as u64));
+    }
+
+    /// A screen reader picked row `row`.
+    pub(crate) fn slash_click(&mut self, row: usize) -> bool {
+        self.update_slash();
+        if !self.slash.appear.target() || row >= self.slash.shown.len() {
+            return false;
+        }
+        self.pick_slash(row);
         true
     }
 

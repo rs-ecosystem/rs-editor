@@ -7,6 +7,7 @@
 //! IME sees the field's text (`ImeContext::field`), so platform keyboards
 //! work in it as in any text field.
 
+use accesskit::{Action as AxAction, NodeId, Role};
 use rs_editor_layout::{Affinity, Rect, TextLayout, UiText};
 use rs_editor_state::Selection;
 use rs_editor_ui::{
@@ -16,6 +17,7 @@ use rs_editor_ui::{
 use serde_json::{Value, json};
 use skia_safe::{Canvas, Contains};
 
+use crate::a11y::{OverlayNodes, overlay_ids, overlay_node};
 use crate::{
     ClipboardContent, CursorIcon, EditorView, Effect, Granularity, ImeCaret, ImeContext, KeyEvent,
     TouchPhase,
@@ -421,6 +423,72 @@ impl EditorView {
         }
         self.link.toolbar.paint_buttons(canvas, theme, progress);
         canvas.restore();
+    }
+
+    /// The popover as a group for screen readers: the address (a link),
+    /// the buttons, and while editing the address field, which then has
+    /// focus.
+    pub(crate) fn link_a11y(&self, out: &mut OverlayNodes) {
+        if !self.link.appear.target() {
+            return;
+        }
+        let strings = &self.strings;
+        let mut children = Vec::new();
+        if let Some(editing) = &self.link.editing {
+            let id = NodeId(overlay_ids::LINK_FIELD);
+            let label = if editing.image {
+                strings.image_placeholder
+            } else {
+                strings.link_address
+            };
+            let mut field = overlay_node(Role::TextInput, self.link.field_rect, label);
+            field.set_value(editing.field.text());
+            field.add_action(AxAction::Focus);
+            out.nodes.push((id, field));
+            out.focus = Some(id);
+            children.push(id);
+        } else if let Some(link) = &self.link.shown {
+            let id = NodeId(overlay_ids::LINK_URL);
+            let mut url = overlay_node(Role::Link, self.link.url_rect, &link.href);
+            url.set_url(link.href.as_str());
+            url.add_action(AxAction::Click);
+            out.nodes.push((id, url));
+            children.push(id);
+        }
+        let rects = self.link.toolbar.entry_rects();
+        for (index, (action, rect)) in self.link.actions.iter().zip(rects).enumerate() {
+            let id = NodeId(overlay_ids::LINK_BUTTON + index as u64);
+            let label = match action {
+                Action::Open => strings.open_link,
+                Action::Copy => strings.copy_link,
+                Action::Edit => strings.edit_link,
+                Action::Remove => strings.remove_link,
+                Action::Apply => strings.apply,
+            };
+            let mut button = overlay_node(Role::Button, rect, label);
+            button.add_action(AxAction::Click);
+            out.nodes.push((id, button));
+            children.push(id);
+        }
+        let id = NodeId(overlay_ids::LINK_GROUP);
+        let mut group = overlay_node(Role::Group, self.link.rect, strings.link_menu);
+        group.set_children(children);
+        out.nodes.push((id, group));
+        out.roots.push(id);
+    }
+
+    /// A screen reader activated the address (`None`) or button `index`.
+    pub(crate) fn link_click(&mut self, button: Option<usize>) -> bool {
+        if !self.link.appear.target() {
+            return false;
+        }
+        let part = match button {
+            Some(index) if index < self.link.actions.len() => Part::Button(index),
+            Some(_) => return false,
+            None => Part::Url,
+        };
+        self.press_link_part(part);
+        true
     }
 
     fn link_part_at(&self, x: f32, y: f32) -> Option<Part> {

@@ -2,7 +2,10 @@
 // readers get an invisible DOM mirror of the same accessibility tree that
 // AccessKit gives native screen readers (headings, paragraphs, lists,
 // checkboxes, one span per line, each at its place on screen), and spoken
-// feedback for caret moves through a live region.
+// feedback for caret moves through a live region. The editor's menus are
+// mirrored too: the slash menu as a listbox whose chosen option is the
+// input's aria-activedescendant, the bubble menu as a toolbar, the link
+// popover as a group of buttons.
 
 const ROLE_ELEMENTS = {
   Paragraph: "p",
@@ -11,7 +14,21 @@ const ROLE_ELEMENTS = {
   List: "ul",
   ListItem: "li",
   Splitter: "hr",
+  Button: "button",
 };
+
+/** ARIA roles of the menus' nodes. */
+const ARIA_ROLES = {
+  ListBox: "listbox",
+  ListBoxOption: "option",
+  Toolbar: "toolbar",
+  Group: "group",
+  Link: "link",
+  TextInput: "textbox",
+};
+
+/** Nodes a screen reader can activate (AccessKit's Click). */
+const CLICKABLE = new Set(["CheckBox", "Button", "ListBoxOption", "Link"]);
 
 const LABELS = {
   id: { editor: "Editor teks", selected: "dipilih", characters: "karakter dipilih", blank: "kosong", newline: "baris baru", space: "spasi" },
@@ -80,10 +97,32 @@ export class AccessibilityMirror {
     const update = editor._json(len);
     this.rootId = update.root;
     if (update.selection) this.selection = update.selection;
+    this.focusId = update.focus;
     const changed = update.nodes.map((node) => node.id);
     const previous = new Map(changed.map((id) => [id, this.nodes.get(id)]));
     for (const node of update.nodes) this.nodes.set(node.id, node);
     for (const id of changed) this.render(id, previous.get(id));
+    this.linkInput();
+  }
+
+  /**
+   * Points the focused input at the slash menu's chosen option, and names
+   * it after the link field while that has focus.
+   */
+  linkInput() {
+    const input = this.editor._textarea ?? this.editor.canvas;
+    const root = this.nodes.get(this.rootId);
+    const active = root?.active && this.elements.get(root.active);
+    if (active) {
+      active.id ||= `rs-editor-a11y-${root.active}`;
+      input.setAttribute("aria-activedescendant", active.id);
+      input.setAttribute("aria-expanded", "true");
+    } else if (input.hasAttribute("aria-activedescendant")) {
+      input.removeAttribute("aria-activedescendant");
+      input.removeAttribute("aria-expanded");
+    }
+    const field = this.focusId && this.focusId !== this.rootId ? this.nodes.get(this.focusId) : null;
+    input.setAttribute("aria-label", field?.label ?? labels().editor);
   }
 
   /** The element for node `id`, created (with its subtree) when missing. */
@@ -111,8 +150,15 @@ export class AccessibilityMirror {
     }
     element.dataset.id = id;
     if (node.role === "CheckBox") element.setAttribute("aria-checked", String(node.checked === true));
-    if (node.role === "Image") element.setAttribute("aria-label", node.label ?? "");
-    if (node.role === "TextRun") {
+    if (node.role === "Button" && node.checked !== undefined) element.setAttribute("aria-pressed", String(node.checked));
+    if (node.role === "ListBoxOption") element.setAttribute("aria-selected", String(node.selected === true));
+    if (node.disabled) element.setAttribute("aria-disabled", "true");
+    else element.removeAttribute("aria-disabled");
+    if (node.label && node.role !== "TextRun") element.setAttribute("aria-label", node.label);
+    if (node.role === "TextInput") element.textContent = node.text ?? "";
+    if (node.role === "TextInput") {
+      // Its text is its value, set above.
+    } else if (node.role === "TextRun") {
       const text = (node.text ?? "").replace(/\n$/, "");
       if (element.textContent !== text) element.textContent = text;
     } else {
@@ -198,6 +244,8 @@ export class AccessibilityMirror {
   announceMove(event) {
     // Bring the mirror (and its idea of the selection) up to date now.
     this.update();
+    // Arrows choose in the slash menu; the active option speaks for itself.
+    if (this.nodes.get(this.rootId)?.active) return;
     const selection = this.selection;
     if (!selection) return;
     const text = labels();
@@ -255,7 +303,7 @@ function collectRuns(nodes, id, runs) {
 
 function tagOf(node) {
   if (node.role === "Heading") return `h${Math.min(6, Math.max(1, node.level ?? 2))}`;
-  return ROLE_ELEMENTS[node.role] ?? (node.role === "TextRun" ? "span" : "div");
+  return ROLE_ELEMENTS[node.role] ?? (node.role === "TextRun" || node.role === "Link" ? "span" : "div");
 }
 
 function createElement(node, tag, action) {
@@ -269,17 +317,22 @@ function createElement(node, tag, action) {
     style.overflow = "hidden";
   } else if (node.role === "CheckBox") {
     element.setAttribute("role", "checkbox");
+  } else if (ARIA_ROLES[node.role]) {
+    element.setAttribute("role", ARIA_ROLES[node.role]);
+  } else if (node.role === "Image") {
+    element.setAttribute("role", "img");
+  } else if (node.role === "List") {
+    element.setAttribute("role", "list");
+  }
+  if (CLICKABLE.has(node.role)) {
     element.tabIndex = -1;
+    if (node.role === "Button") element.type = "button";
     // Screen readers activate it with a click, which reaches the element
     // directly even though the mirror ignores the pointer.
     element.addEventListener("click", (e) => {
       e.preventDefault();
       action(element.dataset.id, "click");
     });
-  } else if (node.role === "Image") {
-    element.setAttribute("role", "img");
-  } else if (node.role === "List") {
-    element.setAttribute("role", "list");
   }
   return element;
 }

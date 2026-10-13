@@ -2377,3 +2377,128 @@ mod content {
         paint(&mut view);
     }
 }
+
+mod overlay_a11y {
+    use accesskit::{Action, ActionRequest, NodeId, Role, TreeId};
+
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn node(update: &accesskit::TreeUpdate, id: u64) -> Option<accesskit::Node> {
+        update
+            .nodes
+            .iter()
+            .find(|(n, _)| n.0 == id)
+            .map(|(_, node)| node.clone())
+    }
+
+    fn click(view: &mut EditorView, id: u64) -> bool {
+        view.accessibility_action(&ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: NodeId(id),
+            data: None,
+        })
+    }
+
+    #[test]
+    fn the_slash_menu_is_a_list_box_with_an_active_row() {
+        let (mut view, _) = view_with(doc(vec![p("")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.set_locale("id");
+        view.accessibility_tree();
+        view.insert_text("/");
+        paint(&mut view);
+        let update = view.accessibility_update().unwrap();
+        let list = node(&update, 16).expect("the list box");
+        assert_eq!(list.role(), Role::ListBox);
+        assert_eq!(list.label(), Some("Blok"));
+        assert_eq!(list.children().len(), 11);
+        let first = node(&update, 1_000).unwrap();
+        assert_eq!(first.role(), Role::ListBoxOption);
+        assert_eq!(first.label(), Some("Teks"));
+        assert_eq!(first.is_selected(), Some(true));
+        let editor = node(&update, EDITOR_NODE.0).unwrap();
+        assert_eq!(editor.active_descendant(), Some(NodeId(1_000)));
+        assert!(editor.children().contains(&NodeId(16)));
+
+        // Arrows move the active row; a screen reader's click picks one.
+        key(&mut view, "ArrowDown", plain());
+        let update = view.accessibility_update().unwrap();
+        let editor = node(&update, EDITOR_NODE.0).unwrap();
+        assert_eq!(editor.active_descendant(), Some(NodeId(1_001)));
+        assert!(click(&mut view, 1_002), "Judul 2");
+        assert_eq!(view.editor().get_json()["content"][0]["attrs"]["level"], 2);
+        paint(&mut view);
+        let update = view.accessibility_update().unwrap();
+        let editor = node(&update, EDITOR_NODE.0).unwrap();
+        assert_eq!(editor.active_descendant(), None);
+        assert!(!editor.children().contains(&NodeId(16)), "the menu left");
+    }
+
+    #[test]
+    fn the_bubble_menu_link_popover_and_grip_are_buttons() {
+        let content = doc(vec![p("halo dunia"), p("dua")]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        view.accessibility_tree();
+
+        // A mouse selection: the bubble menu's toggle buttons.
+        let rect = view
+            .layout()
+            .caret_rect(1, Affinity::Downstream, 0.0)
+            .unwrap();
+        let start = view.to_view(rect);
+        let rect = view
+            .layout()
+            .caret_rect(5, Affinity::Downstream, 0.0)
+            .unwrap();
+        let end = view.to_view(rect);
+        view.pointer_down(PointerEvent::at(start.x, start.center_y()));
+        view.pointer_move(PointerEvent::at(end.x, end.center_y()));
+        view.pointer_up(PointerEvent::at(end.x, end.center_y()));
+        paint(&mut view);
+        let update = view.accessibility_update().unwrap();
+        assert_eq!(node(&update, 17).unwrap().role(), Role::Toolbar);
+        let bold = node(&update, 2_000).unwrap();
+        assert_eq!((bold.role(), bold.label()), (Role::Button, Some("Bold")));
+        assert!(click(&mut view, 2_000));
+        assert!(view.editor().is_active("bold", &Default::default()));
+        let update = view.accessibility_update().unwrap();
+        assert_eq!(
+            node(&update, 2_000).unwrap().toggled(),
+            Some(accesskit::Toggled::True)
+        );
+
+        // The link button opens the address field, which takes focus.
+        assert!(click(&mut view, 2_006));
+        paint(&mut view);
+        let update = view.accessibility_update().unwrap();
+        assert_eq!(update.focus, NodeId(3_100));
+        let field = node(&update, 3_100).unwrap();
+        assert_eq!(field.role(), Role::TextInput);
+        view.insert_text("rs-editor.dev");
+        let update = view.accessibility_update().unwrap();
+        assert_eq!(node(&update, 3_100).unwrap().value(), Some("rs-editor.dev"));
+        assert!(click(&mut view, 3_001), "Apply");
+        assert!(!view.link_editing());
+        let update = view.accessibility_update().unwrap();
+        assert_eq!(update.focus, EDITOR_NODE);
+
+        // The grip selects its block.
+        let y = view_y_of(&mut view, 13) + 10.0;
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let update = view.accessibility_update().unwrap();
+        assert_eq!(node(&update, 19).unwrap().role(), Role::Button);
+        assert!(click(&mut view, 19));
+        assert!(view.has_node_selection());
+        assert_eq!(view.editor().selection().from(), 12);
+    }
+}

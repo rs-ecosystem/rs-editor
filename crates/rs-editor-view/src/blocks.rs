@@ -6,12 +6,14 @@
 //!
 //! Blocks are the document's top-level blocks: a list moves as a whole.
 
+use accesskit::{Action, NodeId, Role};
 use rs_editor_layout::{Rect, TopBlock};
 use rs_editor_model::Fragment;
 use rs_editor_state::{NodeSelection, Selection, TextSelection};
 use rs_editor_ui::{Appear, Icon};
 use skia_safe::{Canvas, Contains, Paint, RRect};
 
+use crate::a11y::{OverlayNodes, overlay_ids, overlay_node};
 use crate::{CursorIcon, EditorView, Effect, HapticKind, TouchPhase};
 
 const GRIP_WIDTH: f32 = 20.0;
@@ -317,6 +319,30 @@ impl EditorView {
         };
         tr.set_selection(selection);
         self.dispatch(tr)
+    }
+
+    /// The grip as a button for screen readers: activating it selects the
+    /// block.
+    pub(crate) fn grip_a11y(&self, out: &mut OverlayNodes) {
+        if !self.blocks.appear.target() || self.blocks.drag.is_some() {
+            return;
+        }
+        let id = NodeId(overlay_ids::GRIP);
+        let mut node = overlay_node(Role::Button, self.blocks.grip, self.strings.move_block);
+        node.add_action(Action::Click);
+        out.nodes.push((id, node));
+        out.roots.push(id);
+    }
+
+    /// A screen reader activated the grip: the block is selected.
+    pub(crate) fn grip_click(&mut self) -> bool {
+        let grip = self.blocks.grip;
+        if !self.blocks.appear.target() || !self.start_block_drag(grip.center_x(), grip.center_y())
+        {
+            return false;
+        }
+        self.end_block_drag();
+        true
     }
 
     /// Escape during a drag puts the block back.

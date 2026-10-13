@@ -6,6 +6,12 @@
 //! node identity, so an update after typing only carries the edited block
 //! and the few nodes whose place changed. Platform adapters (AccessKit on
 //! native, ARIA on the web) consume the same tree.
+//!
+//! The menus and popovers drawn over the text are children of the editor
+//! node too: the slash menu a list box whose chosen row is the editor's
+//! active descendant (as a combobox's), the bubble menu a toolbar, the
+//! link popover a group with its buttons and address field, and the drag
+//! handle a button. Clicking any of them does what a tap would.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -71,6 +77,52 @@ pub(crate) struct A11y {
     /// Nodes outside subtrees as last sent.
     sent: HashMap<NodeId, AxNode>,
     sent_focus: Option<NodeId>,
+}
+
+/// Node ids of the menus and popovers (below any block subtree's base).
+pub(crate) mod overlay_ids {
+    pub const SLASH_LIST: u64 = 16;
+    pub const BUBBLE_BAR: u64 = 17;
+    pub const LINK_GROUP: u64 = 18;
+    pub const GRIP: u64 = 19;
+    /// Slash menu rows: `SLASH_OPTION + row`.
+    pub const SLASH_OPTION: u64 = 1_000;
+    /// Bubble menu buttons: `BUBBLE_BUTTON + index`.
+    pub const BUBBLE_BUTTON: u64 = 2_000;
+    pub const LINK_URL: u64 = 3_000;
+    /// Link popover buttons: `LINK_BUTTON + index`.
+    pub const LINK_BUTTON: u64 = 3_001;
+    pub const LINK_FIELD: u64 = 3_100;
+    /// Everything at or above this (and below a block base) is an overlay.
+    pub const FIRST: u64 = 16;
+    pub const LAST: u64 = 3_999;
+}
+
+/// The overlays' nodes for one update.
+#[derive(Default)]
+pub(crate) struct OverlayNodes {
+    pub nodes: Vec<(NodeId, AxNode)>,
+    /// Children of the editor node.
+    pub roots: Vec<NodeId>,
+    /// The editor's active descendant (the slash menu's chosen row).
+    pub active: Option<NodeId>,
+    /// Where focus is instead of the editor (the address field).
+    pub focus: Option<NodeId>,
+}
+
+/// A node at `rect` (view coordinates) named `label`.
+pub(crate) fn overlay_node(role: Role, rect: skia_safe::Rect, label: &str) -> AxNode {
+    let mut node = AxNode::new(role);
+    node.set_bounds(AxRect::new(
+        f64::from(rect.left),
+        f64::from(rect.top),
+        f64::from(rect.right),
+        f64::from(rect.bottom),
+    ));
+    if !label.is_empty() {
+        node.set_label(label);
+    }
+    node
 }
 
 fn ax_rect(x: f32, y: f32, width: f32, height: f32) -> AxRect {
@@ -346,6 +398,11 @@ impl EditorView {
     /// changed. Hosts call this after input while an assistive technology
     /// is active.
     pub fn accessibility_update(&mut self) -> Option<TreeUpdate> {
+        // The menus follow the latest input, even before the next frame.
+        self.update_bubble();
+        self.update_slash();
+        self.update_link();
+        self.update_block_handle();
         let layout = self.layout();
         let doc = self.editor.doc().clone();
         let mut a11y = std::mem::take(&mut self.a11y);
@@ -437,10 +494,32 @@ impl EditorView {
         content.set_children(top_ids);
         push_changed(&mut a11y.sent, &mut nodes, CONTENT_NODE, content);
 
+        let mut overlays = OverlayNodes::default();
+        self.slash_a11y(&mut overlays);
+        self.bubble_a11y(&mut overlays);
+        self.link_a11y(&mut overlays);
+        self.grip_a11y(&mut overlays);
+        // Overlays that went away must be sent in full when they return.
+        let shown: std::collections::HashSet<NodeId> =
+            overlays.nodes.iter().map(|(id, _)| *id).collect();
+        a11y.sent.retain(|id, _| {
+            !(overlay_ids::FIRST..=overlay_ids::LAST).contains(&id.0) || shown.contains(id)
+        });
+        for (id, node) in overlays.nodes {
+            push_changed(&mut a11y.sent, &mut nodes, id, node);
+        }
+
         let mut editor = AxNode::new(Role::MultilineTextInput);
         editor.set_transform(Affine::scale(f64::from(self.scale)));
         editor.set_bounds(ax_rect(0.0, 0.0, self.width, self.height));
-        editor.set_children(vec![CONTENT_NODE]);
+        let mut children = vec![CONTENT_NODE];
+        children.extend(overlays.roots.iter().copied());
+        editor.set_children(children);
+        if let Some(active) = overlays.active {
+            editor.set_active_descendant(active);
+            editor.set_expanded(true);
+            editor.set_controls(vec![NodeId(overlay_ids::SLASH_LIST)]);
+        }
         editor.add_action(Action::Focus);
         editor.add_action(Action::SetTextSelection);
         editor.add_action(Action::ReplaceSelectedText);
@@ -452,7 +531,7 @@ impl EditorView {
         }
         push_changed(&mut a11y.sent, &mut nodes, EDITOR_NODE, editor);
 
-        let focus = EDITOR_NODE;
+        let focus = overlays.focus.unwrap_or(EDITOR_NODE);
         let changed = !nodes.is_empty() || a11y.sent_focus != Some(focus);
         let first = a11y.sent_focus.is_none();
         a11y.sent_focus = Some(focus);
@@ -490,8 +569,11 @@ impl EditorView {
                 self.select_text(anchor, head, Affinity::Downstream)
             }
             (Action::ReplaceSelectedText, Some(ActionData::Value(text))) => self.insert_text(text),
+            (Action::Click, _) if request.target_node.0 >> LOCAL_BITS == 0 => {
+                self.overlay_click(request.target_node.0)
+            }
             (Action::Click, _) => {
-                // Task checkboxes are the only clickable nodes.
+                // In the document, task checkboxes are the clickable nodes.
                 let base = request.target_node.0 >> LOCAL_BITS;
                 let (Some(top), Some(subtree)) = (self.locate(base), self.a11y.subtrees.get(&base))
                 else {
@@ -510,6 +592,25 @@ impl EditorView {
             (Action::ScrollIntoView, _) => {
                 self.scroll_into_view();
                 true
+            }
+            _ => false,
+        }
+    }
+
+    /// A screen reader activated a menu row, a button or the grip.
+    fn overlay_click(&mut self, id: u64) -> bool {
+        use overlay_ids::*;
+        match id {
+            GRIP => self.grip_click(),
+            id if (SLASH_OPTION..BUBBLE_BUTTON).contains(&id) => {
+                self.slash_click((id - SLASH_OPTION) as usize)
+            }
+            id if (BUBBLE_BUTTON..LINK_URL).contains(&id) => {
+                self.bubble_click((id - BUBBLE_BUTTON) as usize)
+            }
+            LINK_URL => self.link_click(None),
+            id if (LINK_BUTTON..LINK_FIELD).contains(&id) => {
+                self.link_click(Some((id - LINK_BUTTON) as usize))
             }
             _ => false,
         }
