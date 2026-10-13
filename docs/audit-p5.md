@@ -61,6 +61,16 @@
   - Menjatuhkan file tidak membuat halaman berpindah.
   - Kolom tautan mematikan autocorrect dan spellcheck.
 
+### Tambahan (batch 4)
+
+- **Gambar yang diketuk di layar sentuh** memunculkan menu Potong/Salin tanpa membuka keyboard.
+- **Mod-Shift-Atas/Bawah** memindah blok atau item list yang berisi caret, seperti di Notion. Caret tetap berada di tempatnya di dalam blok.
+- **Placeholder:**
+  - Judul 4-6, item list ("Daftar"), dan item tugas ("Tugas") memakai nama bloknya.
+  - Petunjuk "ketik /" hanya tampil saat menu `/` bisa dipakai. Saat read-only atau editor tidak fokus, yang tampil "Tulis sesuatu…".
+- **Alamat berkurung** seperti `…/Rust_(bahasa)` tidak lagi terpotong.
+- **Menu konteks web dan label screen reader** mengikuti opsi `locale` dan `setLocale()`.
+
 ### Laporan pengguna sebelumnya
 
 - **Menu `/`:** bisa di-scroll, sorotan menempel pada opsi yang ditekan, dan tidak kembali ke opsi pertama (`42452a9`, `1e80343`).
@@ -76,34 +86,30 @@
 
 ### Sedang
 
-1. **Gambar di layar sentuh** belum punya menu Potong/Salin/Hapus. Saat ini gambar hanya bisa dihapus dengan Backspace.
-2. **Batas karakter** belum memberi umpan balik (haptik/event). Tempel yang melebihi batas ditolak seluruhnya, tidak dipotong seperti Tiptap.
-3. **Upload gambar di web** belum punya status "mengunggah" dan pesan gagal.
-4. **Memori gambar:**
+1. **Batas karakter** belum memberi umpan balik (haptik/event). Tempel yang melebihi batas ditolak seluruhnya, tidak dipotong seperti Tiptap.
+2. **Upload gambar di web** belum punya status "mengunggah" dan pesan gagal.
+3. **Memori gambar:**
    - Gambar yang dihapus tidak dilepas dari memori.
    - Tidak ada antrean muat.
    - Setiap gambar yang selesai dimuat memicu layout ulang seluruh dokumen.
    - Gambar besar disalin beberapa kali di web.
-5. **Kolom tautan di layar sentuh** belum mendukung tekan lama untuk Tempel, ketuk ganda, dan magnifier.
-6. **Memindah blok dengan keyboard** (Mod-Shift-Atas/Bawah) dan aksi a11y "pindah ke atas/bawah" belum ada.
-7. **Tujuan drop belum lengkap:**
+4. **Kolom tautan di layar sentuh** belum mendukung tekan lama untuk Tempel, ketuk ganda, dan magnifier.
+5. **Aksi a11y "pindah ke atas/bawah"** untuk screen reader belum ada (memindah blok dengan keyboard sudah bisa).
+6. **Tujuan drop belum lengkap:**
    - Item list ↔ item tugas.
    - Masuk sebagai anak item yang belum punya sublist.
    - Paragraf ke dalam list atau kutipan.
    - Penggabungan list sejenis yang bersebelahan.
-8. **Tempel dari situs lain:**
+7. **Tempel dari situs lain:**
    - Gambar tanpa CORS tampil gagal.
    - Clipboard berisi file sekaligus HTML membuang teksnya.
    - Klik kanan belum memindah seleksi ke titik klik.
-9. **Gambar di akhir dokumen** belum diikuti paragraf, sehingga sulit mengetik di bawahnya.
-10. **Potong lewat menu web** bisa kehilangan isi kalau clipboard tidak tersedia (HTTP biasa).
+8. **Gambar di akhir dokumen** belum diikuti paragraf, sehingga sulit mengetik di bawahnya.
+9. **Potong lewat menu web** bisa kehilangan isi kalau clipboard tidak tersedia (HTTP biasa).
 
 ### Rendah
 
-- **Placeholder:**
-  - Judul 4-6 dan item list belum memakai nama bloknya.
-  - Petunjuk "ketik /" tetap tampil saat read-only, saat menu `/` dimatikan, atau saat editor tidak fokus.
-- **Lokalisasi:** menu konteks web dan mirror a11y belum mengikuti opsi `locale`. Android baru membaca locale saat editor dibuat.
+- **Lokalisasi Android:** locale baru dibaca saat editor dibuat, jadi perubahan bahasa sistem belum langsung diikuti.
 - **Tombol Salin di popover** belum memberi umpan balik "Disalin".
 - **Kolom tautan:**
   - Belum bisa dinavigasi dengan Tab.
@@ -112,5 +118,4 @@
 - **Ghost drag** belum dibatasi tingginya untuk blok yang sangat tinggi.
 - **Grip mouse bisa menimpa teks** kalau padding kiri lebih kecil dari lebarnya.
 - **Bubble menu** tidak ikut ke awal seleksi multi-baris.
-- **`detect_link` memotong `)`** di akhir alamat seperti `…/Rust_(bahasa)`.
 - **Gagal muat gambar** belum bisa dicoba ulang. Android belum mendukung SVG dan stiker/GIF Gboard (`commitContent`).

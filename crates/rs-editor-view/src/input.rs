@@ -52,6 +52,12 @@ impl EditorView {
         if command && !m.shift && !m.alt && event.key.eq_ignore_ascii_case("k") {
             return self.edit_link();
         }
+        if command && m.shift && !m.alt && matches!(event.key.as_str(), "ArrowUp" | "ArrowDown") {
+            // Move the block (Notion's Mod-Shift-Up/Down); at the first or
+            // last place the keys do nothing else either.
+            self.move_block_by(event.key == "ArrowUp");
+            return true;
+        }
         if event.key == "Escape" && (self.link_escape() || self.bubble_escape()) {
             return true;
         }

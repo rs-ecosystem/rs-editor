@@ -914,6 +914,7 @@ class Editor {
 
   /** The language of the editor's own menus, such as `"id-ID"`. */
   setLocale(locale) {
+    this._options.locale = locale;
     this._withString(locale, (ptr, len) => this._M._rse_set_locale(this._app, ptr, len));
     this._requestFrame();
   }

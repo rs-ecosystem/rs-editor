@@ -381,6 +381,11 @@ impl EditorView {
         self.pointer_down(event);
         self.pointer_up(event);
         let after = self.editor.selection().clone();
+        if let Selection::Node(_) = after {
+            // A tapped image: its Cut/Copy menu, and no keyboard.
+            self.show_menu();
+            return;
+        }
         if self.editor.is_editable() {
             self.push_effect(Effect::ShowKeyboard);
         }
@@ -734,9 +739,17 @@ impl EditorView {
             if editable {
                 items.push(MenuItem::Paste);
             }
-            let rects = self
-                .layout()
-                .selection_rects(selection.from(), selection.to());
+            let layout = self.layout();
+            let rects = match &selection {
+                // A selected image or rule: its own box.
+                Selection::Node(_) => layout
+                    .blocks
+                    .iter()
+                    .filter(|b| b.pos == selection.from())
+                    .map(|b| b.rect)
+                    .collect(),
+                _ => layout.selection_rects(selection.from(), selection.to()),
+            };
             let mut bounds = rects.first().copied()?;
             for r in &rects[1..] {
                 let (x0, y0) = (bounds.x.min(r.x), bounds.y.min(r.y));

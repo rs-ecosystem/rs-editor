@@ -635,3 +635,18 @@ fn autolink_does_not_relink_after_undo_or_block_changes() {
     assert!(editor.run("undo", &Value::Null).unwrap());
     assert_eq!(editor.get_json(), unlinked, "undo must not autolink either");
 }
+
+#[test]
+fn detected_links_keep_balanced_parentheses() {
+    use crate::starter_kit::detect_link;
+    assert_eq!(
+        detect_link("https://en.wikipedia.org/wiki/Rust_(programming_language)").as_deref(),
+        Some("https://en.wikipedia.org/wiki/Rust_(programming_language)")
+    );
+    assert_eq!(
+        detect_link("https://a.b/x),").as_deref(),
+        Some("https://a.b/x"),
+        "a sentence's parenthesis and comma"
+    );
+    assert_eq!(detect_link("www.a.b.").as_deref(), Some("https://www.a.b"));
+}

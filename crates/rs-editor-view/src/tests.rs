@@ -3175,3 +3175,85 @@ mod audit_link {
         assert_eq!(safe_url("data:text/html,x"), None);
     }
 }
+
+mod audit_more {
+    use super::*;
+
+    fn ctrl_shift() -> Modifiers {
+        Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn mod_shift_arrows_move_the_caret_block() {
+        let (mut view, _) = view_with(
+            doc(vec![p("satu"), p("dua"), p("tiga")]),
+            KeyPlatform::Other,
+        );
+        view.set_focused(true);
+        view.select_text(9, 9, Affinity::Downstream); // "du|a"
+        assert!(key(&mut view, "ArrowUp", ctrl_shift()));
+        assert_eq!(view.editor().get_text("|"), "dua|satu|tiga");
+        assert_eq!(
+            view.editor().selection().head(),
+            3,
+            "the caret stays in 'du|a'"
+        );
+        assert!(
+            key(&mut view, "ArrowUp", ctrl_shift()),
+            "at the top it does nothing"
+        );
+        assert_eq!(view.editor().get_text("|"), "dua|satu|tiga");
+        assert!(key(&mut view, "ArrowDown", ctrl_shift()));
+        assert!(key(&mut view, "ArrowDown", ctrl_shift()));
+        assert_eq!(view.editor().get_text("|"), "satu|tiga|dua");
+
+        // In a list, the item moves within it.
+        let item = |t: &str| json!({"type": "listItem", "content": [p(t)]});
+        let list = json!({"type": "bulletList", "content": [item("a"), item("b")]});
+        let (mut view, _) = view_with(doc(vec![list]), KeyPlatform::Other);
+        view.select_text(8, 8, Affinity::Downstream); // in "b"
+        assert!(key(&mut view, "ArrowUp", ctrl_shift()));
+        assert_eq!(view.editor().get_text("|"), "b|a");
+    }
+
+    #[test]
+    fn a_tapped_image_gets_cut_and_copy() {
+        let content = doc(vec![
+            p("a"),
+            json!({"type": "image", "attrs": {"src": "x.png", "width": 200, "height": 100}}),
+            p("b"),
+        ]);
+        let (mut view, _) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        let rect = view
+            .layout()
+            .blocks
+            .iter()
+            .find(|b| b.node.type_name() == "image")
+            .unwrap()
+            .rect;
+        let at = view.to_view(rect);
+        view.take_effects();
+        view.touch(TouchPhase::Down, at.x + 50.0, at.y + 50.0);
+        view.touch(TouchPhase::Up, at.x + 50.0, at.y + 50.0);
+        assert!(view.has_node_selection());
+        let effects = view.take_effects();
+        let menu = effects.iter().find_map(|e| match e {
+            Effect::SelectionMenu(Some(menu)) => Some(menu.clone()),
+            _ => None,
+        });
+        let menu = menu.expect("a menu for the image");
+        assert!(menu.items.contains(&MenuItem::Cut) && menu.items.contains(&MenuItem::Copy));
+        assert!(
+            !effects.contains(&Effect::ShowKeyboard),
+            "no keyboard for an image"
+        );
+        let copied = view.menu_action(MenuItem::Cut, None, None).unwrap();
+        assert_eq!(copied.text, "x.png");
+        assert_eq!(view.editor().get_text("|"), "a|b");
+    }
+}

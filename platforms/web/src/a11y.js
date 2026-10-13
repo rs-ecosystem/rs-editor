@@ -35,8 +35,10 @@ const LABELS = {
   en: { editor: "Text editor", selected: "selected", characters: "characters selected", blank: "blank", newline: "new line", space: "space" },
 };
 
-function labels() {
-  return LABELS[(navigator.language || "en").slice(0, 2)] ?? LABELS.en;
+/** Labels in the editor's UI language (its `locale`; "in" is Indonesian too). */
+function labels(locale) {
+  const language = (locale || navigator.language || "en").slice(0, 2).toLowerCase();
+  return LABELS[language === "in" ? "id" : language] ?? LABELS.en;
 }
 
 /** Hidden from sight, not from assistive technology. */
@@ -55,7 +57,7 @@ export class AccessibilityMirror {
     const root = this.root = document.createElement("div");
     root.className = "rs-editor-a11y";
     root.setAttribute("role", "document");
-    root.setAttribute("aria-label", labels().editor);
+    root.setAttribute("aria-label", labels(this.editor._options.locale).editor);
     // Laid over the canvas so screen readers highlight the right place;
     // invisible and never in the way of the pointer.
     root.style.cssText = "position:absolute;inset:0;overflow:hidden;pointer-events:none;color:transparent;-webkit-user-select:none;user-select:none;z-index:0";
@@ -67,8 +69,8 @@ export class AccessibilityMirror {
     live.style.cssText = VISUALLY_HIDDEN;
     editor.element.append(live);
 
-    editor.canvas.setAttribute("aria-label", labels().editor);
-    editor._textarea?.setAttribute("aria-label", labels().editor);
+    editor.canvas.setAttribute("aria-label", labels(this.editor._options.locale).editor);
+    editor._textarea?.setAttribute("aria-label", labels(this.editor._options.locale).editor);
     this.scheduled = false;
   }
 
@@ -122,7 +124,7 @@ export class AccessibilityMirror {
       input.removeAttribute("aria-expanded");
     }
     const field = this.focusId && this.focusId !== this.rootId ? this.nodes.get(this.focusId) : null;
-    input.setAttribute("aria-label", field?.label ?? labels().editor);
+    input.setAttribute("aria-label", field?.label ?? labels(this.editor._options.locale).editor);
   }
 
   /** The element for node `id`, created (with its subtree) when missing. */
@@ -248,7 +250,7 @@ export class AccessibilityMirror {
     if (this.nodes.get(this.rootId)?.active) return;
     const selection = this.selection;
     if (!selection) return;
-    const text = labels();
+    const text = labels(this.editor._options.locale);
     if (event.shiftKey && !this.editor.selection.empty) {
       const runs = new Map();
       collectRuns(this.nodes, this.rootId, runs);

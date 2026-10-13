@@ -348,7 +348,20 @@ fn typed_whitespace(tr: &Transaction) -> bool {
 
 /// Whether `word` looks like a web or mail address.
 pub fn detect_link(word: &str) -> Option<String> {
-    let trimmed = word.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', '"', '\'']);
+    // Trailing punctuation is the sentence's; a closing parenthesis is the
+    // address's when it closes one opened inside it (`…/Rust_(language)`).
+    let mut trimmed = word;
+    loop {
+        let next = trimmed.trim_end_matches(['.', ',', ';', ':', '!', '?', '"', '\'']);
+        let next = match next.strip_suffix(')') {
+            Some(inner) if next.matches('(').count() < next.matches(')').count() => inner,
+            _ => next,
+        };
+        if next.len() == trimmed.len() {
+            break;
+        }
+        trimmed = next;
+    }
     let lower = trimmed.to_ascii_lowercase();
     if lower.starts_with("http://") || lower.starts_with("https://") {
         return (trimmed.len() > lower.find("//")? + 3).then(|| trimmed.to_owned());

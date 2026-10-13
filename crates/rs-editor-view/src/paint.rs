@@ -127,22 +127,40 @@ impl EditorView {
             let Some(label) = placeholder.text_for(&text.node, doc_empty) else {
                 continue;
             };
-            let label = match self.placeholder_override() {
-                Some(custom) => custom,
+            let label: String = match self.placeholder_override() {
+                Some(custom) => custom.to_owned(),
                 // The default text, in the UI's language: a block's name
-                // for headings, a hint at the slash menu elsewhere.
+                // for headings and list items, a hint at the slash menu in
+                // a paragraph that can use it.
                 None if label == Placeholder::DEFAULT_TEXT => {
+                    if text.node.node_type().spec().code {
+                        continue;
+                    }
+                    let strings = self.strings;
+                    let parent = self
+                        .editor
+                        .doc()
+                        .resolve(text.pos)
+                        .ok()
+                        .filter(|at| at.depth() >= 1)
+                        .map(|at| at.node(at.depth() - 1).type_name().to_owned());
                     let level = text.node.attr("level").and_then(|v| v.as_u64());
-                    match (text.node.type_name(), level) {
-                        ("heading", Some(level @ 1..=3)) => {
-                            self.strings.heading[level as usize - 1]
+                    match (text.node.type_name(), level, parent.as_deref()) {
+                        ("heading", Some(level @ 1..=3), _) => {
+                            strings.heading[level as usize - 1].to_owned()
                         }
-                        _ if text.node.node_type().spec().code => continue,
-                        _ => self.strings.placeholder,
+                        ("heading", Some(level), _) => format!("{} {level}", strings.heading_word),
+                        (_, _, Some("taskItem")) => strings.task_item.to_owned(),
+                        (_, _, Some("listItem")) => strings.list_item.to_owned(),
+                        _ if self.focused && self.editor.is_editable() && self.slash.enabled => {
+                            strings.placeholder.to_owned()
+                        }
+                        _ => strings.write_something.to_owned(),
                     }
                 }
-                None => label,
+                None => label.to_owned(),
             };
+            let label = label.as_str();
             let label_layout = self.engine.placeholder(&text.node, label, text.rect.width);
             render::paint_placeholder(canvas, &label_layout, text.rect.x, text.rect.y);
         }

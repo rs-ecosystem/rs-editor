@@ -14,9 +14,10 @@ const THEMES = {
 
 const MAGNIFIER = { width: 120, height: 48, zoom: 1.25, lift: 44 };
 
-function labels() {
-  const language = (navigator.language || "en").slice(0, 2);
-  return LABELS[language] ?? LABELS.en;
+/** Labels in the editor's UI language (its `locale`; "in" is Indonesian too). */
+function labels(locale) {
+  const language = (locale || navigator.language || "en").slice(0, 2).toLowerCase();
+  return LABELS[language === "in" ? "id" : language] ?? LABELS.en;
 }
 
 export class SelectionUi {
@@ -72,7 +73,7 @@ export class SelectionUi {
       this.menu.style.display = "none";
       return;
     }
-    const text = labels();
+    const text = labels(this.editor._options.locale);
     this.menu.replaceChildren(...menu.items.map((item) => {
       const button = document.createElement("button");
       button.type = "button";

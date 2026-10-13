@@ -16,6 +16,12 @@ pub(crate) struct Strings {
     pub image_placeholder: &'static str,
     /// Shown in an empty line with the caret.
     pub placeholder: &'static str,
+    /// …where the slash menu does not apply (read-only, unfocused).
+    pub write_something: &'static str,
+    /// "Heading" in "Heading 4".
+    pub heading_word: &'static str,
+    pub list_item: &'static str,
+    pub task_item: &'static str,
     // Names for screen readers.
     pub blocks_menu: &'static str,
     pub formatting: &'static str,
@@ -46,6 +52,10 @@ const ENGLISH: Strings = Strings {
     image: "Image",
     image_placeholder: "Paste an image link",
     placeholder: "Write, or type \u{201c}/\u{201d} for commands",
+    write_something: "Write something\u{2026}",
+    heading_word: "Heading",
+    list_item: "List",
+    task_item: "To-do",
     blocks_menu: "Blocks",
     formatting: "Formatting",
     marks: [
@@ -81,6 +91,10 @@ const INDONESIAN: Strings = Strings {
     image: "Gambar",
     image_placeholder: "Tempel tautan gambar",
     placeholder: "Tulis, atau ketik \u{201c}/\u{201d} untuk perintah",
+    write_something: "Tulis sesuatu\u{2026}",
+    heading_word: "Judul",
+    list_item: "Daftar",
+    task_item: "Tugas",
     blocks_menu: "Blok",
     formatting: "Format",
     marks: [

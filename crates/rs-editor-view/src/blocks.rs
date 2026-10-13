@@ -608,6 +608,60 @@ impl EditorView {
         self.dispatch(tr)
     }
 
+    /// Moves the block with the caret (a list item in a list) one place
+    /// up or down among its siblings, keeping the caret where it is in it
+    /// (Mod-Shift-Up/Down, as in Notion). False at the first or last place.
+    pub fn move_block_by(&mut self, up: bool) -> bool {
+        if !self.editor.is_editable() {
+            return false;
+        }
+        let selection = self.editor.selection().clone();
+        let head = selection.head();
+        let layout = self.layout();
+        let unit = innermost_item(&layout, |b| {
+            b.pos < head && head < b.pos + b.node.node_size()
+        })
+        .or_else(|| top_unit(&layout, layout.top_at_pos(head)?));
+        let Some(unit) = unit else {
+            return false;
+        };
+        let doc = self.editor.doc().clone();
+        let Ok(at) = doc.resolve(unit.pos) else {
+            return false;
+        };
+        let parent = at.parent();
+        let index = at.index(at.depth());
+        let target = if up {
+            let Some(previous) = index.checked_sub(1).map(|i| parent.child(i)) else {
+                return false;
+            };
+            unit.pos - previous.node_size()
+        } else {
+            if index + 1 >= parent.child_count() {
+                return false;
+            }
+            unit.end() + parent.child(index + 1).node_size()
+        };
+        let drop = Drop {
+            pos: target,
+            y: 0.0,
+            left: 0.0,
+            top_level: false,
+        };
+        self.finish_composition();
+        if !self.move_block(&unit, &drop) {
+            return false;
+        }
+        // The caret (or selection) keeps its place inside the block.
+        let moved_to = if up { target } else { target - unit.size };
+        let shift = |pos: usize| moved_to + (pos - unit.pos);
+        if selection.from() >= unit.pos && selection.to() <= unit.end() {
+            let (anchor, head) = (shift(selection.anchor()), shift(selection.head()));
+            self.select_text(anchor, head, self.affinity);
+        }
+        true
+    }
+
     /// Typing over a selected block (a click on its grip) goes on at the
     /// block's end instead of replacing the block; a selected image is
     /// replaced, as anywhere.
