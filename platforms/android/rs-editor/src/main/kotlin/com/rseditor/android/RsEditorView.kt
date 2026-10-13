@@ -36,7 +36,7 @@ class RsEditorView private constructor(
     context: Context,
     attrs: AttributeSet?,
     content: String,
-) : SurfaceView(context, attrs), SurfaceHolder.Callback, Choreographer.FrameCallback {
+) : SurfaceView(context, attrs), SurfaceHolder.Callback2, Choreographer.FrameCallback {
 
     @JvmOverloads
     constructor(context: Context, attrs: AttributeSet? = null) : this(context, attrs, "")
@@ -174,7 +174,16 @@ class RsEditorView private constructor(
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         log("surfaceChanged ${width}x$height")
         NativeSurface.resize(handle(), width, height, density)
-        scheduleFrame()
+        drawNow()
+    }
+
+    /**
+     * The surface must show a frame of its new size before the window does:
+     * otherwise a resize (a keyboard sliding in or out, animated frame by
+     * frame) shows the empty buffer.
+     */
+    override fun surfaceRedrawNeeded(holder: SurfaceHolder) {
+        drawNow()
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -191,8 +200,15 @@ class RsEditorView private constructor(
 
     override fun doFrame(frameTimeNanos: Long) {
         frameScheduled = false
+        drawNow()
+    }
+
+    private fun drawNow() {
         if (!surfaceReady || released) return
-        val next = NativeSurface.render(handle())
+        var next = NativeSurface.render(handle())
+        // Right after a resize EGL can still hand out a buffer of the old
+        // size; the next frame gets the new one.
+        if (next == 0L) next = NativeSurface.render(handle())
         // A frame can start a long press or bring the menu back after a fling.
         applyEffects()
         notifyIfChanged()
