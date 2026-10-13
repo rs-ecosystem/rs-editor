@@ -1859,7 +1859,7 @@ mod slash {
     }
 
     /// A finger scrolls the rows, and the rows stay where it left them;
-    /// holding a row keeps it chosen (frames once scrolled back to it).
+    /// the pressed row keeps its highlight, as in a platform select.
     #[test]
     fn a_finger_scrolls_the_rows_and_holds_a_row() {
         let (mut view, clock) = setup(vec![p("")]);
@@ -1874,14 +1874,15 @@ mod slash {
             clock.advance(16);
             paint(&mut view);
         }
-        assert_eq!(view.slash.selected(), None, "a scroll highlights no row");
-        view.touch(TouchPhase::Up, x, y - 60.0);
-        paint(&mut view);
         assert_eq!(
             view.slash.selected(),
-            None,
-            "nor does it bring back an earlier one"
+            Some(5),
+            "the pressed row stays highlighted"
         );
+        view.touch(TouchPhase::Up, x, y - 60.0);
+        paint(&mut view);
+        assert_eq!(view.slash.selected(), Some(5), "also after the scroll");
+        assert_eq!(view.editor().get_text(""), "/", "a scroll picks nothing");
         let scrolled = view.slash.scroll();
         assert!(scrolled > 0.0, "the rows scrolled");
         clock.advance(500);

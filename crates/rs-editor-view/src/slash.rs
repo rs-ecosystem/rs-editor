@@ -638,19 +638,13 @@ impl EditorView {
                 let Some(touch) = &mut self.slash.touch else {
                     return false;
                 };
-                let started = !touch.moved && (x - touch.start.0).hypot(y - touch.start.1) > slop;
-                touch.moved |= started;
+                touch.moved |= (x - touch.start.0).hypot(y - touch.start.1) > slop;
                 let dy = touch.last_y - y;
                 touch.last_y = y;
-                let moved = touch.moved;
-                if started {
-                    // A scroll, not a choice: the row under the finger was
-                    // only highlighted while it might have been a tap. No
-                    // row stays highlighted, as in platform lists (Enter
-                    // still takes the first).
-                    self.slash.menu.selected = None;
-                }
-                if moved {
+                // The pressed row keeps its highlight and moves with the
+                // finger, as in a platform select; a scroll only does not
+                // pick it.
+                if touch.moved {
                     self.slash.menu.scroll_by(dy);
                 }
                 true
