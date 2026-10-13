@@ -1,2 +1,4 @@
 dist/
 node_modules/
+# System fonts copied for local testing; not redistributable.
+demo/local-fonts/

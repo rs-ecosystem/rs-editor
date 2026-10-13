@@ -35,7 +35,8 @@ editor.chain().focus().toggleBold().toggleHeading(2).run()   // satu langkah und
 editor.can().toggleBulletList().run()                        // apakah bisa? tidak mengubah apa pun
 editor.isActive("heading", mapOf("level" to 2))
 editor.getAttributes("link")["href"]
-editor.json = "..."   // atau editor.html; editor.text, editor.isEditable
+editor.json = "..."   // atau editor.html, editor.markdown; editor.text, editor.isEditable
+editor.pasteMarkdown = true                                  // teks polos yang ditempel dibaca sebagai Markdown
 editor.addOnChangeListener { refreshToolbar() }
 editor.release()      // saat view dibuang
 ```

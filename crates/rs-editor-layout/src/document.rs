@@ -8,7 +8,8 @@
 //! shapes only that block, and opening a long document shapes only what
 //! is visible.
 
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::rc::Rc;
 
@@ -17,10 +18,10 @@ use rs_editor_text::Affinity;
 use rs_editor_theme::Theme;
 use skia_safe::textlayout::{
     FontCollection, ParagraphBuilder, ParagraphStyle, PlaceholderAlignment, PlaceholderStyle,
-    TextAlign, TextBaseline,
+    TextAlign, TextBaseline, TypefaceFontProvider,
 };
 
-use crate::fonts::font_collection;
+use crate::fonts::{font_collection, register_font};
 use crate::geometry::Rect;
 use crate::style::{BlockStyle, base_text_style, block_style, run_style, strut};
 use crate::text::{CaretStop, TextLayout};
@@ -209,6 +210,12 @@ struct Entry {
 /// Builds paragraphs with the theme's fonts and styles.
 struct Shaper {
     fonts: FontCollection,
+    provider: TypefaceFontProvider,
+    /// Families added at run time, tried after the bundled ones.
+    fallbacks: Vec<String>,
+    /// Characters no font could show, since the last
+    /// [`LayoutEngine::take_missing_characters`].
+    missing: RefCell<BTreeSet<u32>>,
     theme: Theme,
 }
 
@@ -257,9 +264,13 @@ impl LayoutEngine {
     /// `system_fallback` lets the platform's fonts cover emoji and scripts
     /// missing from the bundle; turn it off for deterministic tests.
     pub fn new(theme: Theme, system_fallback: bool) -> Self {
+        let (fonts, provider) = font_collection(system_fallback);
         Self {
             shaper: Shaper {
-                fonts: font_collection(system_fallback),
+                fonts,
+                provider,
+                fallbacks: Vec::new(),
+                missing: RefCell::new(BTreeSet::new()),
                 theme,
             },
             texts: HashMap::new(),
@@ -290,6 +301,29 @@ impl LayoutEngine {
             self.texts.clear();
             self.reset();
         }
+    }
+
+    /// Adds a font (file bytes) as a fallback for characters the bundled
+    /// fonts lack, under `family` or the font's own family name. Every block
+    /// is laid out again. Returns the family, or `None` for bytes that are
+    /// not a font.
+    pub fn add_font(&mut self, bytes: &[u8], family: Option<&str>) -> Option<String> {
+        let family = register_font(&mut self.shaper.provider, bytes, family)?;
+        if !self.shaper.fallbacks.contains(&family) {
+            self.shaper.fallbacks.push(family.clone());
+        }
+        self.shaper.fonts.clear_caches();
+        self.texts.clear();
+        self.reset();
+        Some(family)
+    }
+
+    /// Characters laid out since the last call that no font could show
+    /// (Unicode scalar values), for hosts that load fonts on demand.
+    pub fn take_missing_characters(&mut self) -> Vec<u32> {
+        std::mem::take(&mut *self.shaper.missing.borrow_mut())
+            .into_iter()
+            .collect()
     }
 
     /// Number of measured top-level blocks.
@@ -583,18 +617,19 @@ impl Shaper {
 
     fn text_layout(&self, node: &Node, width: f32, italic: bool) -> TextLayout {
         let theme = &self.theme;
+        let extra = &self.fallbacks;
         let block: BlockStyle = block_style(theme, node, italic);
-        let base = base_text_style(theme, &block);
+        let base = base_text_style(theme, &block, extra);
         let mut paragraph_style = ParagraphStyle::new();
         paragraph_style.set_text_style(&base);
-        paragraph_style.set_strut_style(strut(theme, &block));
+        paragraph_style.set_strut_style(strut(theme, &block, extra));
         paragraph_style.set_text_align(block.align);
         paragraph_style.set_apply_rounding_hack(false);
         paragraph_style.turn_hinting_off();
         let mut builder = ParagraphBuilder::new(&paragraph_style, self.fonts.clone());
         let mut text = String::new();
         for child in node.children() {
-            let style = run_style(theme, &block, child.marks());
+            let style = run_style(theme, &block, child.marks(), extra);
             if let Some(run) = child.text() {
                 builder.push_style(&style);
                 builder.add_text(run);
@@ -622,6 +657,17 @@ impl Shaper {
         }
         let mut paragraph = builder.build();
         paragraph.layout(width.max(1.0));
+        if paragraph.unresolved_glyphs().is_some_and(|count| count > 0) {
+            let mut missing = self.missing.borrow_mut();
+            for c in paragraph.unresolved_codepoints() {
+                if let Ok(c) = u32::try_from(c)
+                    && c > 0x20
+                    && c != 0xfffc
+                {
+                    missing.insert(c);
+                }
+            }
+        }
         TextLayout::new(
             paragraph,
             text,
@@ -636,10 +682,10 @@ impl Shaper {
         let theme = &self.theme;
         let mut block: BlockStyle = block_style(theme, node, false);
         block.color = theme.palette.muted_foreground;
-        let style = base_text_style(theme, &block);
+        let style = base_text_style(theme, &block, &self.fallbacks);
         let mut paragraph_style = ParagraphStyle::new();
         paragraph_style.set_text_style(&style);
-        paragraph_style.set_strut_style(strut(theme, &block));
+        paragraph_style.set_strut_style(strut(theme, &block, &self.fallbacks));
         paragraph_style.set_text_align(block.align);
         paragraph_style.turn_hinting_off();
         let mut builder = ParagraphBuilder::new(&paragraph_style, self.fonts.clone());
@@ -671,9 +717,9 @@ impl Shaper {
             align: TextAlign::Right,
         };
         let mut paragraph_style = ParagraphStyle::new();
-        let style = base_text_style(theme, &block);
+        let style = base_text_style(theme, &block, &self.fallbacks);
         paragraph_style.set_text_style(&style);
-        paragraph_style.set_strut_style(strut(theme, &block));
+        paragraph_style.set_strut_style(strut(theme, &block, &self.fallbacks));
         paragraph_style.turn_hinting_off();
         let mut builder = ParagraphBuilder::new(&paragraph_style, self.fonts.clone());
         builder.push_style(&style);

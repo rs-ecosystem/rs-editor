@@ -62,10 +62,12 @@ export async function createEditor(options) {
 }
 
 class Editor {
-  constructor({ element, content = "", dark = false, editable = true, wasmUrl = DEFAULT_WASM, input } = {}) {
+  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, fonts = [], wasmUrl = DEFAULT_WASM, input } = {}) {
     if (!element) throw new Error("Rs Editor: `element` is required");
     this.element = element;
-    this._options = { content, dark, editable, wasmUrl, input };
+    this._options = { content, contentType, dark, editable, pasteMarkdown, wasmUrl, input };
+    // Fonts to load when text needs them: { family, url, ranges }.
+    this._fonts = fonts.map((font) => ({ ...font, state: "idle" }));
     this._listeners = new Map();
     this._destroyed = false;
     this.stats = { frames: 0, lastFrameMs: 0 };
@@ -104,10 +106,12 @@ class Editor {
     const content = typeof this._options.content === "string"
       ? this._options.content
       : JSON.stringify(this._options.content);
+    const markdown = this._options.contentType === "markdown" ? 1 : 0;
     this._app = this._withString(content, (ptr, len) =>
-      M._rse_init(width, height, dpr, platformCode(), this._options.dark ? 1 : 0, ptr, len));
+      M._rse_init(width, height, dpr, platformCode(), this._options.dark ? 1 : 0, ptr, len, markdown));
     if (!this._app) throw new Error("Rs Editor: the editor could not be created");
     if (!this._options.editable) M._rse_set_editable(this._app, 0);
+    if (this._options.pasteMarkdown) M._rse_set_markdown_paste(this._app, 1);
 
     this._revision = M._rse_revision(this._app, 0);
     this._docRevision = M._rse_revision(this._app, 1);
@@ -381,6 +385,7 @@ class Editor {
         case "haptic": this._ui.haptic(effect.kind); break;
         case "menu": this._ui.showMenu(effect.menu); break;
         case "magnifier": this._ui.showMagnifier(effect.at); break;
+        case "missingCharacters": this._loadFontsFor(effect.characters); break;
       }
     }
   }
@@ -405,6 +410,53 @@ class Editor {
     this._emit(docChanged ? "update" : "selectionUpdate", { editor: this });
   }
 
+  // --- fonts ------------------------------------------------------------------
+
+  /** Loads the configured fonts that cover `characters` (code points). */
+  _loadFontsFor(characters) {
+    for (const font of this._fonts) {
+      if (font.state !== "idle") continue;
+      const covers = !font.ranges || characters.some((c) =>
+        font.ranges.some((range) => Array.isArray(range) ? c >= range[0] && c <= range[1] : c === range));
+      if (!covers) continue;
+      font.state = "loading";
+      fetch(font.url)
+        .then((response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.arrayBuffer();
+        })
+        .then((bytes) => {
+          font.state = this.addFont(bytes, font.family) ? "loaded" : "failed";
+        })
+        .catch((error) => {
+          font.state = "failed";
+          console.warn(`Rs Editor: font ${font.url} could not be loaded`, error);
+        });
+    }
+  }
+
+  /**
+   * Adds a font (TTF/OTF bytes) for characters the bundled fonts lack, under
+   * `family` or the font's own name; returns the family, or "" when the bytes
+   * are not a font.
+   */
+  addFont(bytes, family = "") {
+    if (this._destroyed) return "";
+    const M = this._M;
+    const data = new Uint8Array(bytes);
+    const ptr = M._rse_alloc(data.length);
+    M.HEAPU8.set(data, ptr);
+    let added;
+    try {
+      added = this._withString(family, (fp, fl) =>
+        this._result(M._rse_add_font(this._app, ptr, data.length, fp, fl)));
+    } finally {
+      M._rse_free(ptr, data.length);
+    }
+    this._afterInput();
+    return added;
+  }
+
   // --- pointer and touch ----------------------------------------------------
 
   _setUpPointer() {
@@ -416,6 +468,15 @@ class Editor {
       return [e.clientX - box.left, e.clientY - box.top];
     };
     let touchId = null;
+    // Pointer events need not carry the click count (`detail` may be 0), so
+    // count double and triple clicks here as well.
+    let lastClick = { time: 0, x: 0, y: 0, count: 0 };
+    const clickCount = (e, x, y) => {
+      if (e.detail > 0) return e.detail;
+      const near = e.timeStamp - lastClick.time < 500 && Math.hypot(x - lastClick.x, y - lastClick.y) < 5;
+      lastClick = { time: e.timeStamp, x, y, count: near ? lastClick.count % 3 + 1 : 1 };
+      return lastClick.count;
+    };
     canvas.addEventListener("pointerdown", (e) => {
       const [x, y] = local(e);
       if (e.pointerType === "touch") {
@@ -428,9 +489,12 @@ class Editor {
         this._afterInput();
         return;
       }
+      // Only the primary button edits; the secondary one opens the menu.
+      if (e.button !== 0) return;
+      this._ui.showMenu(null);
       this._focusInput();
       canvas.setPointerCapture(e.pointerId);
-      M._rse_pointer(app, 0, x, y, e.detail || 1, mods(e));
+      M._rse_pointer(app, 0, x, y, clickCount(e, x, y), mods(e));
       this._afterInput();
     });
     canvas.addEventListener("pointermove", (e) => {
@@ -459,12 +523,21 @@ class Editor {
         this._afterInput();
         return;
       }
+      if (e.button !== 0) return;
       M._rse_pointer(app, 2, x, y, 1, mods(e));
       this._afterInput();
     };
     canvas.addEventListener("pointerup", (e) => end(e, 2));
     canvas.addEventListener("pointercancel", (e) => end(e, 3));
-    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    canvas.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      // The same menu as for touch, at the mouse (touch menus come from Rust).
+      if (touchId !== null || e.pointerType === "touch") return;
+      const [x, y] = local(e);
+      this._focusInput();
+      const items = this.selection.empty ? ["paste", "selectAll"] : ["cut", "copy", "paste", "selectAll"];
+      this._ui.showMenu({ rect: [x, y, x, y], items }, { atPoint: true });
+    });
     // The browser's own touch gestures (its long press on an editable
     // element cancels the pointer) would fight the ones Rust recognizes.
     canvas.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
@@ -496,6 +569,9 @@ class Editor {
     return ok;
   }
 
+  /** The selection: `{ anchor, head, from, to, empty }` in document positions. */
+  get selection() { return this._json(this._M._rse_selection(this._app)); }
+
   /** Whether the mark or node `name` (with `attrs`, if given) is active at the selection. */
   isActive(name, attrs = {}) {
     return this._withStrings(name, JSON.stringify(attrs), (pn, ln, pa, la) =>
@@ -511,16 +587,27 @@ class Editor {
   getJSON() { return this._json(this._M._rse_get_content(this._app, 0)); }
   getHTML() { return this._result(this._M._rse_get_content(this._app, 1)); }
   getText() { return this._result(this._M._rse_get_content(this._app, 2)); }
+  /** The document as GitHub-flavored Markdown. */
+  getMarkdown() { return this._result(this._M._rse_get_content(this._app, 3)); }
   get isEmpty() { return this._M._rse_is_empty(this._app) === 1; }
 
-  /** Replaces the document with Tiptap JSON (an object) or HTML (a string). */
-  setContent(content) {
-    const html = typeof content === "string";
-    const text = html ? content : JSON.stringify(content);
+  /**
+   * Replaces the document with Tiptap JSON (an object), HTML (a string) or,
+   * with `{ contentType: "markdown" }`, Markdown.
+   */
+  setContent(content, { contentType } = {}) {
+    const json = typeof content !== "string";
+    const format = json ? 0 : contentType === "markdown" ? 2 : 1;
+    const text = json ? JSON.stringify(content) : content;
     const ok = this._withString(text, (ptr, len) =>
-      this._M._rse_set_content(this._app, ptr, len, html ? 1 : 0)) === 1;
+      this._M._rse_set_content(this._app, ptr, len, format)) === 1;
     this._afterInput();
     return ok;
+  }
+
+  /** Whether pasted plain text is read as Markdown. */
+  setPasteMarkdown(markdown) {
+    this._M._rse_set_markdown_paste(this._app, markdown ? 1 : 0);
   }
 
   get isEditable() { return this._M._rse_is_editable(this._app) === 1; }
@@ -581,6 +668,31 @@ class Editor {
     return { composing: this._composing, imeStart: this._imeStart, state: this._imeState() };
   }
 }
+
+/**
+ * Noto fonts for emoji and CJK on public CDNs, to pass as `fonts` when the
+ * page may fetch them from there (they are large: self-host them for
+ * production). The bundled fonts cover Latin, Arabic and Devanagari.
+ */
+export const notoFonts = {
+  emoji: {
+    family: "Noto Color Emoji",
+    url: "https://cdn.jsdelivr.net/npm/noto-color-emoji@1.0.1/ttf/NotoColorEmoji.ttf",
+    ranges: [[0x00a9, 0x00a9], [0x00ae, 0x00ae], [0x203c, 0x2049], [0x2122, 0x2139], [0x2194, 0x21aa],
+      [0x231a, 0x23ff], [0x24c2, 0x24c2], [0x25aa, 0x27bf], [0x2934, 0x2935], [0x2b05, 0x2b55],
+      [0x3030, 0x303d], [0x3297, 0x3299], [0x1f000, 0x1faff]],
+  },
+  japanese: {
+    family: "Noto Sans JP",
+    url: "https://fonts.gstatic.com/s/notosansjp/v57/-F6jfjtqLzI2JPCgQBnw7HFyzSD-AsregP8VFBEj75vY0rw_mMI.ttf",
+    ranges: [[0x3000, 0x30ff], [0x31f0, 0x31ff], [0x3400, 0x4dbf], [0x4e00, 0x9fff], [0xf900, 0xfaff], [0xff00, 0xffef]],
+  },
+  korean: {
+    family: "Noto Sans KR",
+    url: "https://fonts.gstatic.com/s/notosanskr/v40/PbyxFmXiEBPT4ITbgNA5Cgms3VYcOA-vvnIzzuoyeLTq8H4gReI.ttf",
+    ranges: [[0x1100, 0x11ff], [0x3130, 0x318f], [0xac00, 0xd7af]],
+  },
+};
 
 /**
  * A chain of commands. Any command name works as a method

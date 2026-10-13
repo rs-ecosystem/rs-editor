@@ -21,7 +21,10 @@ import com.rseditor.android.RsEditorView
  * toolbar recomposes as the selection moves.
  */
 @Stable
-class RsEditorState internal constructor(internal val content: String) {
+class RsEditorState internal constructor(
+    internal val content: String,
+    internal val contentIsMarkdown: Boolean,
+) {
     /** The view while the editor is in the composition. */
     var view: RsEditorView? by mutableStateOf(null)
         internal set
@@ -60,12 +63,21 @@ class RsEditorState internal constructor(internal val content: String) {
             revision
             return view?.html
         }
+
+    val markdown: String?
+        get() {
+            revision
+            return view?.markdown
+        }
 }
 
-/** Remembers editor state starting from `content`: a Tiptap JSON document or HTML. */
+/**
+ * Remembers editor state starting from `content`: a Tiptap JSON document or HTML, or Markdown
+ * when [markdown].
+ */
 @Composable
-fun rememberRsEditorState(content: String = ""): RsEditorState =
-    remember { RsEditorState(content) }
+fun rememberRsEditorState(content: String = "", markdown: Boolean = false): RsEditorState =
+    remember { RsEditorState(content, markdown) }
 
 /**
  * The Rs Editor. [dark] null follows the system theme. The Rust editor
@@ -87,7 +99,7 @@ fun RsEditor(
     val overlayPixels = with(LocalDensity.current) { overlayBottom.roundToPx() }
     AndroidView(
         factory = { context ->
-            RsEditorView(context, state.content).also { view ->
+            RsEditorView(context, state.content, state.contentIsMarkdown).also { view ->
                 view.addOnChangeListener(state.onChange)
                 state.view = view
             }

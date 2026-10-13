@@ -509,7 +509,8 @@ impl Shell {
                 Effect::Haptic(_)
                 | Effect::SelectionMenu(_)
                 | Effect::Magnifier(_)
-                | Effect::ShowKeyboard => {}
+                | Effect::ShowKeyboard
+                | Effect::MissingCharacters(_) => {}
             }
         }
     }

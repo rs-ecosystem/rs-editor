@@ -38,16 +38,19 @@ class RsEditorView private constructor(
     context: Context,
     attrs: AttributeSet?,
     content: String,
+    markdown: Boolean,
 ) : SurfaceView(context, attrs), SurfaceHolder.Callback2, Choreographer.FrameCallback {
 
     @JvmOverloads
-    constructor(context: Context, attrs: AttributeSet? = null) : this(context, attrs, "")
+    constructor(context: Context, attrs: AttributeSet? = null) : this(context, attrs, "", false)
 
     /**
-     * An editor starting with `content`, a Tiptap JSON document or HTML. Unlike
-     * setting [json] later, this is not an undoable change.
+     * An editor starting with `content`: a Tiptap JSON document or HTML, or Markdown when
+     * [markdown]. Unlike setting [json] later, this is not an undoable change.
      */
-    constructor(context: Context, content: String) : this(context, null, content)
+    @JvmOverloads
+    constructor(context: Context, content: String, markdown: Boolean = false) :
+        this(context, null, content, markdown)
 
     /** Told whenever the document or the selection may have changed. */
     fun interface OnChangeListener {
@@ -56,7 +59,7 @@ class RsEditorView private constructor(
 
     private val density = resources.displayMetrics.density
     private val imm = context.getSystemService(InputMethodManager::class.java)
-    internal val native = NativeEditor(1f, 1f, density, systemDark(), content)
+    internal val native = NativeEditor(1f, 1f, density, systemDark(), content, markdown)
     private val selection = SelectionUi(this)
     private val listeners = mutableListOf<OnChangeListener>()
     private var surfaceReady = false
@@ -156,6 +159,23 @@ class RsEditorView private constructor(
 
     /** Plain text, blocks separated by newlines. */
     val text: String get() = native.getText()
+
+    /**
+     * The document as GitHub-flavored Markdown (marks Markdown lacks are written as HTML
+     * tags); setting it replaces the document.
+     */
+    var markdown: String
+        get() = native.getMarkdown()
+        set(value) {
+            if (native.setMarkdown(value)) afterInput()
+        }
+
+    /** Read pasted plain text as Markdown (off by default). */
+    var pasteMarkdown: Boolean = false
+        set(value) {
+            field = value
+            native.setMarkdownPaste(value)
+        }
 
     val isEmpty: Boolean get() = native.isEmpty()
 

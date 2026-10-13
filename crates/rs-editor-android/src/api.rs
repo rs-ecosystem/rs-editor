@@ -25,9 +25,17 @@ impl std::fmt::Debug for NativeEditor {
 
 #[boltffi::export(single_threaded)]
 impl NativeEditor {
-    /// An editor starting with `content`: a Tiptap JSON document, HTML, or
-    /// `""` for an empty document. Sizes are in pixels.
-    pub fn new(width: f32, height: f32, density: f32, dark: bool, content: String) -> Self {
+    /// An editor starting with `content`: a Tiptap JSON document, HTML,
+    /// Markdown when `markdown`, or `""` for an empty document. Sizes are in
+    /// pixels.
+    pub fn new(
+        width: f32,
+        height: f32,
+        density: f32,
+        dark: bool,
+        content: String,
+        markdown: bool,
+    ) -> Self {
         Self {
             api: EditorApi::new(ApiOptions {
                 width,
@@ -36,6 +44,7 @@ impl NativeEditor {
                 units: Units::Device,
                 dark,
                 content,
+                markdown,
                 profile: InteractionProfile::android(),
                 ..Default::default()
             }),
@@ -59,6 +68,21 @@ impl NativeEditor {
     /// Plain text, blocks separated by `\n`.
     pub fn get_text(&self) -> String {
         self.api.get_text()
+    }
+
+    /// The document as GitHub-flavored Markdown.
+    pub fn get_markdown(&self) -> String {
+        self.api.get_markdown()
+    }
+
+    /// Replaces the document with Markdown.
+    pub fn set_markdown(&mut self, markdown: String) -> bool {
+        self.api.set_markdown(&markdown)
+    }
+
+    /// Whether pasted plain text is read as Markdown (off by default).
+    pub fn set_markdown_paste(&mut self, markdown: bool) {
+        self.api.set_markdown_paste(markdown);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -113,6 +137,11 @@ impl NativeEditor {
     /// Attributes of the mark or node `name` at the selection, as JSON.
     pub fn get_attributes(&self, name: String) -> String {
         self.api.get_attributes(&name)
+    }
+
+    /// The selection as JSON: `{anchor, head, from, to, empty}`.
+    pub fn selection(&self) -> String {
+        self.api.selection()
     }
 
     /// Changes whenever the document or selection may have changed.

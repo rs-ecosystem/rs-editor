@@ -224,6 +224,33 @@ fn a_keyboard_covering_the_caret_scrolls_it_into_view() {
 }
 
 #[test]
+fn pasted_text_can_be_read_as_markdown() {
+    let (mut view, _) = view_with(doc(vec![p("abcd")]), KeyPlatform::Other);
+    view.select_text(3, 3, Affinity::Downstream);
+    // Off by default: Markdown syntax stays text.
+    assert!(view.paste_text("**x**"));
+    assert_eq!(text_of(&view), "ab**x**cd");
+    assert!(view.run("undo", &Value::Null).unwrap());
+    view.set_markdown_paste(true);
+    view.select_text(3, 3, Affinity::Downstream);
+    assert!(view.paste_text("**x** y"));
+    assert_eq!(text_of(&view), "abx ycd", "one paragraph merges inline");
+    assert!(view.editor().get_json()["content"][0]["content"][1]["marks"][0]["type"] == "bold");
+    assert!(view.paste_text("# Judul\n\n- satu"));
+    let json = view.editor().get_json();
+    let types: Vec<&str> = json["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["type"].as_str().unwrap())
+        .collect();
+    assert!(
+        types.contains(&"heading") && types.contains(&"bulletList"),
+        "{types:?}"
+    );
+}
+
+#[test]
 fn clicks_select_positions_words_and_blocks() {
     let (mut view, _) = view_with(doc(vec![p("halo dunia indah")]), KeyPlatform::Other);
     let caret = {

@@ -9,7 +9,7 @@
 | P0 | Kerangka workspace, CI, ADR, spike Skia (WASM, Android) | **Selesai.** Lihat [laporan spike](spikes/p0-web-android.md). |
 | P1 | Core headless: model, transform, state, history, command, extension, StarterKit | **Selesai** |
 | P2 | Layout inkremental, render Skia, view, tema shadcn, dev harness desktop | **Selesai** |
-| P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Berjalan.** Milestone 1 selesai |
+| P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Berjalan.** Milestone 1 dan 2 selesai |
 | P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit, library Kotlin dan Compose | **Selesai.** Navigasi TalkBack dan Samsung Keyboard jadi tugas lanjutan |
 | P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | Belum dimulai |
 | P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | Belum dimulai |
@@ -97,11 +97,24 @@ Target: editor di web HP terasa seperti di Android native, dengan API yang sama 
   - ketikan Gboard lewat EditContext;
   - scroll dengan momentum fling.
 
-### Milestone 2: clipboard dan font
+### Milestone 2: Markdown, font, dan menu desktop · Selesai
 
-- Markdown (pulldown-cmark) untuk impor, ekspor, dan tempel teks yang berisi Markdown.
-- Font emoji dan CJK dimuat bertahap (Noto Color Emoji, Noto Sans CJK), sama seperti di platform lain.
-- Menu seleksi di desktop (klik kanan) memakai sinyal `SelectionMenu`.
+- **Markdown di `rs-editor-markup`:**
+  - **Impor:** Markdown diubah ke HTML oleh pulldown-cmark (GFM: coretan, task list, tabel), lalu dibaca parser HTML yang sama, sehingga hasilnya selalu valid. Parser HTML sekarang juga mengenali task list tanpa class (`<li><input type="checkbox">`), seperti yang ditulis renderer Markdown dan banyak situs.
+  - **Ekspor:** serializer bergaya prosemirror-markdown. Garis bawah, sorotan, sub/superskrip ditulis sebagai tag HTML. Di tempat aturan *flanking* CommonMark akan membuat `**`/`*`/`~~` gagal dibaca (tanda baca di tepi, delimiter bersarang atau berdempetan), mark itu ditulis sebagai `<strong>`/`<em>`/`<s>`.
+  - **Escape:** teks yang mirip sintaks Markdown di-escape: `#`, `1.`, `-` di awal baris, `!` sebelum link, `#` di akhir judul, dan entity. Spasi yang akan hilang ditulis sebagai `&nbsp;`, lalu dikembalikan menjadi spasi saat dibaca.
+  - **Tes:** property test round-trip (16.000 kasus acak saat pengembangan).
+  - **Yang hilang** karena memang tidak ada di Markdown: perataan teks, target link, warna sorotan, paragraf kosong, dan mark pada spasi di tepi teks bermark.
+- **API Markdown:**
+  - `getMarkdown`/`setMarkdown` di semua platform (`markdown` di Kotlin, `contentType: "markdown"` di web seperti Tiptap 3), termasuk konten awal Markdown yang tidak bisa di-undo jadi kosong.
+  - Opsi `pasteMarkdown` membaca teks polos yang ditempel sebagai Markdown. Satu paragraf digabung ke paragraf yang sedang diedit.
+- **Font sesuai kebutuhan:**
+  - `LayoutEngine::add_font` menambah font cadangan saat runtime, dan layout mencatat karakter tanpa glyph (`unresolved_codepoints` SkParagraph). View mengirimnya sebagai effect `missingCharacters`.
+  - Paket web memuat font dari daftar `fonts` aplikasi yang rentang Unicode-nya cocok, dan menyediakan `editor.addFont()` untuk aplikasi yang memuat font sendiri. Preset `notoFonts` (emoji di jsDelivr, Jepang/Korea di Google Fonts) hanya dipakai kalau aplikasi memilihnya.
+  - Diuji dengan font lokal: teks Jepang dan Korea tampil setelah font dimuat.
+- **Menu klik kanan di web desktop:** menu yang sama dengan menu sentuh, muncul di posisi kursor, dan ditutup dengan Escape atau klik di luar. Klik kanan tidak lagi memindahkan caret.
+- **Klik ganda/tiga kali di web:** dihitung sendiri ketika `pointerdown.detail` bernilai 0, yang diizinkan oleh spesifikasi Pointer Events.
+- **`selection`** (`{anchor, head, from, to, empty}`) tersedia di API.
 
 ### Milestone 3: aksesibilitas dan browser lain
 
@@ -206,7 +219,7 @@ Rencana awal milestone:
 
 ## Berikutnya
 
-1. **P3 (web):** milestone 2 (Markdown, font emoji/CJK) lalu milestone 3 (ARIA, Safari, Firefox).
+1. **P3 (web):** milestone 3 (ARIA, Safari, Firefox).
 2. **Tugas lanjutan Android:** navigasi TalkBack (lihat milestone 2), Samsung Keyboard, `addVisibleLineBounds`, paket AAR/Maven.
 3. **Desktop (P7):** menu klik kanan Potong/Salin/Tempel memakai sinyal `SelectionMenu` yang sama.
 

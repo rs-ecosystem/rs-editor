@@ -25,7 +25,9 @@ pub(crate) fn sk_color(color: Color) -> skia_safe::Color {
     skia_safe::Color::new(color.argb())
 }
 
-fn families(theme: &Theme, mono: bool) -> Vec<String> {
+/// The theme's family, then the bundled script fonts, then `extra`
+/// families added at run time (emoji and CJK fonts loaded by the host).
+fn families(theme: &Theme, mono: bool, extra: &[String]) -> Vec<String> {
     let primary = if mono {
         &theme.typography.mono
     } else {
@@ -33,6 +35,7 @@ fn families(theme: &Theme, mono: bool) -> Vec<String> {
     };
     std::iter::once(primary.clone())
         .chain(SCRIPT_FALLBACKS.iter().map(|f| (*f).to_owned()))
+        .chain(extra.iter().cloned())
         .collect()
 }
 
@@ -79,9 +82,9 @@ pub fn block_style(theme: &Theme, node: &Node, italic: bool) -> BlockStyle {
 }
 
 /// A Skia style for the block itself (used for the strut and empty text).
-pub fn base_text_style(theme: &Theme, block: &BlockStyle) -> TextStyle {
+pub fn base_text_style(theme: &Theme, block: &BlockStyle, extra: &[String]) -> TextStyle {
     let mut style = TextStyle::new();
-    style.set_font_families(&families(theme, block.mono));
+    style.set_font_families(&families(theme, block.mono, extra));
     style.set_font_size(block.size);
     style.set_font_style(font_style(block.weight, block.italic));
     style.set_letter_spacing(block.letter_spacing_em * block.size);
@@ -94,9 +97,9 @@ pub fn base_text_style(theme: &Theme, block: &BlockStyle) -> TextStyle {
 
 /// A strut that gives every line the block's line height, like CSS
 /// `line-height`, so mixed fonts and emoji do not change line spacing.
-pub fn strut(theme: &Theme, block: &BlockStyle) -> StrutStyle {
+pub fn strut(theme: &Theme, block: &BlockStyle, extra: &[String]) -> StrutStyle {
     let mut strut = StrutStyle::new();
-    strut.set_font_families(&families(theme, block.mono));
+    strut.set_font_families(&families(theme, block.mono, extra));
     strut.set_font_size(block.size);
     strut.set_height(block.line_height / block.size);
     strut.set_height_override(true);
@@ -107,7 +110,12 @@ pub fn strut(theme: &Theme, block: &BlockStyle) -> StrutStyle {
 }
 
 /// The Skia style of a text run with `marks` inside `block`.
-pub fn run_style(theme: &Theme, block: &BlockStyle, marks: &MarkSet) -> TextStyle {
+pub fn run_style(
+    theme: &Theme,
+    block: &BlockStyle,
+    marks: &MarkSet,
+    extra: &[String],
+) -> TextStyle {
     let typography = &theme.typography;
     let palette = &theme.palette;
     let mut size = block.size;
@@ -154,7 +162,7 @@ pub fn run_style(theme: &Theme, block: &BlockStyle, marks: &MarkSet) -> TextStyl
         }
     }
     let mut style = TextStyle::new();
-    style.set_font_families(&families(theme, mono));
+    style.set_font_families(&families(theme, mono, extra));
     style.set_font_size(size);
     style.set_font_style(font_style(weight, italic));
     style.set_letter_spacing(block.letter_spacing_em * size);

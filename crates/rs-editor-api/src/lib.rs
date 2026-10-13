@@ -40,8 +40,10 @@ pub struct ApiOptions {
     pub scale: f32,
     pub units: Units,
     pub dark: bool,
-    /// A Tiptap JSON document, HTML, or empty for an empty document.
+    /// A Tiptap JSON document, HTML, or empty for an empty document; with
+    /// [`ApiOptions::markdown`], Markdown.
     pub content: String,
+    pub markdown: bool,
     pub platform: KeyPlatform,
     /// Whether platform fonts may cover scripts the bundled fonts lack.
     pub system_fonts: bool,
@@ -59,6 +61,7 @@ impl Default for ApiOptions {
             units: Units::Logical,
             dark: false,
             content: String::new(),
+            markdown: false,
             platform: KeyPlatform::Other,
             system_fonts: true,
             padding: Insets {
@@ -107,17 +110,22 @@ fn steps(json: &str) -> Option<Vec<(String, Value)>> {
         .collect()
 }
 
-/// A document for `content`: Tiptap JSON, or else HTML.
-fn initial_doc(content: &str) -> Option<Value> {
+/// A document for `content`: Markdown when `markdown`, otherwise Tiptap
+/// JSON, or else HTML.
+fn initial_doc(content: &str, markdown: bool) -> Option<Value> {
     let content = content.trim();
     if content.is_empty() {
         return None;
     }
-    if let Ok(json) = serde_json::from_str(content) {
+    if !markdown && let Ok(json) = serde_json::from_str(content) {
         return Some(json);
     }
     let schema = Editor::new(EditorOptions::default()).ok()?.schema().clone();
-    let fragment = rs_editor_markup::parse_fragment(&schema, content);
+    let fragment = if markdown {
+        rs_editor_markup::parse_markdown(&schema, content)
+    } else {
+        rs_editor_markup::parse_fragment(&schema, content)
+    };
     (fragment.child_count() > 0)
         .then(|| json!({"type": "doc", "content": fragment_to_json(&fragment)}))
 }
@@ -145,9 +153,12 @@ impl EditorApi {
             padding: options.padding,
             system_fonts: options.system_fonts,
         };
-        let mut view = EditorView::new(view_options(initial_doc(&options.content)))
-            .or_else(|_| EditorView::new(view_options(None)))
-            .expect("an empty document is always valid");
+        let mut view = EditorView::new(view_options(initial_doc(
+            &options.content,
+            options.markdown,
+        )))
+        .or_else(|_| EditorView::new(view_options(None)))
+        .expect("an empty document is always valid");
         view.set_interaction_profile(options.profile);
         Self {
             view,
@@ -198,6 +209,31 @@ impl EditorApi {
         rs_editor_markup::serialize_fragment(self.view.editor().doc().content())
     }
 
+    /// The document as GitHub-flavored Markdown.
+    pub fn get_markdown(&self) -> String {
+        rs_editor_markup::serialize_markdown(self.view.editor().doc().content())
+    }
+
+    /// Replaces the document with Markdown.
+    pub fn set_markdown(&mut self, markdown: &str) -> bool {
+        let schema = self.view.editor().schema().clone();
+        let fragment = rs_editor_markup::parse_markdown(&schema, markdown);
+        self.set_fragment(&fragment)
+    }
+
+    /// Adds a font (file bytes) for characters the bundled fonts lack; see
+    /// the `missingCharacters` effect. Returns its family, or `""` for bytes
+    /// that are not a font.
+    pub fn add_font(&mut self, bytes: &[u8], family: &str) -> String {
+        let family = (!family.is_empty()).then_some(family);
+        self.view.add_font(bytes, family).unwrap_or_default()
+    }
+
+    /// Whether pasted plain text is read as Markdown (off by default).
+    pub fn set_markdown_paste(&mut self, markdown: bool) {
+        self.view.set_markdown_paste(markdown);
+    }
+
     /// Plain text, blocks separated by `\n`.
     pub fn get_text(&self) -> String {
         self.view.editor().get_text("\n")
@@ -217,7 +253,11 @@ impl EditorApi {
     pub fn set_html(&mut self, html: &str) -> bool {
         let schema = self.view.editor().schema().clone();
         let fragment = rs_editor_markup::parse_fragment(&schema, html);
-        let mut content = fragment_to_json(&fragment);
+        self.set_fragment(&fragment)
+    }
+
+    fn set_fragment(&mut self, fragment: &rs_editor_model::Fragment) -> bool {
+        let mut content = fragment_to_json(fragment);
         if content.as_array().is_none_or(Vec::is_empty) {
             content = json!([{"type": "paragraph"}]);
         }
@@ -267,6 +307,20 @@ impl EditorApi {
     /// Attributes of the mark or node `name` at the selection, as JSON.
     pub fn get_attributes(&self, name: &str) -> String {
         Value::Object(self.view.editor().get_attributes(name)).to_string()
+    }
+
+    /// The selection as JSON: `{anchor, head, from, to, empty}` (document
+    /// positions).
+    pub fn selection(&self) -> String {
+        let selection = self.view.editor().selection();
+        json!({
+            "anchor": selection.anchor(),
+            "head": selection.head(),
+            "from": selection.from(),
+            "to": selection.to(),
+            "empty": selection.empty(),
+        })
+        .to_string()
     }
 
     /// Changes whenever the document or selection may have changed.
@@ -347,7 +401,7 @@ impl EditorApi {
     }
 
     /// Effects since the last call, as a JSON array of
-    /// `{type: haptic|menu|magnifier|showKeyboard|clipboard|openUrl|cursor|imeArea|redraw, …}`.
+    /// `{type: haptic|menu|magnifier|showKeyboard|clipboard|openUrl|cursor|imeArea|redraw|missingCharacters, …}`.
     /// Rectangles are `[left, top, right, bottom]`.
     pub fn take_effects(&mut self) -> String {
         let unit = self.unit();
@@ -372,6 +426,9 @@ impl EditorApi {
                     json!({"type": "magnifier", "at": at.map(|(x, y)| [x * unit, y * unit])})
                 }
                 Effect::ShowKeyboard => json!({"type": "showKeyboard"}),
+                Effect::MissingCharacters(characters) => {
+                    json!({"type": "missingCharacters", "characters": characters})
+                }
                 Effect::Clipboard(content) => {
                     json!({"type": "clipboard", "text": content.text, "html": content.html})
                 }

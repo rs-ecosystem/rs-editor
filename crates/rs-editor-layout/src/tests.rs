@@ -483,3 +483,25 @@ fn windowed_layout_measures_only_what_is_near() {
     assert!(layout.caret_rect(far, Affinity::Downstream, 1.0).is_some());
     assert!(layout.text_at(far + 1).is_some());
 }
+
+#[test]
+fn characters_without_a_font_are_reported_until_one_is_added() {
+    let mut engine = engine();
+    let doc = tiptap(serde_json::json!({"type": "doc", "content": [para("halo 日本 🎉")]}));
+    engine.layout(&doc, 480.0);
+    let missing = engine.take_missing_characters();
+    assert!(missing.contains(&u32::from('日')), "{missing:x?}");
+    assert!(missing.contains(&0x1f389), "{missing:x?}");
+    assert!(!missing.contains(&u32::from('h')));
+    assert!(engine.take_missing_characters().is_empty(), "reported once");
+    // A font registers under its own family name or the one given, and the
+    // document is laid out again with it.
+    assert_eq!(engine.add_font(b"not a font", None), None);
+    let geist = crate::fonts::BUNDLED_FONTS[0].1;
+    assert_eq!(
+        engine.add_font(geist, Some("Ekstra")).as_deref(),
+        Some("Ekstra")
+    );
+    engine.layout(&doc, 480.0);
+    assert!(engine.take_missing_characters().contains(&u32::from('日')));
+}

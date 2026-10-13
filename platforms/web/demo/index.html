@@ -28,12 +28,13 @@
   <header>
     <h1>Rs Editor</h1>
     <button id="theme" type="button">Tema gelap</button>
+    <button id="markdown" type="button">Markdown</button>
     <span id="status">memuat…</span>
   </header>
   <div id="editor"></div>
   <div id="toolbar" role="toolbar" aria-label="Format"></div>
   <script type="module">
-    import { createEditor } from "../src/index.js";
+    import { createEditor, notoFonts } from "../src/index.js";
 
     const t = (text, marks = []) => marks.length
       ? { type: "text", text, marks: marks.map((type) => ({ type })) }
@@ -57,6 +58,7 @@
       { type: "blockquote", content: [p(t("Satu jalur render untuk semua platform."))] },
       h(3, "Aksara"),
       p(t("العربية من اليمين إلى اليسار، हिन्दी देवनागरी.")),
+      p(t("日本語のテキスト、한국어 텍스트, emoji 👩‍💻🎉 — dimuat saat dibutuhkan.")),
       { type: "codeBlock", content: [t("fn main() {\n    println!(\"halo, web\");\n}")] },
       ...Array.from({ length: 20 }, (_, i) => p(t(`Paragraf ${i + 1}: teks pengisi untuk mencoba scroll dan fling.`))),
       { type: "paragraph" },
@@ -85,8 +87,16 @@
     const toolbar = document.getElementById("toolbar");
     try {
       const started = performance.now();
-      const input = new URLSearchParams(location.search).get("input") ?? undefined;
-      const editor = await createEditor({ element: document.getElementById("editor"), content, input });
+      const params = new URLSearchParams(location.search);
+      const input = params.get("input") ?? undefined;
+      // ?fonts=cdn loads Noto emoji/CJK from public CDNs; ?fonts=local uses a
+      // font copied into demo/local-fonts for offline testing.
+      const fonts = params.get("fonts") === "cdn"
+        ? [notoFonts.emoji, notoFonts.japanese, notoFonts.korean]
+        : params.get("fonts") === "local"
+          ? [{ family: "Arial Unicode MS", url: "local-fonts/ArialUnicode.ttf", ranges: [[0x1100, 0x11ff], [0x3000, 0x9fff], [0xac00, 0xd7af], [0xff00, 0xffef]] }]
+          : [];
+      const editor = await createEditor({ element: document.getElementById("editor"), content, input, fonts, pasteMarkdown: true });
       const loadMs = Math.round(performance.now() - started);
 
       const buttons = tools.map(([label, [command, args], active, style]) => {
@@ -120,6 +130,12 @@
       setInterval(() => {
         status.textContent = `${editor.inputMode} · muat ${loadMs} ms · frame ${editor.stats.lastFrameMs.toFixed(1)} ms`;
       }, 500);
+      document.getElementById("markdown").onclick = () => {
+        const markdown = editor.getMarkdown();
+        console.log(markdown);
+        navigator.clipboard?.writeText(markdown).catch(() => {});
+        status.textContent = `Markdown (${markdown.length} karakter) disalin`;
+      };
       window.rsEditor = editor;
     } catch (error) {
       status.textContent = "gagal";

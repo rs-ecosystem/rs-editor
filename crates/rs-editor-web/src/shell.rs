@@ -96,7 +96,8 @@ pub unsafe extern "C" fn rse_result(app_ptr: *mut App) -> *const u8 {
 
 /// Creates the editor in the current WebGL context. `platform` is 1 on
 /// Apple systems, 2 on Windows, 0 elsewhere; `content` is a Tiptap JSON
-/// document, HTML, or empty. Returns null on failure.
+/// document, HTML, or empty, or Markdown when `markdown` is 1. Returns
+/// null on failure.
 ///
 /// # Safety
 /// `content` must point to `content_len` bytes of UTF-8.
@@ -109,6 +110,7 @@ pub unsafe extern "C" fn rse_init(
     dark: u32,
     content: *const u8,
     content_len: usize,
+    markdown: u32,
 ) -> *mut App {
     let Some(interface) = gpu::gl::Interface::new_native() else {
         return std::ptr::null_mut();
@@ -128,6 +130,7 @@ pub unsafe extern "C" fn rse_init(
         units: Units::Logical,
         dark: dark != 0,
         content: unsafe { read(content, content_len) },
+        markdown: markdown != 0,
         platform,
         // The web has no system font manager; the bundle covers Latin,
         // Arabic and Devanagari (other scripts load lazily).
@@ -471,7 +474,8 @@ pub unsafe extern "C" fn rse_paste_html(app_ptr: *mut App, html: *const u8, len:
 
 // --- content and commands (the Tiptap API) ---------------------------------------
 
-/// `what`: 0 Tiptap JSON, 1 HTML, 2 plain text. Returns the length.
+/// `what`: 0 Tiptap JSON, 1 HTML, 2 plain text, 3 Markdown. Returns the
+/// length.
 ///
 /// # Safety
 /// `app` must be live.
@@ -481,13 +485,14 @@ pub unsafe extern "C" fn rse_get_content(app_ptr: *mut App, what: u32) -> usize 
     let content = match what {
         0 => app.api.get_json(),
         1 => app.api.get_html(),
+        3 => app.api.get_markdown(),
         _ => app.api.get_text(),
     };
     app.set_result(&content)
 }
 
-/// Replaces the document with Tiptap JSON (`html` 0) or HTML (`html` 1);
-/// returns 1 when it fit the schema.
+/// Replaces the document with Tiptap JSON (`format` 0), HTML (1) or
+/// Markdown (2); returns 1 when it fit the schema.
 ///
 /// # Safety
 /// `app` must be live; the string must be readable.
@@ -496,15 +501,52 @@ pub unsafe extern "C" fn rse_set_content(
     app_ptr: *mut App,
     content: *const u8,
     len: usize,
-    html: u32,
+    format: u32,
 ) -> u32 {
     let app = unsafe { app(app_ptr) };
     let content = unsafe { read(content, len) };
-    u32::from(if html != 0 {
-        app.api.set_html(&content)
-    } else {
-        app.api.set_json(&content)
+    u32::from(match format {
+        1 => app.api.set_html(&content),
+        2 => app.api.set_markdown(&content),
+        _ => app.api.set_json(&content),
     })
+}
+
+/// Adds a font from file bytes for characters the bundled fonts lack (see
+/// the `missingCharacters` effect), under `family` (empty: the font's own
+/// name). Leaves the family as the result and returns its length (0 when
+/// the bytes are not a font).
+///
+/// # Safety
+/// `app` must be live; the buffers must be readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_add_font(
+    app_ptr: *mut App,
+    bytes: *const u8,
+    len: usize,
+    family: *const u8,
+    family_len: usize,
+) -> usize {
+    let app = unsafe { app(app_ptr) };
+    let bytes = if bytes.is_null() || len == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(bytes, len) }
+    };
+    let family = unsafe { read(family, family_len) };
+    let added = app.api.add_font(bytes, &family);
+    app.set_result(&added)
+}
+
+/// Whether pasted plain text is read as Markdown.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_markdown_paste(app_ptr: *mut App, markdown: u32) {
+    unsafe { app(app_ptr) }
+        .api
+        .set_markdown_paste(markdown != 0);
 }
 
 /// # Safety
@@ -582,6 +624,18 @@ pub unsafe extern "C" fn rse_get_attributes(
     let app = unsafe { app(app_ptr) };
     let attributes = app.api.get_attributes(&unsafe { read(name, len) });
     app.set_result(&attributes)
+}
+
+/// The selection as JSON `{anchor, head, from, to, empty}`; returns the
+/// length.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_selection(app_ptr: *mut App) -> usize {
+    let app = unsafe { app(app_ptr) };
+    let selection = app.api.selection();
+    app.set_result(&selection)
 }
 
 /// Revisions (wrapping): `doc` 0 changes with any transaction, 1 only with

@@ -212,6 +212,124 @@ fn rs_editor_clipboard_html_restores_the_exact_slice() {
     );
 }
 
+fn markdown_round_trip(doc: Value) -> String {
+    let schema = schema();
+    let fragment = schema.fragment_from_json(&doc).expect("valid document");
+    let markdown = serialize_markdown(&fragment);
+    let back = parse_markdown(&schema, &markdown);
+    assert_eq!(json_of(&back), json_of(&fragment), "{markdown}");
+    markdown
+}
+
+#[test]
+fn markdown_round_trips_every_node_and_mark() {
+    let markdown = markdown_round_trip(json!([
+        {"type": "heading", "attrs": {"level": 2}, "content": [text("Judul "), marked("tebal", json!([{"type": "bold"}]))]},
+        p(vec![
+            text("a "),
+            marked("tebal", json!([{"type": "bold"}])),
+            text(" "),
+            marked("miring tebal", json!([{"type": "bold"}, {"type": "italic"}])),
+            text(", "),
+            marked("u", json!([{"type": "underline"}])),
+            marked("s", json!([{"type": "strike"}])),
+            text(" "),
+            marked("kode `x`", json!([{"type": "code"}])),
+            text(" "),
+            marked("2", json!([{"type": "subscript"}])),
+            marked("3", json!([{"type": "superscript"}])),
+            marked("sorot", json!([{"type": "highlight"}])),
+            text(" "),
+            // Markdown has no link targets.
+            marked("tautan", json!([{"type": "link", "attrs": {"href": "https://contoh.id/a_(b)", "target": null, "rel": "noopener noreferrer nofollow", "class": null}}])),
+            json!({"type": "hardBreak"}),
+            text("baris 2"),
+        ]),
+        {"type": "blockquote", "content": [p(vec![text("kutipan")]), p(vec![text("dua")])]},
+        {"type": "bulletList", "content": [
+            {"type": "listItem", "content": [
+                p(vec![text("satu")]),
+                {"type": "bulletList", "content": [{"type": "listItem", "content": [p(vec![text("dalam")])]}]},
+            ]},
+            {"type": "listItem", "content": [p(vec![text("dua")])]},
+        ]},
+        {"type": "orderedList", "attrs": {"start": 3, "type": null}, "content": [
+            {"type": "listItem", "content": [p(vec![text("tiga")])]},
+            {"type": "listItem", "content": [p(vec![text("empat")])]},
+        ]},
+        {"type": "taskList", "content": [
+            {"type": "taskItem", "attrs": {"checked": true}, "content": [p(vec![text("selesai")])]},
+            {"type": "taskItem", "attrs": {"checked": false}, "content": [p(vec![text("belum")])]},
+        ]},
+        {"type": "codeBlock", "attrs": {"language": "rust"}, "content": [text("fn main() {\n    a  <  b; // ```\n}")]},
+        {"type": "horizontalRule"},
+        p(vec![text("akhir")]),
+    ]));
+    assert!(
+        markdown.starts_with(
+            "## Judul **tebal**\n\na **tebal** ***miring tebal***, <u>u</u>~~s~~ `` kode `x` ``"
+        ),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("\n- satu\n  - dalam\n- dua\n"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("\n3. tiga\n4. empat\n"), "{markdown}");
+    assert!(
+        markdown.contains("\n- [x] selesai\n- [ ] belum\n"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("\n> kutipan\n>\n> dua\n"), "{markdown}");
+    assert!(markdown.contains("````rust\n"), "{markdown}");
+}
+
+#[test]
+fn markdown_text_that_looks_like_syntax_stays_text() {
+    for line in [
+        "# bukan judul",
+        "1. bukan list",
+        "- bukan list",
+        "*bintang* _garis_ [kurung] <tag> `tick` ~~coret~~ | pipa",
+        "a\\b &amp; &copy &",
+        "  spasi  ganda  ",
+        "+ plus",
+        "==",
+    ] {
+        markdown_round_trip(json!([p(vec![text(line)])]));
+    }
+    // Spaces inside code spans stay inside.
+    for code in ["# ", " x ", " y", "a  b", "` `"] {
+        markdown_round_trip(json!([p(vec![
+            text("a "),
+            marked(code, json!([{"type": "code"}])),
+            text(" b")
+        ])]));
+    }
+}
+
+#[test]
+fn github_markdown_parses_to_the_schema() {
+    let md = "# Judul\n\nTeks **tebal** dan *miring*.\n\n- [x] selesai\n- [ ] belum\n\n1. satu\n   - dalam\n\n```js\nlet a = 1;\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+    assert_eq!(
+        json_of(&parse_markdown(&schema(), md)),
+        expect!([
+            {"type": "heading", "attrs": {"level": 1}, "content": [text("Judul")]},
+            p(vec![text("Teks "), marked("tebal", json!([{"type": "bold"}])), text(" dan "), marked("miring", json!([{"type": "italic"}])), text(".")]),
+            {"type": "taskList", "content": [
+                {"type": "taskItem", "attrs": {"checked": true}, "content": [p(vec![text("selesai")])]},
+                {"type": "taskItem", "attrs": {"checked": false}, "content": [p(vec![text("belum")])]},
+            ]},
+            {"type": "orderedList", "content": [{"type": "listItem", "content": [
+                p(vec![text("satu")]),
+                {"type": "bulletList", "content": [{"type": "listItem", "content": [p(vec![text("dalam")])]}]},
+            ]}]},
+            {"type": "codeBlock", "attrs": {"language": "js"}, "content": [text("let a = 1;")]},
+            p(vec![text("a")]), p(vec![text("b")]), p(vec![text("1")]), p(vec![text("2")]),
+        ])
+    );
+}
+
 mod proptests {
     use proptest::prelude::*;
 
@@ -285,6 +403,90 @@ mod proptests {
             );
             let again = parse_fragment(&schema, &serialize_fragment(&fragment));
             prop_assert_eq!(json_of(&again), json_of(&fragment), "html {:?}", html);
+        }
+    }
+
+    const WORDS: &[&str] = &[
+        "kata",
+        "dua",
+        " ",
+        "  ",
+        "a",
+        "*",
+        "_",
+        "#",
+        "1.",
+        "-",
+        "`",
+        "~",
+        "[x]",
+        "<b>",
+        "&amp;",
+        "\\",
+        "(",
+        ")",
+        "!",
+        "é",
+        "👩‍💻",
+        ".",
+        ",",
+    ];
+    const MARKS: &[&str] = &[
+        "bold",
+        "italic",
+        "strike",
+        "code",
+        "underline",
+        "highlight",
+        "link",
+    ];
+
+    fn mark_json(name: &str) -> Value {
+        if name == "link" {
+            json!({"type": "link", "attrs": {"href": "https://a.id/x", "target": null, "rel": "noopener noreferrer nofollow", "class": null}})
+        } else {
+            json!({"type": name})
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(cases(300)))]
+
+        #[test]
+        fn marked_text_round_trips_through_markdown(
+            runs in proptest::collection::vec(
+                (proptest::collection::vec(0..WORDS.len(), 1..4), proptest::collection::btree_set(0..MARKS.len(), 0..3)),
+                1..6,
+            ),
+            block in 0..4usize,
+        ) {
+            let schema = schema();
+            let content: Vec<Value> = runs
+                .iter()
+                .map(|(words, marks)| {
+                    let text: String = words.iter().map(|&i| WORDS[i]).collect();
+                    // Markdown cannot mark spaces at the edges of a run (they
+                    // move outside the delimiters), so marked runs have none.
+                    let mut marks: Vec<Value> = marks.iter().map(|&i| mark_json(MARKS[i])).collect();
+                    let text = if marks.is_empty() { text } else { text.trim_matches(' ').to_string() };
+                    if text.is_empty() {
+                        marks.clear();
+                    }
+                    let text = if text.is_empty() { " ".to_string() } else { text };
+                    if marks.is_empty() { json!({"type": "text", "text": text}) } else { json!({"type": "text", "text": text, "marks": marks}) }
+                })
+                .collect();
+            let textblock = match block {
+                0 => json!({"type": "paragraph", "content": content}),
+                1 => json!({"type": "heading", "attrs": {"level": 2}, "content": content}),
+                2 => json!({"type": "bulletList", "content": [{"type": "listItem", "content": [{"type": "paragraph", "content": content}]}]}),
+                _ => json!({"type": "blockquote", "content": [{"type": "paragraph", "content": content}]}),
+            };
+            // Normalize (adjacent runs with the same marks merge) through the schema.
+            let Ok(fragment) = schema.fragment_from_json(&json!([textblock])) else { return Ok(()); };
+            let markdown = serialize_markdown(&fragment);
+            let back = parse_markdown(&schema, &markdown);
+            prop_assert_eq!(json_of(&back), json_of(&fragment), "markdown {:?}", markdown);
         }
     }
 }

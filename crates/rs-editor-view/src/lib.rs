@@ -88,6 +88,9 @@ pub enum Effect {
     Magnifier(Option<(f32, f32)>),
     /// A tap on the text: bring up the soft keyboard.
     ShowKeyboard,
+    /// Characters laid out that no font could show (Unicode scalar values),
+    /// for hosts that load fonts on demand ([`EditorView::add_font`]).
+    MissingCharacters(Vec<u32>),
 }
 
 /// Copied content in the formats the clipboard takes.
@@ -180,6 +183,8 @@ pub struct EditorView {
     revision: u64,
     /// Bumped by transactions that change the document.
     doc_revision: u64,
+    /// Pasted plain text is read as Markdown.
+    pub(crate) markdown_paste: bool,
     effects: Vec<Effect>,
     pub(crate) a11y: a11y::A11y,
     pub(crate) touch: touch::TouchState,
@@ -241,6 +246,7 @@ impl EditorView {
             scroll_seen,
             revision: 0,
             doc_revision: 0,
+            markdown_paste: false,
             effects: Vec::new(),
             a11y: a11y::A11y::default(),
             touch: touch::TouchState::default(),
@@ -412,11 +418,28 @@ impl EditorView {
                 self.scroll_y = (top.y + offset + self.padding.top).clamp(0.0, max);
             }
             self.layout = Some(LaidOut { doc, width, layout });
+            let missing = self.engine.take_missing_characters();
+            if !missing.is_empty() {
+                self.push_effect(Effect::MissingCharacters(missing));
+            }
         }
         self.layout
             .as_ref()
             .map(|current| current.layout.clone())
             .expect("layout was just computed")
+    }
+
+    /// Adds a font (file bytes) for characters the bundled fonts lack, such
+    /// as emoji or CJK; text is laid out again. Returns the font's family,
+    /// or `None` for bytes that are not a font.
+    pub fn add_font(&mut self, bytes: &[u8], family: Option<&str>) -> Option<String> {
+        let family = self.engine.add_font(bytes, family)?;
+        self.pending_anchor = self
+            .pending_anchor
+            .or_else(|| self.layout.as_ref().and_then(|l| self.anchor_in(&l.layout)));
+        self.layout = None;
+        self.request_redraw();
+        Some(family)
     }
 
     /// The top-level block at the top of the view and how far into it the

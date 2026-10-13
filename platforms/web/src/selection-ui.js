@@ -33,6 +33,17 @@ export class SelectionUi {
       menu.addEventListener(type, (e) => { e.preventDefault(); e.stopPropagation(); }, { passive: false });
     }
     editor.element.append(menu);
+    // A press anywhere else, or Escape, closes the menu.
+    this._onOutside = (e) => {
+      if (this.menu.style.display !== "none" && !this.menu.contains(e.target) && e.target !== editor.canvas) {
+        this.dismiss();
+      }
+    };
+    this._onEscape = (e) => {
+      if (e.key === "Escape" && this.menu.style.display !== "none") this.dismiss();
+    };
+    document.addEventListener("pointerdown", this._onOutside, true);
+    document.addEventListener("keydown", this._onEscape, true);
 
     const magnifier = this.magnifier = document.createElement("canvas");
     magnifier.className = "rs-editor-magnifier";
@@ -51,8 +62,12 @@ export class SelectionUi {
 
   // --- menu -----------------------------------------------------------------
 
-  /** Shows the menu next to `menu.rect` ([left, top, right, bottom]), or hides it (null). */
-  showMenu(menu) {
+  /**
+   * Shows the menu next to `menu.rect` ([left, top, right, bottom]), or hides it
+   * (null). `atPoint` opens it below and right of the rect's corner, as a
+   * context menu.
+   */
+  showMenu(menu, { atPoint = false } = {}) {
     if (!menu || !menu.items.length) {
       this.menu.style.display = "none";
       return;
@@ -78,13 +93,28 @@ export class SelectionUi {
     const height = this.menu.offsetHeight;
     const area = this.editor.element;
     const gap = 8;
-    // Above the selection; below it (clear of the handles) when there is no room.
-    let y = top - gap - height;
-    if (y < 4) y = bottom + gap + 28;
-    y = Math.min(y, area.clientHeight - height - 4);
-    const x = Math.max(4, Math.min((left + right) / 2 - width / 2, area.clientWidth - width - 4));
+    let x, y;
+    if (atPoint) {
+      x = left + 2;
+      y = top + 2;
+      if (y + height > area.clientHeight - 4) y = top - height - 2;
+    } else {
+      // Above the selection; below it (clear of the handles) when there is no room.
+      y = top - gap - height;
+      if (y < 4) y = bottom + gap + 28;
+      x = (left + right) / 2 - width / 2;
+    }
+    y = Math.max(4, Math.min(y, area.clientHeight - height - 4));
+    x = Math.max(4, Math.min(x, area.clientWidth - width - 4));
     this.menu.style.left = `${x}px`;
     this.menu.style.top = `${y}px`;
+  }
+
+  /** Closes the menu on the user's behalf and tells the editor. */
+  dismiss() {
+    this.showMenu(null);
+    this.editor._M._rse_menu_dismissed(this.editor._app);
+    this.editor._requestFrame();
   }
 
   async menuAction(item) {
@@ -176,6 +206,8 @@ export class SelectionUi {
   }
 
   destroy() {
+    document.removeEventListener("pointerdown", this._onOutside, true);
+    document.removeEventListener("keydown", this._onEscape, true);
     this.menu.remove();
     this.magnifier.remove();
   }

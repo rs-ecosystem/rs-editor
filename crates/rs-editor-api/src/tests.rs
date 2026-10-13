@@ -167,3 +167,23 @@ fn coordinates_follow_the_shell_units() {
     let x = |s: &Value| s["caret"][0].as_f64().unwrap();
     assert!((x(&a) * 2.0 - x(&b)).abs() < 0.01, "{a} {b}");
 }
+
+#[test]
+fn content_round_trips_through_markdown() {
+    let mut editor = sample();
+    assert!(editor.set_markdown("# Judul\n\n- [x] **tugas**\n"));
+    assert_eq!(editor.get_markdown(), "# Judul\n\n- [x] **tugas**");
+    assert!(editor.set_markdown(""));
+    assert!(editor.is_empty());
+}
+
+#[test]
+fn initial_content_can_be_markdown() {
+    let mut editor = EditorApi::new(ApiOptions {
+        content: "## Hai *dunia*".into(),
+        markdown: true,
+        ..Default::default()
+    });
+    assert_eq!(editor.get_html(), "<h2>Hai <em>dunia</em></h2>");
+    assert!(!editor.run("undo", ""), "not an undoable change");
+}

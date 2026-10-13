@@ -1,0 +1,14 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 01a22e8e68ccc1a6f48858413de3f6895af27a512932e249aacbf20f4f809ce7 # shrinks to runs = [([2], {0})], block = 0
+cc 5fa777ace374fb91c9df0408d5103560541ba4045887ad6166c5e991043d3a62 # shrinks to runs = [([18], {}), ([4], {6})], block = 0
+cc c54f1af7393c5f34e9eb767834010aaa16e45fda11542b447e1f8463d1927b8f # shrinks to runs = [([19], {1, 2}), ([4], {})], block = 0
+cc ced9e1be034e5e1d2cb3392f5585323e77c2efef9324fdb2f51a0ba2b220c6de # shrinks to runs = [([4, 3, 4], {3})], block = 0
+cc 99d8e3360ab1a5158c139123082ce8ae960f74667b4649d3d094fadcaf346283 # shrinks to runs = [([4], {1}), ([4], {1}), ([9], {0})], block = 0
+cc 4e1515ffc63bcb29a409499eb59161d6a0b62062a23e70948e6ecee9bbe75393 # shrinks to runs = [([4, 2, 7], {})], block = 1
+cc 706f5772be9cfa81be9aadb7be6bfdb83646061b2b54efd11cc06f93c73895bd # shrinks to runs = [([15, 18], {}), ([0], {6})], block = 0
+cc f6df365b827f2dbffc7f749423b8f075013ea744198c6c84755d0eb01832c2d8 # shrinks to runs = [([7], {})], block = 1

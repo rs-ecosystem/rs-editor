@@ -9,6 +9,7 @@ rust-version.workspace = true
 rs-editor-model.workspace = true
 serde_json.workspace = true
 html5gum = "0.8"
+pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
 
 [dev-dependencies]
 rs-editor-extensions.workspace = true

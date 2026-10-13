@@ -53,8 +53,9 @@ fn instance(base: &Typeface, weight: u16) -> Option<Typeface> {
 
 /// Fonts for laying out documents: the bundled families first, then the
 /// platform's fonts for emoji and scripts the bundle lacks (unless
-/// `system_fallback` is off, for fully deterministic tests).
-pub fn font_collection(system_fallback: bool) -> FontCollection {
+/// `system_fallback` is off, for fully deterministic tests). The provider
+/// takes fonts added later.
+pub fn font_collection(system_fallback: bool) -> (FontCollection, TypefaceFontProvider) {
     let manager = FontMgr::default();
     let mut provider = TypefaceFontProvider::new();
     for (name, bytes) in BUNDLED_FONTS {
@@ -77,6 +78,7 @@ pub fn font_collection(system_fallback: bool) -> FontCollection {
         }
     }
     let mut fonts = FontCollection::new();
+    let shared = provider.clone();
     let provider: FontMgr = provider.into();
     fonts.set_asset_font_manager(Some(provider));
     if system_fallback {
@@ -84,5 +86,21 @@ pub fn font_collection(system_fallback: bool) -> FontCollection {
     } else {
         fonts.disable_font_fallback();
     }
-    fonts
+    (fonts, shared)
+}
+
+/// Registers font file `bytes` with `provider`, under `family` or the
+/// font's own family name; returns the family, or `None` for bytes that
+/// are not a font.
+pub fn register_font(
+    provider: &mut TypefaceFontProvider,
+    bytes: &[u8],
+    family: Option<&str>,
+) -> Option<String> {
+    let typeface = FontMgr::default().new_from_data(skia_safe::Data::new_copy(bytes), None)?;
+    let family = family
+        .map(str::to_owned)
+        .unwrap_or_else(|| typeface.family_name());
+    provider.register_typeface(typeface, Some(family.as_str()));
+    Some(family)
 }

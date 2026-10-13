@@ -1,3 +1,15 @@
+/** A font file to load when the text needs one of its characters. */
+export interface FontSource {
+  family: string;
+  /** A TTF or OTF file (not WOFF/WOFF2). */
+  url: string;
+  /** Code point ranges `[first, last]` the font covers; any character when omitted. */
+  ranges?: [number, number][];
+}
+
+/** Noto emoji and CJK fonts on public CDNs (large; self-host for production). */
+export const notoFonts: { emoji: FontSource; japanese: FontSource; korean: FontSource };
+
 /** Tiptap JSON: a document node such as `{ type: "doc", content: [...] }`. */
 export type JSONContent = {
   type?: string;
@@ -11,8 +23,17 @@ export type JSONContent = {
 export interface EditorOptions {
   /** Element the editor fills (it gets `position: relative` if static). */
   element: HTMLElement;
-  /** Tiptap JSON, or an HTML string. Not an undoable change. */
+  /** Tiptap JSON, or an HTML (or Markdown) string. Not an undoable change. */
   content?: JSONContent | string;
+  /** How to read a string `content`: HTML by default. */
+  contentType?: "html" | "markdown";
+  /** Read pasted plain text as Markdown (off by default). */
+  pasteMarkdown?: boolean;
+  /**
+   * Fonts loaded on demand when the text has characters the bundled fonts
+   * (Latin, Arabic, Devanagari) lack, such as emoji or CJK. See `notoFonts`.
+   */
+  fonts?: FontSource[];
   dark?: boolean;
   editable?: boolean;
   /** URL of `rs-editor-web.js` (default: `../dist/` next to this module). */
@@ -98,9 +119,17 @@ export interface Editor {
   getJSON(): JSONContent;
   getHTML(): string;
   getText(): string;
+  /** GitHub-flavored Markdown; marks Markdown lacks are written as HTML tags. */
+  getMarkdown(): string;
   readonly isEmpty: boolean;
-  /** Tiptap JSON or HTML; false when the content does not fit the schema. */
-  setContent(content: JSONContent | string): boolean;
+  /**
+   * Tiptap JSON, HTML, or Markdown with `{ contentType: "markdown" }`; false
+   * when the content does not fit the schema.
+   */
+  setContent(content: JSONContent | string, options?: { contentType?: "html" | "markdown" }): boolean;
+  setPasteMarkdown(markdown: boolean): void;
+  /** Adds a font (TTF/OTF bytes); returns its family, or "" when the bytes are not a font. */
+  addFont(bytes: ArrayBuffer | Uint8Array, family?: string): string;
 
   readonly isEditable: boolean;
   setEditable(editable: boolean): void;

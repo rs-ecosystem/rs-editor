@@ -26,14 +26,33 @@ editor.can().toggleBulletList().run();     // apakah bisa? tidak mengubah apa pu
 editor.commands.undo();
 editor.isActive("heading", { level: 2 });
 editor.getAttributes("link").href;
-editor.getJSON(); editor.getHTML(); editor.getText();
+editor.getJSON(); editor.getHTML(); editor.getText(); editor.getMarkdown();
 editor.setContent("<p>halo</p>");
+editor.setContent("# Judul", { contentType: "markdown" });
 editor.on("update", ({ editor }) => save(editor.getJSON()));
 editor.on("selectionUpdate", refreshToolbar);
 editor.destroy();
 ```
 
 Semua perintah dari extension Rust bisa dipakai sebagai metode chain, dengan argumen yang sama seperti di Tiptap. Tipe TypeScript-nya ada di `src/index.d.ts`.
+
+## Font
+
+Font bawaan mencakup aksara Latin, Arab, dan Devanagari. Untuk emoji dan CJK, aplikasi memberi daftar `fonts`. Sebuah font hanya dimuat ketika teks berisi karakter dalam rentang Unicode-nya:
+
+```js
+import { createEditor, notoFonts } from "@rs-editor/web";
+
+await createEditor({ element, fonts: [notoFonts.emoji, notoFonts.japanese, notoFonts.korean] });
+// atau muat sendiri:
+editor.addFont(await (await fetch("/fonts/MyFont.ttf")).arrayBuffer(), "My Font");
+```
+
+Format yang didukung adalah TTF dan OTF (bukan WOFF/WOFF2). Preset `notoFonts` mengambil font dari CDN publik dan ukurannya besar (emoji 7 MB, JP/KR 5–6 MB), jadi untuk produksi sebaiknya di-host sendiri.
+
+## Markdown
+
+`getMarkdown()` menghasilkan Markdown gaya GitHub. Mark yang tidak punya sintaks Markdown (garis bawah, sorotan, sub/superskrip) ditulis sebagai tag HTML. `setContent(md, { contentType: "markdown" })` dan opsi `contentType: "markdown"` membaca Markdown. Opsi `pasteMarkdown: true` membuat teks polos yang ditempel dibaca sebagai Markdown.
 
 ## Sentuh
 
@@ -46,3 +65,4 @@ Semua perintah dari extension Rust bisa dipakai sebagai metode chain, dengan arg
 - Getar memakai `navigator.vibrate` (browser Android).
 - Keyboard layar muncul saat teks diketuk.
 - Jika keyboard menutupi halaman tanpa mengubah ukurannya (Safari iOS), editor membaca `visualViewport` dan menggeser caret supaya tidak tertutup keyboard.
+- Dengan mouse, klik kanan membuka menu yang sama di posisi kursor.

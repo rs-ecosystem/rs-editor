@@ -465,10 +465,35 @@ impl EditorView {
         self.paste_slice(slice)
     }
 
-    /// Pastes plain text; each line becomes a paragraph.
+    /// Pastes Markdown: one paragraph merges into the current block, more
+    /// become blocks of their own.
+    pub fn paste_markdown(&mut self, markdown: &str) -> bool {
+        if !self.editor.is_editable() || markdown.trim().is_empty() {
+            return false;
+        }
+        let fragment = rs_editor_markup::parse_markdown(self.editor.schema(), markdown);
+        if fragment.size() == 0 {
+            return false;
+        }
+        let single_paragraph =
+            fragment.child_count() == 1 && fragment.child(0).type_name() == "paragraph";
+        let open = usize::from(single_paragraph);
+        self.paste_slice(Slice::new(fragment, open, open))
+    }
+
+    /// Whether pasted plain text is read as Markdown.
+    pub fn set_markdown_paste(&mut self, markdown: bool) {
+        self.markdown_paste = markdown;
+    }
+
+    /// Pastes plain text; each line becomes a paragraph (or, with
+    /// [`EditorView::set_markdown_paste`], the text is read as Markdown).
     pub fn paste_text(&mut self, text: &str) -> bool {
         if !self.editor.is_editable() || text.is_empty() {
             return false;
+        }
+        if self.markdown_paste {
+            return self.paste_markdown(text);
         }
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         let lines: Vec<&str> = text.split('\n').collect();

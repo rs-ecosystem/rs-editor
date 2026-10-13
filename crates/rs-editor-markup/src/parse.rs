@@ -487,8 +487,17 @@ impl<'a> Parser<'a> {
             }
             "pre" => self.code_block(element),
             "ul" => {
+                let items: Vec<&Element> = element
+                    .children
+                    .iter()
+                    .filter_map(|child| match child {
+                        Dom::Element(e) if e.name == "li" => Some(e),
+                        _ => None,
+                    })
+                    .collect();
                 let task = element.attr("data-type") == Some("taskList")
-                    || element.has_class("contains-task-list");
+                    || element.has_class("contains-task-list")
+                    || (!items.is_empty() && items.iter().all(|li| starts_with_checkbox(li)));
                 let list = if task { "taskList" } else { "bulletList" };
                 if !self.with_node(list, Map::new(), element) {
                     self.children(element);
@@ -557,7 +566,8 @@ impl<'a> Parser<'a> {
         });
         let task = parent_task
             || element.attr("data-type") == Some("taskItem")
-            || element.has_class("task-list-item");
+            || element.has_class("task-list-item")
+            || starts_with_checkbox(element);
         if task && self.node_type("taskItem").is_some() {
             let checked = element.attr("data-checked") == Some("true")
                 || checkbox.is_some_and(|c| c.attr("checked").is_some());
@@ -637,4 +647,26 @@ pub fn parse_slice(schema: &Schema, html: &str) -> Slice {
     let mut parser = Parser::new(schema);
     parser.children(&root);
     Slice::max_open(parser.finish(), false)
+}
+
+fn is_checkbox(element: &Element) -> bool {
+    element.name == "input"
+        && element
+            .attr("type")
+            .is_some_and(|t| t.eq_ignore_ascii_case("checkbox"))
+}
+
+/// A list item that starts with a checkbox, as Markdown renderers write
+/// task items (`<li><input type="checkbox" checked> text`, or inside a
+/// `<p>` in loose lists).
+fn starts_with_checkbox(element: &Element) -> bool {
+    let first = element
+        .children
+        .iter()
+        .find(|child| !matches!(child, Dom::Text(text) if text.trim().is_empty()));
+    match first {
+        Some(Dom::Element(e)) if is_checkbox(e) => true,
+        Some(Dom::Element(e)) if e.name == "p" => starts_with_checkbox(e),
+        _ => false,
+    }
 }
