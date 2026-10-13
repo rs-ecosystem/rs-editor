@@ -91,6 +91,9 @@ pub enum Effect {
     /// Characters laid out that no font could show (Unicode scalar values),
     /// for hosts that load fonts on demand ([`EditorView::add_font`]).
     MissingCharacters(Vec<u32>),
+    /// Emoji (graphemes) laid out without an image, when emoji are drawn
+    /// from images ([`EditorView::set_emoji_images`]).
+    MissingEmoji(Vec<String>),
 }
 
 /// Copied content in the formats the clipboard takes.
@@ -422,11 +425,54 @@ impl EditorView {
             if !missing.is_empty() {
                 self.push_effect(Effect::MissingCharacters(missing));
             }
+            let emoji = self.engine.take_missing_emoji();
+            if !emoji.is_empty() {
+                self.push_effect(Effect::MissingEmoji(emoji));
+            }
         }
         self.layout
             .as_ref()
             .map(|current| current.layout.clone())
             .expect("layout was just computed")
+    }
+
+    /// Draws emoji with images from the host instead of a font, for
+    /// platforms whose fonts the editor cannot use (the web): emoji without
+    /// an image are reported through [`Effect::MissingEmoji`] and drawn
+    /// once [`EditorView::add_emoji_image`] supplies one.
+    pub fn set_emoji_images(&mut self, on: bool) {
+        self.engine.set_emoji_images(on);
+        self.layout = None;
+        self.request_redraw();
+    }
+
+    /// The image for emoji `grapheme`: `width` × `height` pixels of
+    /// unpremultiplied RGBA. Returns false for a buffer of the wrong size.
+    pub fn add_emoji_image(
+        &mut self,
+        grapheme: &str,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> bool {
+        let row = width as usize * 4;
+        if width == 0 || height == 0 || rgba.len() != row * height as usize {
+            return false;
+        }
+        let info = skia_safe::ImageInfo::new(
+            (width as i32, height as i32),
+            skia_safe::ColorType::RGBA8888,
+            skia_safe::AlphaType::Unpremul,
+            None,
+        );
+        let Some(image) =
+            skia_safe::images::raster_from_data(&info, skia_safe::Data::new_copy(rgba), row)
+        else {
+            return false;
+        };
+        self.engine.add_emoji_image(grapheme, image);
+        self.request_redraw();
+        true
     }
 
     /// Adds a font (file bytes) for characters the bundled fonts lack, such

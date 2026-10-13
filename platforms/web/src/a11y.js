@@ -167,16 +167,17 @@ export class AccessibilityMirror {
     const run = runs.get(runId);
     if (!run) return;
     const line = (run.text ?? "").replace(/\n$/, "");
+    const characters = graphemes(line);
     const key = event.key;
     if (key === "ArrowUp" || key === "ArrowDown" || key === "PageUp" || key === "PageDown") {
       this.announce(line.trim() ? line : text.blank);
     } else if (key === "Home" || key === "End" || key === "ArrowLeft" || key === "ArrowRight") {
       if (event.ctrlKey || event.altKey) {
-        const rest = line.slice(index);
+        const rest = characters.slice(index).join("");
         const word = rest.match(/^\S*/)[0] || rest.trim().split(/\s+/)[0];
         this.announce(word || text.newline);
       } else {
-        const character = line[index];
+        const character = characters[index];
         this.announce(character === undefined ? text.newline : character === " " ? text.space : character);
       }
     }
@@ -186,6 +187,17 @@ export class AccessibilityMirror {
     this.root.remove();
     this.live.remove();
   }
+}
+
+/**
+ * The characters of `text` as AccessKit counts them (graphemes), which is
+ * what text positions index.
+ */
+function graphemes(text) {
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map((s) => s.segment);
+  }
+  return Array.from(text);
 }
 
 function collectRuns(node, runs) {
@@ -206,8 +218,8 @@ function selectedText(runs, selection) {
   if (start < 0 || end < 0) return "";
   let out = "";
   for (let i = start; i <= end; i++) {
-    const text = runs.get(ids[i]).text ?? "";
-    out += text.slice(i === start ? ai : 0, i === end ? fi : text.length);
+    const characters = graphemes(runs.get(ids[i]).text ?? "");
+    out += characters.slice(i === start ? ai : 0, i === end ? fi : characters.length).join("");
   }
   return out.replace(/\n/g, " ").trim();
 }

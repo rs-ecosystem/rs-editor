@@ -2366,6 +2366,7 @@ dependencies = [
  "serde_json",
  "skia-safe",
  "thiserror 2.0.21",
+ "unicode-segmentation",
 ]
 
 [[package]]

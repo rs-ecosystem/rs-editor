@@ -15,6 +15,7 @@ rs-editor-theme.workspace = true
 skia-safe = { version = "=0.153.3", features = ["textlayout"] }
 serde_json.workspace = true
 thiserror.workspace = true
+unicode-segmentation.workspace = true
 
 [dev-dependencies]
 rs-editor-model = { workspace = true, features = ["test-util"] }

@@ -113,6 +113,10 @@ class Editor {
     if (!this._app) throw new Error("Rs Editor: the editor could not be created");
     if (!this._options.editable) M._rse_set_editable(this._app, 0);
     if (this._options.pasteMarkdown) M._rse_set_markdown_paste(this._app, 1);
+    // Emoji come from the system's emoji font through the browser, unless
+    // the app brings its own emoji font.
+    const emojiFont = this._fonts.some((font) => !font.ranges || font.ranges.some(([a, b]) => a <= 0x1f600 && 0x1f600 <= b));
+    if (!emojiFont) M._rse_set_emoji_images(this._app, 1);
 
     this._revision = M._rse_revision(this._app, 0);
     this._docRevision = M._rse_revision(this._app, 1);
@@ -399,6 +403,7 @@ class Editor {
         case "menu": this._ui.showMenu(effect.menu); break;
         case "magnifier": this._ui.showMagnifier(effect.at); break;
         case "missingCharacters": this._loadFontsFor(effect.characters); break;
+        case "missingEmoji": this._drawEmoji(effect.emoji); break;
       }
     }
   }
@@ -425,6 +430,38 @@ class Editor {
   }
 
   // --- fonts ------------------------------------------------------------------
+
+  /**
+   * Draws `emoji` (graphemes) with the system's emoji font in a 2D canvas
+   * and gives the editor the pixels, so emoji look as in other apps on the
+   * device without downloading a font.
+   */
+  _drawEmoji(emoji) {
+    const M = this._M;
+    const size = 96;
+    const canvas = this._emojiCanvas ??= Object.assign(document.createElement("canvas"), { width: size, height: size });
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.font = `${Math.round(size * 0.82)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+    for (const grapheme of emoji) {
+      context.clearRect(0, 0, size, size);
+      const metrics = context.measureText(grapheme);
+      // Center the glyph's own box, whatever the font's ascent.
+      const ascent = metrics.actualBoundingBoxAscent || size * 0.7;
+      const descent = metrics.actualBoundingBoxDescent || size * 0.1;
+      context.fillText(grapheme, size / 2, size / 2 + (ascent - descent) / 2);
+      const pixels = context.getImageData(0, 0, size, size).data;
+      const ptr = M._rse_alloc(pixels.length);
+      M.HEAPU8.set(pixels, ptr);
+      try {
+        this._withString(grapheme, (gp, gl) => M._rse_add_emoji_image(this._app, gp, gl, ptr, pixels.length, size, size));
+      } finally {
+        M._rse_free(ptr, pixels.length);
+      }
+    }
+    this._requestFrame();
+  }
 
   /** Loads the configured fonts that cover `characters` (code points). */
   _loadFontsFor(characters) {

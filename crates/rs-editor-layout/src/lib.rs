@@ -7,6 +7,7 @@
 //! fonts only cover emoji and scripts the bundle lacks.
 
 mod document;
+mod emoji;
 pub mod fonts;
 mod geometry;
 pub mod render;

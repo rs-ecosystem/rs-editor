@@ -21,10 +21,11 @@ use skia_safe::textlayout::{
     TextAlign, TextBaseline, TypefaceFontProvider,
 };
 
+use crate::emoji::{self, SharedEmoji};
 use crate::fonts::{font_collection, register_font};
 use crate::geometry::Rect;
 use crate::style::{BlockStyle, base_text_style, block_style, run_style, strut};
-use crate::text::{CaretStop, TextLayout};
+use crate::text::{CaretStop, Placeholders, Squeeze, TextLayout};
 use crate::tops::{CHUNK, Chunk, Slot, Tops};
 
 /// A laid-out textblock in document coordinates.
@@ -216,6 +217,8 @@ struct Shaper {
     /// Characters no font could show, since the last
     /// [`LayoutEngine::take_missing_characters`].
     missing: RefCell<BTreeSet<u32>>,
+    /// Emoji images from the host, when emoji are drawn that way.
+    emoji: Option<SharedEmoji>,
     theme: Theme,
 }
 
@@ -271,6 +274,7 @@ impl LayoutEngine {
                 provider,
                 fallbacks: Vec::new(),
                 missing: RefCell::new(BTreeSet::new()),
+                emoji: None,
                 theme,
             },
             texts: HashMap::new(),
@@ -316,6 +320,38 @@ impl LayoutEngine {
         self.texts.clear();
         self.reset();
         Some(family)
+    }
+
+    /// Draws emoji with images from the host (see
+    /// [`LayoutEngine::add_emoji_image`]) rather than with a font: for
+    /// platforms without emoji fonts, such as the web. Every block is laid
+    /// out again.
+    pub fn set_emoji_images(&mut self, on: bool) {
+        if on == self.shaper.emoji.is_some() {
+            return;
+        }
+        self.shaper.emoji = on.then(SharedEmoji::default);
+        self.texts.clear();
+        self.reset();
+    }
+
+    /// The image (any size, drawn into a square) for emoji `grapheme`.
+    /// Only painting changes, so no layout is needed.
+    pub fn add_emoji_image(&mut self, grapheme: &str, image: skia_safe::Image) {
+        if let Some(emoji) = &self.shaper.emoji {
+            let mut emoji = emoji.borrow_mut();
+            emoji.missing.remove(grapheme);
+            emoji.images.insert(grapheme.to_owned(), image);
+        }
+    }
+
+    /// Emoji laid out since the last call that have no image yet.
+    pub fn take_missing_emoji(&mut self) -> Vec<String> {
+        self.shaper.emoji.as_ref().map_or_else(Vec::new, |emoji| {
+            std::mem::take(&mut emoji.borrow_mut().missing)
+                .into_iter()
+                .collect()
+        })
     }
 
     /// Characters laid out since the last call that no font could show
@@ -628,19 +664,59 @@ impl Shaper {
         paragraph_style.turn_hinting_off();
         let mut builder = ParagraphBuilder::new(&paragraph_style, self.fonts.clone());
         let mut text = String::new();
+        // Content and paragraph lengths differ by the emoji drawn as images.
+        let (mut doc_units, mut para_units) = (0usize, 0usize);
+        let mut squeezes: Vec<Squeeze> = Vec::new();
+        let mut placeholders: Placeholders = Vec::new();
         for child in node.children() {
             let style = run_style(theme, &block, child.marks(), extra);
             if let Some(run) = child.text() {
-                builder.push_style(&style);
-                builder.add_text(run);
-                builder.pop();
+                let pieces = match &self.emoji {
+                    Some(_) => emoji::segments(run),
+                    None => vec![(run, false)],
+                };
+                for (piece, is_emoji) in pieces {
+                    let units = piece.encode_utf16().count();
+                    builder.push_style(&style);
+                    if is_emoji && let Some(emoji) = &self.emoji {
+                        let size = style.font_size() * 1.2;
+                        builder.add_placeholder(&PlaceholderStyle::new(
+                            size,
+                            size,
+                            PlaceholderAlignment::Baseline,
+                            TextBaseline::Alphabetic,
+                            size * 0.8,
+                        ));
+                        squeezes.push(Squeeze {
+                            doc: doc_units,
+                            len: units,
+                            para: para_units,
+                        });
+                        placeholders.push(Some(piece.to_owned()));
+                        let mut emoji = emoji.borrow_mut();
+                        if !emoji.images.contains_key(piece) {
+                            emoji.missing.insert(piece.to_owned());
+                        }
+                        para_units += 1;
+                    } else {
+                        builder.add_text(piece);
+                        para_units += units;
+                    }
+                    builder.pop();
+                    doc_units += units;
+                }
                 text.push_str(run);
             } else if child.node_type().spec().leaf_text.as_deref() == Some("\n") {
                 builder.push_style(&style);
                 builder.add_text("\n");
                 builder.pop();
                 text.push('\n');
+                doc_units += 1;
+                para_units += 1;
             } else {
+                placeholders.push(None);
+                doc_units += 1;
+                para_units += 1;
                 // Inline atoms (images, mentions) take one position each.
                 let size = block.size * 1.25;
                 builder.push_style(&style);
@@ -668,13 +744,16 @@ impl Shaper {
                 }
             }
         }
-        TextLayout::new(
+        TextLayout::with_emoji(
             paragraph,
             text,
             width,
             block.align,
             block.line_height,
             block.size * 1.3,
+            squeezes,
+            placeholders,
+            self.emoji.clone(),
         )
     }
 

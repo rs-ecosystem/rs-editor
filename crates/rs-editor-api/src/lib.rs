@@ -229,6 +229,23 @@ impl EditorApi {
         self.view.add_font(bytes, family).unwrap_or_default()
     }
 
+    /// Draws emoji from images the host supplies (`missingEmoji` effect,
+    /// [`EditorApi::add_emoji_image`]) instead of a font.
+    pub fn set_emoji_images(&mut self, on: bool) {
+        self.view.set_emoji_images(on);
+    }
+
+    /// The image for emoji `grapheme`: unpremultiplied RGBA pixels.
+    pub fn add_emoji_image(
+        &mut self,
+        grapheme: &str,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> bool {
+        self.view.add_emoji_image(grapheme, rgba, width, height)
+    }
+
     /// Whether pasted plain text is read as Markdown (off by default).
     pub fn set_markdown_paste(&mut self, markdown: bool) {
         self.view.set_markdown_paste(markdown);
@@ -429,6 +446,7 @@ impl EditorApi {
                 Effect::MissingCharacters(characters) => {
                     json!({"type": "missingCharacters", "characters": characters})
                 }
+                Effect::MissingEmoji(emoji) => json!({"type": "missingEmoji", "emoji": emoji}),
                 Effect::Clipboard(content) => {
                     json!({"type": "clipboard", "text": content.text, "html": content.html})
                 }

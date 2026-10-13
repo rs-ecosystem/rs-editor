@@ -510,7 +510,8 @@ impl Shell {
                 | Effect::SelectionMenu(_)
                 | Effect::Magnifier(_)
                 | Effect::ShowKeyboard
-                | Effect::MissingCharacters(_) => {}
+                | Effect::MissingCharacters(_)
+                | Effect::MissingEmoji(_) => {}
             }
         }
     }

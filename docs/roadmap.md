@@ -127,6 +127,8 @@ Sudah:
   - Klik pada checkbox dari screen reader diteruskan sebagai aksi AccessKit `Click`.
 - **Umpan balik suara untuk navigasi keyboard** lewat `aria-live`: karakter (kiri/kanan), kata (Ctrl/Alt), baris (atas/bawah, Page), atau teks yang dipilih (Shift).
 - **Diuji di Chrome lewat pohon aksesibilitasnya:** judul, list, checkbox, dan semua baris teks terekspos; klik checkbox dari cermin mengubah dokumen; pengumuman cocok dengan tiap tombol.
+- **Emoji tanpa unduhan di web:** layout menjadikan setiap kluster emoji (ZWJ, bendera, keycap, warna kulit, `FE0F`) satu placeholder kotak berukuran sekitar 1,2 em, sedangkan `TextLayout` memetakan offset dokumen ↔ paragraf sehingga caret, seleksi, dan hit-test tetap per grapheme. Browser menggambar emoji dengan font sistem di canvas 2D (effect `missingEmoji` → `add_emoji_image`), lalu Skia menempelkan gambarnya. Kalau aplikasi memberi font emoji lewat `fonts`, emoji kembali dirender sebagai teks. Di Chrome, warna kulit, bendera, keycap, keluarga ZWJ, dan ❤️ tampil benar; panah melompati satu emoji utuh; dan pengumuman screen reader menyebut emojinya (indeks dihitung per grapheme).
+- **Fokus di jalur textarea:** sebelumnya klik mengembalikan fokus ke canvas sehingga caret hilang di Safari; sekarang sudah diperbaiki.
 - **Jalur textarea** (Safari, Firefox) diuji di Chrome dengan `?input=textarea`: ketik, Backspace, Enter, dan undo berfungsi. Textarea kini menjadi kotak teks berlabel, sedangkan canvas disembunyikan dari pohon aksesibilitas.
 
 Belum:

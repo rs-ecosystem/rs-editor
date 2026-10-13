@@ -36,14 +36,16 @@ editor.destroy();
 
 Semua perintah dari extension Rust bisa dipakai sebagai metode chain, dengan argumen yang sama seperti di Tiptap. Tipe TypeScript-nya ada di `src/index.d.ts`.
 
-## Font
+## Emoji dan font
 
-Font bawaan mencakup aksara Latin, Arab, dan Devanagari. Untuk emoji dan CJK, aplikasi memberi daftar `fonts`. Sebuah font hanya dimuat ketika teks berisi karakter dalam rentang Unicode-nya:
+Emoji tampil tanpa mengunduh apa pun. Browser menggambar setiap emoji dengan font emoji sistem (Apple di Safari, Segoe di Windows, Noto di Android) ke canvas 2D, lalu editor menempelkannya sebagai gambar di tempat emoji itu, dengan ukuran sekitar 1,2 em. Tampilannya sama dengan emoji di aplikasi lain pada perangkat yang sama, sehingga bisa berbeda antar platform. Caret, seleksi, dan hapus tetap memperlakukan satu emoji (termasuk ZWJ, bendera, dan warna kulit) sebagai satu karakter.
+
+Font bawaan mencakup aksara Latin, Arab, dan Devanagari. Untuk CJK, dan untuk emoji yang identik di semua platform, aplikasi bisa memberi daftar `fonts`. Sebuah font hanya dimuat ketika teks berisi karakter dalam rentang Unicode-nya. Kalau daftar ini memuat font emoji, emoji digambar dengan font itu:
 
 ```js
 import { createEditor, notoFonts } from "@rs-editor/web";
 
-await createEditor({ element, fonts: [notoFonts.emoji, notoFonts.japanese, notoFonts.korean] });
+await createEditor({ element, fonts: [notoFonts.japanese, notoFonts.korean] });
 // atau muat sendiri:
 editor.addFont(await (await fetch("/fonts/MyFont.ttf")).arrayBuffer(), "My Font");
 ```

@@ -1,5 +1,7 @@
 //! One laid-out textblock: SkParagraph plus geometry queries in UTF-16
-//! offsets that equal the block's content positions.
+//! offsets that equal the block's content positions. Emoji drawn by the
+//! host are one placeholder each in the paragraph, so paragraph offsets
+//! are mapped to and from content offsets around them.
 
 use std::fmt;
 use std::ops::Range;
@@ -8,9 +10,24 @@ use rs_editor_text::{Affinity, TextIndexMap};
 use skia_safe::textlayout::{
     Affinity as SkAffinity, Paragraph, RectHeightStyle, RectWidthStyle, TextAlign, TextDirection,
 };
-use skia_safe::{Canvas, Point};
+use skia_safe::{Canvas, Point, SamplingOptions};
 
+use crate::emoji::SharedEmoji;
 use crate::geometry::Rect;
+
+/// A grapheme of the text (an emoji) shown as one placeholder in the
+/// paragraph: `len` UTF-16 units at content offset `doc` are paragraph
+/// offset `para`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Squeeze {
+    pub doc: usize,
+    pub len: usize,
+    pub para: usize,
+}
+
+/// What each placeholder of the paragraph stands for, in order: an inline
+/// node (`None`) or an emoji drawn from an image.
+pub(crate) type Placeholders = Vec<Option<String>>;
 
 /// A caret position: a vertical bar at `x` from `y` to `y + height`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -54,6 +71,9 @@ pub struct TextLayout {
     align: TextAlign,
     /// Caret extent for an empty block: (top, height).
     empty_caret: (f32, f32),
+    squeezes: Vec<Squeeze>,
+    placeholders: Placeholders,
+    emoji: Option<SharedEmoji>,
 }
 
 impl fmt::Debug for TextLayout {
@@ -77,19 +97,47 @@ impl TextLayout {
         line_height: f32,
         caret_height: f32,
     ) -> Self {
+        Self::with_emoji(
+            paragraph,
+            text,
+            width,
+            align,
+            line_height,
+            caret_height,
+            Vec::new(),
+            Vec::new(),
+            None,
+        )
+    }
+
+    /// Like [`TextLayout::new`], for a paragraph where the graphemes in
+    /// `squeezes` are placeholders painted with images from `emoji`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn with_emoji(
+        paragraph: Paragraph,
+        text: String,
+        width: f32,
+        align: TextAlign,
+        line_height: f32,
+        caret_height: f32,
+        squeezes: Vec<Squeeze>,
+        placeholders: Placeholders,
+        emoji: Option<SharedEmoji>,
+    ) -> Self {
+        let to_doc = |para: usize| doc_offset(&squeezes, para);
         let mut lines: Vec<Line> = paragraph
             .get_line_metrics()
             .iter()
             .map(|m| {
                 let top = (m.baseline - m.ascent) as f32;
                 Line {
-                    start: m.start_index,
-                    end: if m.hard_break {
+                    start: to_doc(m.start_index),
+                    end: to_doc(if m.hard_break {
                         m.end_index.min(m.end_including_newline)
                     } else {
                         m.end_index
-                    },
-                    end_with_break: m.end_including_newline,
+                    }),
+                    end_with_break: to_doc(m.end_including_newline),
                     top,
                     height: m.height as f32,
                     baseline: m.baseline as f32,
@@ -138,7 +186,30 @@ impl TextLayout {
             width,
             align,
             empty_caret: (empty_top.max(0.0), caret_height),
+            squeezes,
+            placeholders,
+            emoji,
         }
+    }
+
+    /// The paragraph offset of content offset `doc` (inside a squeezed
+    /// grapheme: its end).
+    fn to_para(&self, doc: usize) -> usize {
+        let mut shift = 0;
+        for s in &self.squeezes {
+            if doc <= s.doc {
+                break;
+            }
+            if doc < s.doc + s.len {
+                return s.para + 1;
+            }
+            shift += s.len - 1;
+        }
+        doc - shift
+    }
+
+    fn para_range(&self, range: Range<usize>) -> Range<usize> {
+        self.to_para(range.start)..self.to_para(range.end)
     }
 
     pub fn text(&self) -> &str {
@@ -175,6 +246,24 @@ impl TextLayout {
 
     pub fn paint(&self, canvas: &Canvas, x: f32, y: f32) {
         self.paragraph.paint(canvas, Point::new(x, y));
+        let Some(emoji) = &self.emoji else {
+            return;
+        };
+        let emoji = emoji.borrow();
+        let rects = self.paragraph.get_rects_for_placeholders();
+        for (placeholder, rect) in self.placeholders.iter().zip(rects.iter()) {
+            let Some(image) = placeholder.as_ref().and_then(|g| emoji.images.get(g)) else {
+                continue;
+            };
+            let rect = rect.rect.with_offset((x, y));
+            canvas.draw_image_rect_with_sampling_options(
+                image,
+                None,
+                rect,
+                SamplingOptions::from(skia_safe::CubicResampler::mitchell()),
+                &skia_safe::Paint::default(),
+            );
+        }
     }
 
     /// The line that shows `offset` with `affinity` (an upstream offset at
@@ -196,7 +285,11 @@ impl TextLayout {
 
     fn edge_rect(&self, range: Range<usize>) -> Option<(skia_safe::Rect, TextDirection)> {
         self.paragraph
-            .get_rects_for_range(range, RectHeightStyle::Tight, RectWidthStyle::Tight)
+            .get_rects_for_range(
+                self.para_range(range),
+                RectHeightStyle::Tight,
+                RectWidthStyle::Tight,
+            )
             .into_iter()
             .map(|b| (b.rect, b.direct))
             .next()
@@ -310,7 +403,8 @@ impl TextLayout {
             SkAffinity::Upstream => Affinity::Upstream,
             SkAffinity::Downstream => Affinity::Downstream,
         };
-        let offset = usize::try_from(hit.position).unwrap_or(0).min(self.len());
+        let offset =
+            doc_offset(&self.squeezes, usize::try_from(hit.position).unwrap_or(0)).min(self.len());
         (self.index.snap(offset, affinity), affinity)
     }
 
@@ -362,7 +456,11 @@ impl TextLayout {
             return Vec::new();
         }
         self.paragraph
-            .get_rects_for_range(range, RectHeightStyle::Max, RectWidthStyle::Tight)
+            .get_rects_for_range(
+                self.para_range(range),
+                RectHeightStyle::Max,
+                RectWidthStyle::Tight,
+            )
             .into_iter()
             .map(|b| Rect::new(b.rect.left, b.rect.top, b.rect.width(), b.rect.height()))
             .filter(|r| r.width > 0.0)
@@ -422,4 +520,16 @@ impl TextLayout {
     pub fn word_at(&self, offset: usize) -> Range<usize> {
         rs_editor_text::word_at(&self.text, offset)
     }
+}
+
+/// The content offset of paragraph offset `para`.
+fn doc_offset(squeezes: &[Squeeze], para: usize) -> usize {
+    let mut shift = 0;
+    for s in squeezes {
+        if para <= s.para {
+            break;
+        }
+        shift += s.len - 1;
+    }
+    para + shift
 }

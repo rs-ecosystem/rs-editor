@@ -505,3 +505,68 @@ fn characters_without_a_font_are_reported_until_one_is_added() {
     engine.layout(&doc, 480.0);
     assert!(engine.take_missing_characters().contains(&u32::from('日')));
 }
+
+#[test]
+fn emoji_drawn_from_images_keep_content_offsets() {
+    let mut engine = engine();
+    engine.set_emoji_images(true);
+    // "a" + 👩‍💻 (5 UTF-16 units) + "b " + 🎉 (2 units)
+    let doc = tiptap(serde_json::json!({"type": "doc", "content": [para("a👩‍💻b 🎉")]}));
+    let layout = engine.layout(&doc, 480.0);
+    let mut missing = engine.take_missing_emoji();
+    missing.sort();
+    assert_eq!(missing, vec!["🎉".to_string(), "👩‍💻".to_string()]);
+    assert!(
+        engine.take_missing_characters().is_empty(),
+        "emoji are not missing glyphs"
+    );
+    let text = layout.text_at(1).unwrap();
+    let tl = &text.layout;
+    assert_eq!(tl.len(), 10);
+    let size = Theme::light().typography.paragraph.size;
+    let before = tl.caret(1, Affinity::Downstream).x;
+    let after = tl.caret(6, Affinity::Downstream).x;
+    assert!(
+        (after - before - size * 1.2).abs() < 1.0,
+        "{before} {after}"
+    );
+    // Inside the emoji snaps to its edges; its right half hits its end.
+    assert_eq!(tl.offset_at(after - 2.0, 5.0).0, 6);
+    assert_eq!(tl.offset_at(before + 2.0, 5.0).0, 1);
+    let rects = tl.selection_rects(1..6);
+    assert_eq!(rects.len(), 1);
+    assert!((rects[0].width - size * 1.2).abs() < 1.0);
+    assert_eq!(tl.lines().last().unwrap().end, 10);
+    assert!(tl.caret(10, Affinity::Upstream).x > after);
+
+    // The host's image is painted where the emoji is.
+    let red = skia_safe::surfaces::raster_n32_premul((8, 8)).map(|mut s| {
+        s.canvas().clear(skia_safe::Color::RED);
+        s.image_snapshot()
+    });
+    engine.add_emoji_image("👩‍💻", red.unwrap());
+    let mut surface = skia_safe::surfaces::raster_n32_premul((200, 60)).unwrap();
+    surface.canvas().clear(skia_safe::Color::WHITE);
+    tl.paint(surface.canvas(), 0.0, 0.0);
+    let caret = tl.caret(1, Affinity::Downstream);
+    let mut pixel = [0u8; 4];
+    let info = skia_safe::ImageInfo::new(
+        (1, 1),
+        skia_safe::ColorType::RGBA8888,
+        skia_safe::AlphaType::Premul,
+        None,
+    );
+    assert!(surface.read_pixels(
+        &info,
+        &mut pixel,
+        4,
+        (
+            (before + size * 0.6) as i32,
+            (caret.y + caret.height / 2.0) as i32
+        )
+    ));
+    assert!(
+        pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60,
+        "{pixel:?}"
+    );
+}

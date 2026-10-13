@@ -538,6 +538,40 @@ pub unsafe extern "C" fn rse_add_font(
     app.set_result(&added)
 }
 
+/// Draws emoji from images (see `rse_add_emoji_image`) instead of a font.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_emoji_images(app_ptr: *mut App, on: u32) {
+    unsafe { app(app_ptr) }.api.set_emoji_images(on != 0);
+}
+
+/// The image for an emoji reported by the `missingEmoji` effect:
+/// `width` × `height` unpremultiplied RGBA pixels. Returns 1 when taken.
+///
+/// # Safety
+/// `app` must be live; the buffers must be readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_add_emoji_image(
+    app_ptr: *mut App,
+    grapheme: *const u8,
+    grapheme_len: usize,
+    rgba: *const u8,
+    rgba_len: usize,
+    width: u32,
+    height: u32,
+) -> u32 {
+    let app = unsafe { app(app_ptr) };
+    let grapheme = unsafe { read(grapheme, grapheme_len) };
+    let rgba = if rgba.is_null() {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(rgba, rgba_len) }
+    };
+    u32::from(app.api.add_emoji_image(&grapheme, rgba, width, height))
+}
+
 /// Whether pasted plain text is read as Markdown.
 ///
 /// # Safety
