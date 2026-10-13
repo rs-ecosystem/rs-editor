@@ -8,7 +8,7 @@ use rs_editor_state::{NodeSelection, Selection, TextSelection, meta};
 use serde_json::Value;
 
 use crate::link::FieldInput;
-use crate::{ClipboardContent, Composition, EditorView, Effect, ViewQuery};
+use crate::{ClipboardContent, Composition, EditorView, ViewQuery};
 
 /// How far a deletion or caret movement reaches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -459,11 +459,12 @@ impl EditorView {
     // ---- clipboard --------------------------------------------------------
 
     /// The selection as plain text, HTML (for other apps) and a JSON slice.
+    /// The caller puts it on the clipboard (a browser's `copy` event,
+    /// Android's clipboard); no [`crate::Effect::Clipboard`] follows, since a
+    /// second, asynchronous write could race the first and leave the
+    /// clipboard empty.
     pub fn copy(&mut self) -> Option<ClipboardContent> {
         if let Some(copied) = self.field_copy(false) {
-            if let Some(content) = &copied {
-                self.push_effect(Effect::Clipboard(content.clone()));
-            }
             return copied;
         }
         let selection = self.editor.selection().clone();
@@ -484,15 +485,12 @@ impl EditorView {
             html: rs_editor_markup::serialize_slice(&slice),
             json,
         };
-        self.push_effect(Effect::Clipboard(content.clone()));
         Some(content)
     }
 
+    /// Like [`EditorView::copy`], then deletes the selection.
     pub fn cut(&mut self) -> Option<ClipboardContent> {
         if let Some(copied) = self.field_copy(true) {
-            if let Some(content) = &copied {
-                self.push_effect(Effect::Clipboard(content.clone()));
-            }
             return copied;
         }
         let copied = self.copy()?;

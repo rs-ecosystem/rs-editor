@@ -386,6 +386,32 @@ fn paste_text_splits_lines_and_json_round_trips() {
     assert!(text_of(&view).ends_with("3ba1\n"), "{}", text_of(&view));
 }
 
+/// Copies the host asks for come back to it alone: a second clipboard
+/// write through an effect raced the browser's `copy` event and left the
+/// clipboard empty.
+#[test]
+fn copy_and_cut_return_their_content_without_a_clipboard_effect() {
+    let clipboard_effects = |view: &mut EditorView| {
+        view.take_effects()
+            .iter()
+            .filter(|e| matches!(e, Effect::Clipboard(_)))
+            .count()
+    };
+    let (mut view, _) = view_with(doc(vec![p("halo dunia")]), KeyPlatform::Other);
+    view.select_text(1, 5, Affinity::Downstream);
+    view.take_effects();
+    assert_eq!(view.copy().unwrap().text, "halo");
+    assert_eq!(clipboard_effects(&mut view), 0);
+    assert_eq!(view.cut().unwrap().text, "halo");
+    assert_eq!(clipboard_effects(&mut view), 0);
+    assert_eq!(text_of(&view), " dunia");
+
+    view.select_text(2, 7, Affinity::Downstream);
+    let copied = view.menu_action(MenuItem::Copy, None, None).unwrap();
+    assert_eq!(copied.text, "dunia");
+    assert_eq!(clipboard_effects(&mut view), 0);
+}
+
 #[test]
 fn typing_at_the_bottom_scrolls_the_caret_into_view() {
     let blocks: Vec<Value> = (0..40).map(|i| p(&format!("baris {i}"))).collect();

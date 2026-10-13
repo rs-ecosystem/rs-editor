@@ -86,7 +86,10 @@ pub enum Effect {
     /// The user activated a link.
     OpenUrl(String),
     Cursor(CursorIcon),
-    /// Put this content on the clipboard.
+    /// Put this content on the clipboard: copies the editor makes itself
+    /// (the link popover's copy button). Copies the host asks for
+    /// ([`EditorView::copy`], [`EditorView::menu_action`]) come back as
+    /// return values instead.
     Clipboard(ClipboardContent),
     /// Play haptic feedback.
     Haptic(HapticKind),

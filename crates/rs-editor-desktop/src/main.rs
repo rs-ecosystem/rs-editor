@@ -440,13 +440,15 @@ impl Shell {
 
     fn clipboard_key(&mut self, key: &str) -> bool {
         match key {
-            // The view puts its copy on the clipboard through an effect.
-            "c" => {
-                self.view.copy();
-                true
-            }
-            "x" => {
-                self.view.cut();
+            "c" | "x" => {
+                let copied = if key == "c" {
+                    self.view.copy()
+                } else {
+                    self.view.cut()
+                };
+                if let (Some(content), Some(clipboard)) = (copied, self.clipboard.as_mut()) {
+                    let _ = clipboard.set_html(content.html, Some(content.text));
+                }
                 true
             }
             "v" => {
