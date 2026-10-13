@@ -41,11 +41,15 @@ export interface EditorOptions {
   /** Read pasted plain text as Markdown (off by default). */
   pasteMarkdown?: boolean;
   /**
-   * A formatting menu (bold, italic, underline, strike, code, highlight) over
+   * A formatting menu (bold, italic, underline, strike, code, highlight, link) over
    * text selected with a mouse or trackpad, drawn in the canvas (on by
    * default; touch selections get the selection menu instead).
    */
   bubbleMenu?: boolean;
+  /** Shows a menu of blocks (headings, lists, quote, code…) when `/` is typed. Default true. */
+  slashMenu?: boolean;
+  /** Language of the editor's own menus, as a BCP 47 tag. Default `navigator.language`; English when there is no translation. */
+  locale?: string;
   /**
    * Fonts loaded on demand when the text has characters the bundled fonts
    * (Latin, Arabic, Devanagari) lack, such as emoji or CJK. See `notoFonts`.
@@ -150,6 +154,10 @@ export interface Editor {
    */
   setContent(content: JSONContent | string, options?: { contentType?: "html" | "markdown" }): boolean;
   setPasteMarkdown(markdown: boolean): void;
+  /** Opens the link address field over the link at the caret or the selected text, as Mod-K does. False when there is nothing to link. */
+  editLink(): boolean;
+  /** Language of the editor's own menus, such as "id-ID". */
+  setLocale(locale: string): void;
   /** Adds a font (TTF/OTF/WOFF bytes); returns its family, or "" when the bytes are not a font. */
   addFont(bytes: ArrayBuffer | Uint8Array, family?: string): string;
 

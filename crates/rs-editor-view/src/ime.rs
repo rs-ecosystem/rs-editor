@@ -11,6 +11,7 @@
 use rs_editor_layout::{Affinity, Rect};
 use rs_editor_state::Selection;
 
+use crate::link::FieldInput;
 use crate::{Composition, EditorView};
 
 /// The IME's view of the text around the selection.
@@ -23,6 +24,10 @@ pub struct ImeContext {
     /// Selection anchor and head, relative to `start`, clamped to the block.
     pub selection: (usize, usize),
     pub composition: Option<(usize, usize)>,
+    /// The text is an editor field's (a link's address), not the
+    /// document's; `start` is then 0. Adapters restart input when this
+    /// changes, as when `start` does.
+    pub field: bool,
 }
 
 impl ImeContext {
@@ -79,6 +84,9 @@ impl EditorView {
     /// The textblock around the selection head, or `None` when the head is
     /// not in a textblock (a selected image or rule).
     pub fn ime_context(&self) -> Option<ImeContext> {
+        if self.link_editing() {
+            return self.field_ime_context();
+        }
         let selection = self.editor.selection();
         let head = selection.head_pos();
         let block = head.parent();
@@ -97,11 +105,15 @@ impl EditorView {
             text: rs_editor_text::textblock_text(block),
             selection: (relative(selection.anchor()), relative(selection.head())),
             composition,
+            field: false,
         })
     }
 
     /// Sets the selection inside the IME's block (`setSelection`).
     pub fn ime_set_selection(&mut self, anchor: usize, head: usize) -> bool {
+        if let Some(handled) = self.field_input(FieldInput::SetSelection(anchor, head)) {
+            return handled;
+        }
         let Some(context) = self.ime_context() else {
             return false;
         };
@@ -116,6 +128,9 @@ impl EditorView {
     /// Marks existing text as the composition (`setComposingRegion`), as
     /// keyboards do when the caret returns to a word to offer suggestions.
     pub fn ime_set_composing_region(&mut self, from: usize, to: usize) -> bool {
+        if let Some(handled) = self.field_input(FieldInput::ComposingRegion(from, to)) {
+            return handled;
+        }
         let Some(context) = self.ime_context() else {
             return false;
         };
@@ -148,6 +163,9 @@ impl EditorView {
     /// Ends the composition keeping its text, when the IME already wrote
     /// the final text (EditContext `compositionend`).
     pub fn ime_finish_composition(&mut self) {
+        if self.field_input(FieldInput::FinishComposition).is_some() {
+            return;
+        }
         self.finish_composition();
         self.request_redraw();
     }
@@ -156,6 +174,9 @@ impl EditorView {
     /// after it, within the block (`deleteSurroundingText`).
     pub fn ime_delete_surrounding(&mut self, before: usize, after: usize) -> bool {
         self.end_touch_mode();
+        if let Some(handled) = self.field_input(FieldInput::DeleteSurrounding(before, after)) {
+            return handled;
+        }
         let Some(context) = self.ime_context() else {
             return false;
         };
@@ -180,6 +201,9 @@ impl EditorView {
     /// `textupdate` during a composition); otherwise the text is typed,
     /// running input rules.
     pub fn ime_replace(&mut self, from: usize, to: usize, text: &str, composing: bool) -> bool {
+        if let Some(handled) = self.field_input(FieldInput::Replace(from, to, text, composing)) {
+            return handled;
+        }
         let Some(context) = self.ime_context() else {
             return false;
         };
@@ -235,8 +259,21 @@ impl EditorView {
         self.dispatch(tr)
     }
 
+    /// Where text input goes, for placing the IME's popups and the hidden
+    /// input element: the address field's caret while it is open, else
+    /// the document caret (view coordinates).
+    pub fn input_caret_rect(&mut self) -> Option<Rect> {
+        if self.link_editing() {
+            return self.field_caret_rect();
+        }
+        self.caret_rect()
+    }
+
     /// The caret's line metrics, in view coordinates.
     pub fn ime_caret(&mut self) -> Option<ImeCaret> {
+        if self.link_editing() {
+            return self.field_ime_caret();
+        }
         let head = self.editor.selection().head();
         let affinity = self.affinity;
         let layout = self.layout();
@@ -262,6 +299,9 @@ impl EditorView {
     /// coordinates); both halves of a surrogate pair, and every unit of a
     /// grapheme, get the grapheme's box. `None` for units not laid out.
     pub fn ime_character_bounds(&mut self, from: usize, to: usize) -> Vec<Option<Rect>> {
+        if let Some(bounds) = self.field_character_bounds(from, to) {
+            return bounds;
+        }
         let Some(context) = self.ime_context() else {
             return Vec::new();
         };

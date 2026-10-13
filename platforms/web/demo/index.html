@@ -46,12 +46,13 @@
 
     const content = { type: "doc", content: [
       h(1, "Rs Editor di web"),
-      p(t("Editor ini digambar oleh "), t("Skia", ["bold"]), t(" di WebGL2 dari WebAssembly — kode yang sama dengan desktop dan Android. Coba "),
+      p(t("Editor ini digambar oleh "), { type: "text", text: "Skia", marks: [{ type: "bold" }, { type: "link", attrs: { href: "https://skia.org" } }] }, t(" di WebGL2 dari WebAssembly — kode yang sama dengan desktop dan Android. Coba "),
         t("tebal", ["bold"]), t(", "), t("miring", ["italic"]), t(", "), t("kode", ["code"]), t(" dan "), t("sorotan", ["highlight"]), t(".")),
       h(2, "Coba"),
       { type: "bulletList", content: [
         item(t("Ketik "), t("# ", ["code"]), t(", "), t("- ", ["code"]), t(" atau "), t("[ ] ", ["code"]), t(" di awal baris.")),
         item(t("Klik ganda memilih kata; Cmd/Ctrl-Z untuk undo.")),
+        item(t("Ketik "), t("/", ["code"]), t(" untuk menu blok; Cmd/Ctrl-K untuk tautan.")),
         item(t("Di HP: ketuk, tekan lama, tarik handle, geser untuk scroll.")),
       ]},
       { type: "taskList", content: [task(true, "Skia di WebAssembly"), task(false, "EditContext dan fallback textarea")] },
@@ -78,6 +79,7 @@
       ["☑", ["toggleTaskList"], ["taskList"]],
       ["❝", ["toggleBlockquote"], ["blockquote"]],
       ["{ }", ["toggleCodeBlock"], ["codeBlock"]],
+      ["🔗", ["editLink"], ["link"]],
       ["↶", ["undo"]],
       ["↷", ["redo"]],
     ];
@@ -108,14 +110,14 @@
         if (style) button.style.cssText = style;
         // Keep the editor focused (and the keyboard up) while formatting.
         button.addEventListener("pointerdown", (e) => e.preventDefault());
-        button.addEventListener("click", () => editor.chain()[command](args).run());
+        button.addEventListener("click", () => command === "editLink" ? editor.editLink() : editor.chain()[command](args).run());
         toolbar.append(button);
         return { button, command, args, active };
       });
       const refresh = () => {
         for (const { button, command, args, active } of buttons) {
           if (active) button.setAttribute("aria-pressed", String(editor.isActive(...active)));
-          button.disabled = !editor.can()[command](args).run();
+          button.disabled = command === "editLink" ? !editor.isEditable : !editor.can()[command](args).run();
         }
       };
       editor.on("transaction", refresh);

@@ -114,6 +114,7 @@ private fun Toolbar(editor: RsEditorState) {
         Tool(editor, "☑", "taskList") { toggleTaskList() }
         Tool(editor, "❝", "blockquote") { toggleBlockquote() }
         Tool(editor, "{ }", "codeBlock") { toggleCodeBlock() }
+        Tool(editor, "🔗", "link", onClick = { editor.editLink() }) { this }
         Tool(editor, "↶") { undo() }
         Tool(editor, "↷") { redo() }
     }
@@ -132,12 +133,14 @@ private fun Tool(
     weight: FontWeight? = null,
     style: FontStyle? = null,
     decoration: TextDecoration? = null,
+    /** Replaces running `command` (which then only decides whether the button is enabled). */
+    onClick: (() -> Unit)? = null,
     command: RsEditorChain.() -> RsEditorChain,
 ) {
     val active = name != null && editor.isActive(name, attrs)
     val enabled = editor.revision.let { editor.can().command().run() }
     TextButton(
-        onClick = { editor.chain().command().run() },
+        onClick = { onClick?.invoke() ?: editor.chain().command().run() },
         enabled = enabled,
         modifier = Modifier.size(width = 44.dp, height = 40.dp),
         contentPadding = PaddingValues(0.dp),

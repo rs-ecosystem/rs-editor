@@ -2430,6 +2430,8 @@ dependencies = [
 name = "rs-editor-ui"
 version = "0.1.0"
 dependencies = [
+ "rs-editor-layout",
+ "rs-editor-text",
  "rs-editor-theme",
  "skia-safe",
 ]

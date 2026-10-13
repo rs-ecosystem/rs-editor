@@ -25,6 +25,8 @@ const ALL: &[Icon] = &[
     Icon::GripVertical,
     Icon::Image,
     Icon::Check,
+    Icon::Copy,
+    Icon::Pencil,
 ];
 
 #[test]
@@ -125,4 +127,89 @@ fn toolbar_buttons_are_hit_where_they_are_drawn() {
             .unwrap();
         std::fs::write(path, data.as_bytes()).unwrap();
     }
+}
+
+#[test]
+fn text_field_edits_like_a_platform_field() {
+    let mut field = TextField::new("rs-editor.dev");
+    assert_eq!(field.selection(), (0, 13), "starts all selected");
+    field.insert("https://x.y");
+    assert_eq!(field.text(), "https://x.y");
+    assert_eq!(field.selection(), (11, 11));
+
+    field.delete(false, false);
+    assert_eq!(field.text(), "https://x.");
+    field.move_caret(false, true, false);
+    assert_eq!(field.selection().1, 8, "word left stops at the host");
+    field.move_to_edge(true, true);
+    assert_eq!(field.selected_text(), "x.");
+    field.insert("a\nb");
+    assert_eq!(field.text(), "https://a b", "one line");
+
+    // An emoji is one step, in UTF-16 units.
+    let mut field = TextField::new("");
+    field.insert("a👍b");
+    field.move_caret(false, false, false);
+    field.delete(false, false);
+    assert_eq!(field.text(), "ab");
+    assert_eq!(field.selection(), (1, 1));
+}
+
+#[test]
+fn text_field_takes_ime_composition() {
+    let mut field = TextField::new("");
+    field.set_composing("に");
+    field.set_composing("にほ");
+    assert_eq!(field.composition(), Some((0, 2)));
+    field.insert("日本");
+    assert_eq!(field.text(), "日本");
+    assert_eq!(field.composition(), None);
+
+    // EditContext replaces ranges while composing.
+    field.replace(2, 2, "ご", true);
+    assert_eq!(field.composition(), Some((2, 3)));
+    field.replace(2, 3, "語", false);
+    assert_eq!(field.text(), "日本語");
+    assert_eq!(field.composition(), None);
+
+    field.set_selection(3, 3);
+    field.delete_surrounding(1, 0);
+    assert_eq!(field.text(), "日本");
+    field.set_composing_region(0, 2);
+    assert_eq!(field.composition(), Some((0, 2)));
+    field.finish_composition();
+    assert_eq!(field.composition(), None);
+}
+
+#[test]
+fn menu_rows_scroll_and_are_hit_where_drawn() {
+    let engine = rs_editor_layout::LayoutEngine::new(Theme::light(), false);
+    let style = rs_editor_layout::UiText::small(Theme::light().palette.foreground);
+    let mut menu = Menu {
+        items: (0..12)
+            .map(|i| MenuItem {
+                icon: Icon::Text,
+                label: engine.ui_label(&format!("Item {i}"), &style, None),
+                hint: None,
+            })
+            .collect(),
+        origin: (10.0, 20.0),
+        max_height: 5.0 * ITEM_HEIGHT + 8.0,
+        ..Menu::default()
+    };
+    assert_eq!(menu.size().1, 5.0 * ITEM_HEIGHT + 8.0);
+    let row = menu.item_rect(2);
+    assert_eq!(menu.item_at(row.center_x(), row.center_y()), Some(2));
+    assert_eq!(menu.item_at(0.0, 0.0), None);
+
+    menu.select_by(-1);
+    assert_eq!(menu.selected, Some(11), "up from nothing wraps to the end");
+    assert_eq!(menu.scroll, menu.max_scroll(), "revealed");
+    let row = menu.item_rect(11);
+    assert_eq!(menu.item_at(row.center_x(), row.center_y()), Some(11));
+    menu.select_by(1);
+    assert_eq!(menu.selected, Some(0));
+    assert_eq!(menu.scroll, 0.0);
+    assert!(menu.scroll_by(1_000.0));
+    assert_eq!(menu.scroll, 7.0 * ITEM_HEIGHT);
 }

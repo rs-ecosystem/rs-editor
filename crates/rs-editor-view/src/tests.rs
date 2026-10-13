@@ -1713,3 +1713,381 @@ mod bubble {
         assert!(!view.bubble_menu_shown());
     }
 }
+
+mod slash {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn setup(blocks: Vec<Value>) -> (EditorView, Arc<ManualClock>) {
+        let (mut view, clock) = view_with(doc(blocks), KeyPlatform::Other);
+        view.set_focused(true);
+        (view, clock)
+    }
+
+    fn type_text(view: &mut EditorView, text: &str) {
+        for c in text.chars() {
+            view.insert_text(&c.to_string());
+        }
+        paint(view);
+    }
+
+    fn first_block(view: &EditorView) -> Value {
+        view.editor().get_json()["content"][0].clone()
+    }
+
+    #[test]
+    fn a_slash_opens_blocks_and_the_query_filters_them() {
+        let (mut view, _) = setup(vec![p("")]);
+        type_text(&mut view, "/");
+        assert!(view.slash_menu_shown());
+        assert_eq!(view.slash_menu_items().len(), 10);
+        assert_eq!(view.slash.selected(), Some(0));
+
+        type_text(&mut view, "hea");
+        assert_eq!(
+            view.slash_menu_items(),
+            ["Heading 1", "Heading 2", "Heading 3"]
+        );
+        // Keywords find rows too, in either language.
+        for _ in 0..3 {
+            view.delete(false, Granularity::Grapheme);
+        }
+        type_text(&mut view, "todo");
+        assert_eq!(view.slash_menu_items(), ["To-do list"]);
+        for _ in 0..4 {
+            view.delete(false, Granularity::Grapheme);
+        }
+        type_text(&mut view, "kutip");
+        assert_eq!(view.slash_menu_items(), ["Quote"]);
+        for _ in 0..5 {
+            view.delete(false, Granularity::Grapheme);
+        }
+
+        type_text(&mut view, "h2");
+        assert!(key(&mut view, "Enter", plain()));
+        let block = first_block(&view);
+        assert_eq!(block["type"], "heading");
+        assert_eq!(block["attrs"]["level"], 2);
+        assert!(block.get("content").is_none(), "the query is gone: {block}");
+        paint(&mut view);
+        assert!(!view.slash_menu_shown());
+
+        // One undo step brings the slash back.
+        view.run("undo", &Value::Null).unwrap();
+        assert_eq!(view.editor().get_text("\n"), "/h2");
+    }
+
+    #[test]
+    fn only_a_slash_at_a_word_start_opens_the_menu() {
+        let (mut view, _) = setup(vec![p("")]);
+        type_text(&mut view, "a/b");
+        assert!(!view.slash_menu_shown(), "inside a word (a path, a date)");
+        type_text(&mut view, " /");
+        assert!(view.slash_menu_shown(), "after a space");
+        type_text(&mut view, " ");
+        assert!(!view.slash_menu_shown(), "a space ends the query");
+        type_text(&mut view, "/zzz");
+        assert!(!view.slash_menu_shown(), "nothing matches");
+    }
+
+    #[test]
+    fn arrows_choose_escape_closes_until_the_query_ends() {
+        let (mut view, _) = setup(vec![p("")]);
+        type_text(&mut view, "/");
+        assert!(key(&mut view, "ArrowDown", plain()));
+        assert!(key(&mut view, "ArrowDown", plain()));
+        assert_eq!(view.slash.selected(), Some(2));
+        assert!(key(&mut view, "ArrowUp", plain()));
+        assert_eq!(view.slash.selected(), Some(1));
+
+        assert!(key(&mut view, "Escape", plain()));
+        paint(&mut view);
+        assert!(!view.slash_menu_shown());
+        type_text(&mut view, "h");
+        assert!(!view.slash_menu_shown(), "stays closed for this slash");
+        type_text(&mut view, " /");
+        assert!(view.slash_menu_shown(), "a new slash opens it again");
+
+        // Tab picks too; Enter with the menu closed is a new paragraph.
+        assert!(key(&mut view, "Tab", plain()));
+        assert_eq!(first_block(&view)["type"], "paragraph");
+        assert_eq!(view.editor().get_text("\n"), "/h ");
+    }
+
+    #[test]
+    fn clicks_and_taps_pick_rows() {
+        let (mut view, clock) = setup(vec![p(""), p("dua")]);
+        type_text(&mut view, "/");
+        clock.advance(200);
+        paint(&mut view);
+        let (x, y) = view.slash.row_center(4);
+        assert!(view.pointer_move(PointerEvent::at(x, y)));
+        assert_eq!(view.slash.selected(), Some(4), "hover selects");
+        assert!(view.pointer_down(PointerEvent::at(x, y)));
+        assert!(view.pointer_up(PointerEvent::at(x, y)));
+        assert_eq!(first_block(&view)["type"], "bulletList");
+
+        let (mut view, clock) = setup(vec![p("")]);
+        type_text(&mut view, "/");
+        clock.advance(200);
+        paint(&mut view);
+        let (x, y) = view.slash.row_center(9);
+        view.touch(TouchPhase::Down, x, y);
+        view.touch(TouchPhase::Up, x, y);
+        assert_eq!(first_block(&view)["type"], "horizontalRule");
+    }
+
+    #[test]
+    fn rows_follow_the_locale_and_what_the_block_allows() {
+        let (mut view, _) = setup(vec![p("")]);
+        view.set_locale("id-ID");
+        type_text(&mut view, "/jud");
+        assert_eq!(view.slash_menu_items(), ["Judul 1", "Judul 2", "Judul 3"]);
+
+        // Code blocks take slashes as code.
+        let content = json!({"type": "codeBlock"});
+        let (mut view, _) = setup(vec![content]);
+        type_text(&mut view, "/");
+        assert!(!view.slash_menu_shown());
+    }
+
+    #[test]
+    fn an_ime_composing_the_slash_opens_the_menu() {
+        let (mut view, _) = setup(vec![p("")]);
+        view.set_composition("/");
+        view.commit_composition("/");
+        paint(&mut view);
+        assert!(view.slash_menu_shown());
+        // An IME's Enter arrives as a typed line break.
+        assert!(view.insert_text("\n"));
+        assert_eq!(first_block(&view)["type"], "paragraph");
+        assert_eq!(view.editor().get_text("\n"), "", "Text picked, query gone");
+    }
+}
+
+mod link {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn linked() -> Value {
+        json!({"type": "paragraph", "content": [
+            {"type": "text", "text": "lihat "},
+            {"type": "text", "text": "situs", "marks": [{"type": "link", "attrs": {"href": "https://rs-editor.dev"}}]},
+            {"type": "text", "text": " ini"},
+        ]})
+    }
+
+    fn setup(blocks: Vec<Value>) -> (EditorView, Arc<ManualClock>) {
+        let (mut view, clock) = view_with(doc(blocks), KeyPlatform::Other);
+        view.set_focused(true);
+        (view, clock)
+    }
+
+    fn ctrl() -> Modifiers {
+        Modifiers {
+            ctrl: true,
+            ..Default::default()
+        }
+    }
+
+    fn href_at(view: &EditorView, pos: usize) -> Option<String> {
+        let doc = view.editor().doc().clone();
+        let resolved = doc.resolve(pos).unwrap();
+        resolved
+            .node_after()?
+            .marks()
+            .iter()
+            .find(|m| m.mark_type().name() == "link")
+            .and_then(|m| m.attr("href"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    }
+
+    #[test]
+    fn the_caret_in_a_link_shows_its_popover() {
+        let (mut view, clock) = setup(vec![linked()]);
+        view.select_text(9, 9, Affinity::Downstream);
+        paint(&mut view);
+        assert!(view.link_popover_shown());
+        clock.advance(200);
+        paint(&mut view);
+
+        // Open and copy hand the address to the platform.
+        let (x, y) = view.link.button_center(0);
+        view.take_effects();
+        assert!(view.pointer_down(PointerEvent::at(x, y)));
+        assert!(view.pointer_up(PointerEvent::at(x, y)));
+        assert!(
+            view.take_effects()
+                .contains(&Effect::OpenUrl("https://rs-editor.dev".into()))
+        );
+        let (x, y) = view.link.button_center(1);
+        view.pointer_down(PointerEvent::at(x, y));
+        view.pointer_up(PointerEvent::at(x, y));
+        assert!(view.take_effects().iter().any(|e| matches!(
+            e,
+            Effect::Clipboard(c) if c.text == "https://rs-editor.dev"
+        )));
+
+        // Escape hides it for this link; leaving and coming back shows it.
+        assert!(key(&mut view, "Escape", plain()));
+        paint(&mut view);
+        assert!(!view.link_popover_shown());
+        view.select_text(2, 2, Affinity::Downstream);
+        paint(&mut view);
+        view.select_text(9, 9, Affinity::Downstream);
+        paint(&mut view);
+        assert!(view.link_popover_shown());
+
+        // Remove unlinks the whole link, wherever the caret is in it.
+        let (x, y) = view.link.button_center(3);
+        view.pointer_down(PointerEvent::at(x, y));
+        view.pointer_up(PointerEvent::at(x, y));
+        assert_eq!(href_at(&view, 8), None);
+        assert_eq!(view.editor().get_text("\n"), "lihat situs ini");
+        paint(&mut view);
+        assert!(!view.link_popover_shown());
+    }
+
+    #[test]
+    fn mod_k_links_the_selection_from_a_field() {
+        let (mut view, clock) = setup(vec![p("halo dunia")]);
+        view.select_text(6, 11, Affinity::Downstream);
+        assert!(key(&mut view, "k", ctrl()));
+        assert!(view.link_editing());
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+
+        // Text input goes to the field, and the IME sees the field.
+        let before = view.editor().get_text("\n");
+        for c in "rs-editor.dev".chars() {
+            view.insert_text(&c.to_string());
+        }
+        assert_eq!(view.editor().get_text("\n"), before);
+        let context = view.ime_context().unwrap();
+        assert!(context.field);
+        assert_eq!(context.text, "rs-editor.dev");
+        assert_eq!(context.selection, (13, 13));
+        assert!(key(&mut view, "Backspace", plain()));
+        view.insert_text("v");
+
+        assert!(key(&mut view, "Enter", plain()));
+        assert!(!view.link_editing());
+        assert_eq!(href_at(&view, 6).as_deref(), Some("https://rs-editor.dev"));
+        assert_eq!(href_at(&view, 10).as_deref(), Some("https://rs-editor.dev"));
+        assert!(!view.ime_context().unwrap().field, "the document again");
+        paint(&mut view);
+        assert!(!view.link_popover_shown(), "nothing over the new link");
+    }
+
+    #[test]
+    fn a_link_without_a_selection_inserts_its_address() {
+        let (mut view, _) = setup(vec![p("ke ")]);
+        view.select_text(4, 4, Affinity::Downstream);
+        assert!(view.edit_link());
+        view.set_composition("me@");
+        view.commit_composition("me@rs-editor.dev");
+        assert!(view.insert_text("\n"));
+        assert_eq!(view.editor().get_text("\n"), "ke me@rs-editor.dev");
+        assert_eq!(
+            href_at(&view, 4).as_deref(),
+            Some("mailto:me@rs-editor.dev")
+        );
+    }
+
+    #[test]
+    fn a_refused_address_keeps_the_field_open() {
+        let (mut view, _) = setup(vec![p("halo")]);
+        view.select_text(1, 5, Affinity::Downstream);
+        view.edit_link();
+        view.insert_text("javascript:alert(1)");
+        paint(&mut view);
+        assert!(key(&mut view, "Enter", plain()));
+        assert!(view.link_editing());
+        assert!(view.link.invalid());
+        assert_eq!(href_at(&view, 1), None);
+
+        // Escape gives up; the document never changed.
+        assert!(key(&mut view, "Escape", plain()));
+        assert!(!view.link_editing());
+        assert_eq!(view.editor().get_text("\n"), "halo");
+    }
+
+    #[test]
+    fn editing_an_existing_link_starts_from_its_address() {
+        let (mut view, clock) = setup(vec![linked()]);
+        view.select_text(9, 9, Affinity::Downstream);
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let (x, y) = view.link.button_center(2);
+        view.pointer_down(PointerEvent::at(x, y));
+        view.pointer_up(PointerEvent::at(x, y));
+        assert!(view.link_editing());
+        let (text, anchor, head) = view.link_field().unwrap();
+        assert_eq!(
+            (text.as_str(), anchor, head),
+            ("https://rs-editor.dev", 0, 21)
+        );
+        paint(&mut view);
+
+        // Clicking in the field places its caret; a click outside closes it.
+        let (fx, fy) = view.link.field_center();
+        view.pointer_down(PointerEvent::at(fx, fy));
+        view.pointer_up(PointerEvent::at(fx, fy));
+        let (_, anchor, head) = view.link_field().unwrap();
+        assert_eq!(anchor, head);
+        view.ime_replace(0, 21, "https://example.com", false);
+        assert!(key(&mut view, "Enter", plain()));
+        assert_eq!(href_at(&view, 8).as_deref(), Some("https://example.com"));
+        assert_eq!(view.editor().get_text("\n"), "lihat situs ini");
+    }
+
+    #[test]
+    fn the_bubble_menu_link_button_opens_the_field() {
+        let (mut view, clock) = setup(vec![p("halo dunia")]);
+        let rect = view
+            .layout()
+            .caret_rect(1, Affinity::Downstream, 0.0)
+            .unwrap();
+        let start = view.to_view(rect);
+        let rect = view
+            .layout()
+            .caret_rect(5, Affinity::Downstream, 0.0)
+            .unwrap();
+        let end = view.to_view(rect);
+        view.pointer_down(PointerEvent::at(start.x, start.center_y()));
+        view.pointer_move(PointerEvent::at(end.x, end.center_y()));
+        view.pointer_up(PointerEvent::at(end.x, end.center_y()));
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let (x, y) = view.bubble.button_center(6);
+        view.pointer_down(PointerEvent::at(x, y));
+        view.pointer_up(PointerEvent::at(x, y));
+        assert!(view.link_editing());
+        paint(&mut view);
+        assert!(!view.bubble_menu_shown());
+    }
+
+    #[test]
+    fn addresses_are_made_absolute() {
+        use crate::link::normalize_href;
+        assert_eq!(normalize_href("rs-editor.dev"), "https://rs-editor.dev");
+        assert_eq!(normalize_href("http://a.b"), "http://a.b");
+        assert_eq!(normalize_href("me@a.b"), "mailto:me@a.b");
+        assert_eq!(normalize_href("mailto:me@a.b"), "mailto:me@a.b");
+        assert_eq!(normalize_href("#bagian"), "#bagian");
+        assert_eq!(normalize_href("/docs"), "/docs");
+        assert_eq!(normalize_href("www.a.b/x"), "https://www.a.b/x");
+    }
+}

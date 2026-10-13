@@ -41,6 +41,12 @@ class RsEditorState internal constructor(
     /** Whether a chain would apply: `can().toggleBold().run()`. */
     fun can(): RsEditorChain = view?.can() ?: RsEditorChain.detached()
 
+    /**
+     * Opens the link address field over the link at the caret or the selected text (a link
+     * button); false when there is nothing to link or the editor is not shown.
+     */
+    fun editLink(): Boolean = view?.editLink() ?: false
+
     fun isActive(name: String, attrs: Map<String, Any?> = emptyMap()): Boolean {
         revision // Recompose readers when the selection changes.
         return view?.isActive(name, attrs) ?: false

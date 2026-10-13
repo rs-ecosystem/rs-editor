@@ -1,18 +1,23 @@
 //! The editor's own UI, drawn with Skia inside the canvas so it looks the
-//! same on every platform: popover panels, toolbars of icon buttons and
-//! menus in the shadcn/ui style of the theme, with Lucide icons.
+//! same on every platform: popover panels, toolbars of icon buttons,
+//! command menus and text fields in the shadcn/ui style of the theme,
+//! with Lucide icons.
 //!
 //! Widgets here know nothing of documents; the view decides what they show
 //! and what their buttons do.
 
+mod field;
 mod icons;
+mod menu;
 mod panel;
 mod toolbar;
 mod tween;
 
+pub use field::{FIELD_HEIGHT, TextField};
 pub use icons::Icon;
-pub use panel::{PANEL_PADDING, paint_panel};
-pub use toolbar::{Toolbar, ToolbarButton, ToolbarEntry};
+pub use menu::{ITEM_HEIGHT, Menu, MenuItem, paint_text};
+pub use panel::{PANEL_PADDING, begin_appear, paint_panel};
+pub use toolbar::{BUTTON_SIZE, Toolbar, ToolbarButton, ToolbarEntry};
 pub use tween::Appear;
 
 pub(crate) fn sk(color: rs_editor_theme::Color) -> skia_safe::Color {

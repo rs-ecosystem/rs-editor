@@ -63,10 +63,10 @@ export async function createEditor(options) {
 }
 
 class Editor {
-  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, bubbleMenu = true, fonts = [], accessibility = true, wasmUrl = DEFAULT_WASM, input } = {}) {
+  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, bubbleMenu = true, slashMenu = true, locale = navigator.language, fonts = [], accessibility = true, wasmUrl = DEFAULT_WASM, input } = {}) {
     if (!element) throw new Error("Rs Editor: `element` is required");
     this.element = element;
-    this._options = { content, contentType, dark, editable, pasteMarkdown, bubbleMenu, accessibility, wasmUrl, input };
+    this._options = { content, contentType, dark, editable, pasteMarkdown, bubbleMenu, slashMenu, locale, accessibility, wasmUrl, input };
     // Fonts to load when text needs them: { family, url, ranges }.
     this._fonts = fonts.map((font) => ({ ...font, state: "idle" }));
     this._listeners = new Map();
@@ -114,6 +114,8 @@ class Editor {
     if (!this._options.editable) M._rse_set_editable(this._app, 0);
     if (this._options.pasteMarkdown) M._rse_set_markdown_paste(this._app, 1);
     if (!this._options.bubbleMenu) M._rse_set_bubble_menu(this._app, 0);
+    if (!this._options.slashMenu) M._rse_set_slash_menu(this._app, 0);
+    if (this._options.locale) this._withString(this._options.locale, (ptr, len) => M._rse_set_locale(this._app, ptr, len));
     // Emoji come from the system's emoji font through the browser, unless
     // the app brings its own emoji font.
     const emojiFont = this._fonts.some((font) => !font.ranges || font.ranges.some(([a, b]) => a <= 0x1f600 && 0x1f600 <= b));
@@ -128,6 +130,14 @@ class Editor {
     this._setUpViewport();
     this._afterInput();
     this._prepareFonts();
+    // Compile the menus' WebGL programs while idle, not when one opens.
+    const warmUp = () => {
+      if (this._destroyed) return;
+      M.GL.makeContextCurrent(this._gl);
+      M._rse_warm_up(this._app);
+    };
+    if ("requestIdleCallback" in window) requestIdleCallback(warmUp, { timeout: 1000 });
+    else setTimeout(warmUp, 300);
   }
 
   // --- strings across the wasm boundary ------------------------------------
@@ -374,6 +384,15 @@ class Editor {
     const caret = state.caret
       ? new DOMRect(box.left + state.caret[0], box.top + state.caret[1], Math.max(state.caret[2], 1), state.caret[3])
       : null;
+    // The link address field wants a keyboard for URLs.
+    const field = state.start === -2;
+    if (field !== this._inField) {
+      this._inField = field;
+      const target = this._textarea ?? this.canvas;
+      target.setAttribute("inputmode", field ? "url" : "text");
+      target.setAttribute("enterkeyhint", field ? "go" : "enter");
+      if (this._textarea) this._textarea.setAttribute("autocapitalize", field ? "off" : "sentences");
+    }
     const editContext = this._editContext;
     if (editContext) {
       if (!this._composing) {
@@ -688,9 +707,10 @@ class Editor {
     canvas.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
-      if (e.deltaMode === 1) M._rse_wheel(app, e.deltaY * LINE_HEIGHT, 1);
-      else if (e.deltaMode === 2) M._rse_wheel(app, e.deltaY * this._size.height, 1);
-      else M._rse_wheel(app, e.deltaY, 0);
+      const [x, y] = local(e);
+      if (e.deltaMode === 1) M._rse_wheel(app, x, y, e.deltaY * LINE_HEIGHT, 1);
+      else if (e.deltaMode === 2) M._rse_wheel(app, x, y, e.deltaY * this._size.height, 1);
+      else M._rse_wheel(app, x, y, e.deltaY, 0);
       this._requestFrame();
       this._a11y?.schedule();
     }, { passive: false });
@@ -755,6 +775,24 @@ class Editor {
   /** Whether pasted plain text is read as Markdown. */
   setPasteMarkdown(markdown) {
     this._M._rse_set_markdown_paste(this._app, markdown ? 1 : 0);
+  }
+
+  /**
+   * Opens the link address field over the link at the caret or the
+   * selected text, as Mod-K does (for a toolbar's link button). Returns
+   * false when there is nothing to link.
+   */
+  editLink() {
+    this._focusInput();
+    const opened = this._M._rse_edit_link(this._app) === 1;
+    this._afterInput();
+    return opened;
+  }
+
+  /** The language of the editor's own menus, such as `"id-ID"`. */
+  setLocale(locale) {
+    this._withString(locale, (ptr, len) => this._M._rse_set_locale(this._app, ptr, len));
+    this._requestFrame();
   }
 
   get isEditable() { return this._M._rse_is_editable(this._app) === 1; }

@@ -36,3 +36,14 @@ pub fn paint_panel(canvas: &Canvas, rect: Rect, theme: &Theme, opacity: f32) {
     border.set_color(with_alpha(sk(theme.palette.border), opacity));
     canvas.draw_rrect(shape.with_inset((0.5, 0.5)), &border);
 }
+
+/// Starts drawing a panel at `rect` that is `progress` (0 to 1) of the way
+/// in: zoomed from 95% around its center, as shadcn's popovers open. The
+/// caller restores the canvas when done.
+pub fn begin_appear(canvas: &Canvas, rect: Rect, progress: f32) {
+    canvas.save();
+    let zoom = 0.95 + 0.05 * progress.clamp(0.0, 1.0);
+    canvas.translate((rect.center_x(), rect.center_y()));
+    canvas.scale((zoom, zoom));
+    canvas.translate((-rect.center_x(), -rect.center_y()));
+}

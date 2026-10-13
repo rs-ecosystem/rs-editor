@@ -37,6 +37,8 @@ editor.isActive("heading", mapOf("level" to 2))
 editor.getAttributes("link")["href"]
 editor.json = "..."   // atau editor.html, editor.markdown; editor.text, editor.isEditable
 editor.pasteMarkdown = true                                  // teks polos yang ditempel dibaca sebagai Markdown
+editor.editLink()     // kolom alamat tautan, untuk tombol tautan di toolbar aplikasi
+editor.slashMenu = false                                     // matikan menu blok saat mengetik "/"
 editor.addOnChangeListener { refreshToolbar() }
 editor.release()      // saat view dibuang
 ```
@@ -54,3 +56,9 @@ IconToggleButton(
 ```
 
 Nama perintah dan argumennya sama dengan extension Rust (dan Tiptap). Perintah yang tidak punya metode sendiri di `RsEditorChain` bisa dipanggil lewat `command(name, args)`.
+
+Menu di dalam editor digambar Skia, sama seperti di web, dalam bahasa perangkat (Indonesia atau Inggris):
+
+- Mengetik `/` di awal baris atau setelah spasi membuka menu blok (judul, list, kutipan, kode, pemisah). Teks setelah `/` menyaring isinya. Ketuk untuk memilih; geser untuk scroll menu.
+- Dengan caret di dalam tautan, muncul popover berisi alamatnya dan tombol buka, salin, ubah, dan hapus.
+- Kolom alamat tautan (`editLink()` atau tombol ubah) memakai keyboard URL dengan tombol Go.

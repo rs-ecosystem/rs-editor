@@ -10,9 +10,12 @@ mod a11y;
 mod bubble;
 mod ime;
 mod input;
+mod link;
 mod paint;
 mod pointer;
 mod scroll;
+mod slash;
+mod strings;
 mod touch;
 
 use std::fmt;
@@ -194,6 +197,10 @@ pub struct EditorView {
     pub(crate) touch: touch::TouchState,
     pub(crate) profile: InteractionProfile,
     pub(crate) bubble: bubble::Bubble,
+    pub(crate) slash: slash::Slash,
+    pub(crate) link: link::LinkPopover,
+    /// The UI's words, in the user's language.
+    pub(crate) strings: strings::Strings,
 }
 
 impl fmt::Debug for EditorView {
@@ -257,6 +264,9 @@ impl EditorView {
             touch: touch::TouchState::default(),
             profile: InteractionProfile::default(),
             bubble: bubble::Bubble::new(),
+            slash: slash::Slash::new(),
+            link: link::LinkPopover::default(),
+            strings: strings::strings_for("en"),
         })
     }
 
@@ -285,6 +295,13 @@ impl EditorView {
 
     pub fn state(&self) -> &EditorState {
         self.editor.state()
+    }
+
+    /// The language of the editor's own UI (menus, placeholders), as a
+    /// BCP 47 tag such as `"id-ID"`; English when there is no translation.
+    pub fn set_locale(&mut self, locale: &str) {
+        self.strings = strings::strings_for(locale);
+        self.request_redraw();
     }
 
     pub fn theme(&self) -> &Theme {
@@ -577,7 +594,11 @@ impl EditorView {
     /// Milliseconds until the view should draw again without input: the
     /// next animation frame while scrolling, or the next caret blink.
     pub fn next_frame_in(&self) -> Option<u64> {
-        if self.is_scrolling() || self.bubble_animating() {
+        if self.is_scrolling()
+            || self.bubble_animating()
+            || self.slash_animating()
+            || self.link_animating()
+        {
             return Some(FRAME_MS);
         }
         let touch = self.touch_deadline();
@@ -589,7 +610,11 @@ impl EditorView {
     }
 
     fn blink_deadline(&self) -> Option<u64> {
-        if !self.focused || !self.editor.selection().empty() {
+        let collapsed = match self.link_field() {
+            Some((_, anchor, head)) => anchor == head,
+            None => self.editor.selection().empty(),
+        };
+        if !self.focused || !collapsed {
             return None;
         }
         let elapsed = self.clock.now_ms().saturating_sub(self.blink_start);

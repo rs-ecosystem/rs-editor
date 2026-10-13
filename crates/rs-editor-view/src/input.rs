@@ -7,6 +7,7 @@ use rs_editor_model::{Fragment, MarkSet, Slice};
 use rs_editor_state::{NodeSelection, Selection, TextSelection, meta};
 use serde_json::Value;
 
+use crate::link::FieldInput;
 use crate::{ClipboardContent, Composition, EditorView, Effect, ViewQuery};
 
 /// How far a deletion or caret movement reaches.
@@ -22,12 +23,30 @@ impl EditorView {
     /// A key press. Returns whether the editor used it.
     pub fn key_down(&mut self, event: &KeyEvent) -> bool {
         self.end_touch_mode();
+        if let Some(handled) = self.field_input(FieldInput::Key(event)) {
+            return handled;
+        }
         if !self.editor.is_editable() && !is_navigation(&event.key) {
             return false;
         }
         if self.composition.is_some() {
             // The IME owns keys while composing.
             return false;
+        }
+        if self.slash_key(event) {
+            return true;
+        }
+        let m = event.modifiers;
+        let command = if self.platform() == KeyPlatform::Apple {
+            m.meta
+        } else {
+            m.ctrl
+        };
+        if command && !m.shift && !m.alt && event.key.eq_ignore_ascii_case("k") {
+            return self.edit_link();
+        }
+        if event.key == "Escape" && self.link_escape() {
+            return true;
         }
         let handled = {
             let context = ViewQuery::new(self);
@@ -74,8 +93,14 @@ impl EditorView {
     /// Text typed or pasted as plain characters, replacing the selection.
     pub fn insert_text(&mut self, text: &str) -> bool {
         self.end_touch_mode();
+        if let Some(handled) = self.field_input(FieldInput::Insert(text)) {
+            return handled;
+        }
         if text.is_empty() || !self.editor.is_editable() {
             return false;
+        }
+        if (text == "\n" || text == "\r") && self.composition.is_none() && self.slash_newline() {
+            return true;
         }
         self.finish_composition();
         let selection = self.editor.selection().clone();
@@ -291,6 +316,9 @@ impl EditorView {
     /// Commands bound to Backspace/Delete (joining blocks, deleting a
     /// selection) run first through the keymap.
     pub fn delete(&mut self, forward: bool, granularity: Granularity) -> bool {
+        if let Some(handled) = self.field_input(FieldInput::Delete(forward, granularity)) {
+            return handled;
+        }
         let selection = self.editor.selection().clone();
         if !selection.empty() {
             let mut tr = self.editor.state().tr();
@@ -346,6 +374,9 @@ impl EditorView {
     /// are exact; it becomes one undo step when committed.
     pub fn set_composition(&mut self, text: &str) -> bool {
         self.end_touch_mode();
+        if let Some(handled) = self.field_input(FieldInput::SetComposing(text)) {
+            return handled;
+        }
         if !self.editor.is_editable() {
             return false;
         }
@@ -379,6 +410,9 @@ impl EditorView {
 
     /// Commits the composition with `text` (often equal to the preedit).
     pub fn commit_composition(&mut self, text: &str) -> bool {
+        if let Some(handled) = self.field_input(FieldInput::Commit(text)) {
+            return handled;
+        }
         if self.composition.is_none() {
             return self.insert_text(text);
         }
@@ -390,6 +424,9 @@ impl EditorView {
 
     /// Removes the uncommitted composition (Escape in the IME).
     pub fn cancel_composition(&mut self) -> bool {
+        if let Some(handled) = self.field_input(FieldInput::CancelComposition) {
+            return handled;
+        }
         if self.composition.is_none() {
             return false;
         }
@@ -420,6 +457,12 @@ impl EditorView {
 
     /// The selection as plain text, HTML (for other apps) and a JSON slice.
     pub fn copy(&mut self) -> Option<ClipboardContent> {
+        if let Some(copied) = self.field_copy(false) {
+            if let Some(content) = &copied {
+                self.push_effect(Effect::Clipboard(content.clone()));
+            }
+            return copied;
+        }
         let selection = self.editor.selection().clone();
         if selection.empty() {
             return None;
@@ -443,6 +486,12 @@ impl EditorView {
     }
 
     pub fn cut(&mut self) -> Option<ClipboardContent> {
+        if let Some(copied) = self.field_copy(true) {
+            if let Some(content) = &copied {
+                self.push_effect(Effect::Clipboard(content.clone()));
+            }
+            return copied;
+        }
         let copied = self.copy()?;
         let mut tr = self.editor.state().tr();
         tr.delete_selection().ok()?;
@@ -455,7 +504,8 @@ impl EditorView {
     /// Pastes HTML from the clipboard, keeping what the schema supports of
     /// its formatting. HTML copied from Rs Editor comes back exactly.
     pub fn paste_html(&mut self, html: &str) -> bool {
-        if !self.editor.is_editable() {
+        // The address field takes the plain text the host pastes next.
+        if self.link_editing() || !self.editor.is_editable() {
             return false;
         }
         let slice = rs_editor_markup::parse_slice(self.editor.schema(), html);
@@ -468,6 +518,9 @@ impl EditorView {
     /// Pastes Markdown: one paragraph merges into the current block, more
     /// become blocks of their own.
     pub fn paste_markdown(&mut self, markdown: &str) -> bool {
+        if let Some(handled) = self.field_input(FieldInput::Insert(markdown.trim())) {
+            return handled;
+        }
         if !self.editor.is_editable() || markdown.trim().is_empty() {
             return false;
         }
@@ -489,6 +542,9 @@ impl EditorView {
     /// Pastes plain text; each line becomes a paragraph (or, with
     /// [`EditorView::set_markdown_paste`], the text is read as Markdown).
     pub fn paste_text(&mut self, text: &str) -> bool {
+        if let Some(handled) = self.field_input(FieldInput::Insert(text.trim())) {
+            return handled;
+        }
         if !self.editor.is_editable() || text.is_empty() {
             return false;
         }
@@ -524,6 +580,9 @@ impl EditorView {
 
     /// Pastes a JSON slice produced by [`EditorView::copy`].
     pub fn paste_json(&mut self, json: &Value) -> bool {
+        if self.link_editing() {
+            return false;
+        }
         let schema = self.editor.schema().clone();
         let Ok(content) = schema.fragment_from_json(json.get("content").unwrap_or(&Value::Null))
         else {

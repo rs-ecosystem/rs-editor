@@ -235,6 +235,22 @@ impl EditorApi {
         self.view.set_bubble_menu(enabled);
     }
 
+    /// Shows a menu of blocks when `/` is typed (on by default).
+    pub fn set_slash_menu(&mut self, enabled: bool) {
+        self.view.set_slash_menu(enabled);
+    }
+
+    /// The language of the editor's own UI, as a BCP 47 tag (`"id-ID"`).
+    pub fn set_locale(&mut self, locale: &str) {
+        self.view.set_locale(locale);
+    }
+
+    /// Opens the address field for the link at the caret or the selected
+    /// text, as Mod-K does; false when there is nothing to link.
+    pub fn edit_link(&mut self) -> bool {
+        self.view.edit_link()
+    }
+
     /// Draws emoji from images the host supplies (`missingEmoji` effect,
     /// [`EditorApi::add_emoji_image`]) instead of a font.
     pub fn set_emoji_images(&mut self, on: bool) {
@@ -412,15 +428,13 @@ impl EditorApi {
         }
     }
 
-    /// Scrolls by `dy`; `smooth` animates (mouse wheels), otherwise the
-    /// offset moves at once (trackpads bring their own momentum).
-    pub fn wheel(&mut self, dy: f32, smooth: bool) {
-        let dy = dy / self.unit();
-        if smooth {
-            self.view.scroll_smooth_by(dy);
-        } else {
-            self.view.scroll_by(dy);
-        }
+    /// Scrolls by `dy` with the pointer at `(x, y)`: a menu under the
+    /// pointer scrolls its rows, else the document does. `smooth` animates
+    /// (mouse wheels); otherwise the offset moves at once (trackpads bring
+    /// their own momentum).
+    pub fn wheel(&mut self, x: f32, y: f32, dy: f32, smooth: bool) {
+        let unit = self.unit();
+        self.view.wheel(x / unit, y / unit, dy / unit, smooth);
     }
 
     /// Effects since the last call, as a JSON array of
@@ -565,16 +579,19 @@ impl EditorApi {
     }
 
     /// The IME block as JSON: `{start, text, selection, composition,
-    /// caret}`; the caret is `[x, y, width, height]`.
+    /// caret}`; the caret is `[x, y, width, height]`. `start` is -1 when
+    /// no text takes input, and -2 while the link address field does
+    /// (keyboards for URLs suit it).
     pub fn ime_state(&mut self) -> String {
         let unit = self.unit();
         let caret = self
             .view
-            .caret_rect()
+            .input_caret_rect()
             .map(|r| [r.x * unit, r.y * unit, r.width * unit, r.height * unit]);
         let state = match self.view.ime_context() {
             Some(context) => json!({
-                "start": context.start,
+                // -2: an editor field (a link's address), not the document.
+                "start": if context.field { -2 } else { context.start as i64 },
                 "text": context.text,
                 "selection": [context.selection.0, context.selection.1],
                 "composition": context.composition.map(|(a, b)| [a, b]),

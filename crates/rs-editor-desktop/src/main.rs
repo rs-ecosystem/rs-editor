@@ -149,6 +149,10 @@ impl App {
             left: 56.0,
         });
         view.set_focused(true);
+        // The UI speaks the user's language (LANG=id_ID.UTF-8 → Indonesian).
+        if let Ok(lang) = std::env::var("LC_ALL").or_else(|_| std::env::var("LANG")) {
+            view.set_locale(&lang);
+        }
         let clipboard = arboard::Clipboard::new()
             .inspect_err(|e| eprintln!("clipboard tidak tersedia: {e}"))
             .ok();
@@ -228,15 +232,15 @@ impl ApplicationHandler<accesskit_winit::Event> for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                let (x, y) = shell.cursor;
                 match delta {
                     // Wheel notches animate; trackpads bring their own momentum.
-                    MouseScrollDelta::LineDelta(_, y) => {
-                        shell.view.scroll_smooth_by(-y * LINE_HEIGHT)
+                    MouseScrollDelta::LineDelta(_, dy) => {
+                        shell.view.wheel(x, y, -dy * LINE_HEIGHT, true)
                     }
-                    MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => {
-                        shell
-                            .view
-                            .scroll_by(-(y as f32) / shell.window.scale_factor() as f32);
+                    MouseScrollDelta::PixelDelta(PhysicalPosition { y: dy, .. }) => {
+                        let scale = shell.window.scale_factor() as f32;
+                        shell.view.wheel(x, y, -(dy as f32) / scale, false);
                     }
                 }
                 if shell.pressed {

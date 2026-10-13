@@ -212,6 +212,31 @@ pub unsafe extern "C" fn rse_frame(app_ptr: *mut App) -> i32 {
     i32::try_from(app.api.next_frame_in()).unwrap_or(i32::MAX)
 }
 
+/// Compiles the GPU programs of the editor's menus and popovers by drawing
+/// them once offscreen, so the first menu does not stall on WebGL shader
+/// compilation. Call once while idle, after the first frame.
+///
+/// # Safety
+/// `app` must be live and its WebGL context current.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_warm_up(app_ptr: *mut App) {
+    let app = unsafe { app(app_ptr) };
+    let info = skia_safe::ImageInfo::new_n32_premul((256, 160), None);
+    if let Some(mut surface) = gpu::surfaces::render_target(
+        &mut app.context,
+        gpu::Budgeted::Yes,
+        &info,
+        None,
+        SurfaceOrigin::TopLeft,
+        None,
+        false,
+        None,
+    ) {
+        app.api.view_mut().paint_ui_warm_up(surface.canvas());
+        app.context.flush_and_submit();
+    }
+}
+
 // --- pointer, touch and scrolling ---------------------------------------------
 
 /// A mouse event: `kind` 0 down, 1 move, 2 up; `mods` bits 1 shift, 2 ctrl,
@@ -249,8 +274,8 @@ pub unsafe extern "C" fn rse_touch(app_ptr: *mut App, action: u32, x: f32, y: f3
 /// # Safety
 /// `app` must be live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rse_wheel(app_ptr: *mut App, dy: f32, smooth: u32) {
-    unsafe { app(app_ptr) }.api.wheel(dy, smooth != 0);
+pub unsafe extern "C" fn rse_wheel(app_ptr: *mut App, x: f32, y: f32, dy: f32, smooth: u32) {
+    unsafe { app(app_ptr) }.api.wheel(x, y, dy, smooth != 0);
 }
 
 /// CSS pixels at the bottom covered by the on-screen keyboard (or the
@@ -545,6 +570,34 @@ pub unsafe extern "C" fn rse_add_font(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_set_bubble_menu(app_ptr: *mut App, enabled: u32) {
     unsafe { app(app_ptr) }.api.set_bubble_menu(enabled != 0);
+}
+
+/// Shows the block menu when `/` is typed (1, the default) or not.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_slash_menu(app_ptr: *mut App, enabled: u32) {
+    unsafe { app(app_ptr) }.api.set_slash_menu(enabled != 0);
+}
+
+/// The language of the editor's own UI (UTF-8 BCP 47 tag).
+///
+/// # Safety
+/// `app` must be live; `locale` must point to `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_locale(app_ptr: *mut App, locale: *const u8, len: usize) {
+    let locale = unsafe { read(locale, len) };
+    unsafe { app(app_ptr) }.api.set_locale(&locale);
+}
+
+/// Opens the link address field (Mod-K); 1 when it opened.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_edit_link(app_ptr: *mut App) -> u32 {
+    u32::from(unsafe { app(app_ptr) }.api.edit_link())
 }
 
 /// Draws emoji from images (see `rse_add_emoji_image`) instead of a font.

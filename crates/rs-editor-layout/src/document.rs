@@ -222,6 +222,40 @@ struct Shaper {
     theme: Theme,
 }
 
+/// The style of UI text ([`LayoutEngine::ui_label`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UiText {
+    pub size: f32,
+    pub line_height: f32,
+    pub weight: u16,
+    pub color: rs_editor_theme::Color,
+    pub mono: bool,
+}
+
+impl UiText {
+    /// shadcn's `text-sm`: 14 px on a 20 px line.
+    pub fn small(color: rs_editor_theme::Color) -> Self {
+        Self {
+            size: 14.0,
+            line_height: 20.0,
+            weight: 400,
+            color,
+            mono: false,
+        }
+    }
+
+    /// shadcn's `text-xs`: 12 px on a 16 px line.
+    pub fn extra_small(color: rs_editor_theme::Color) -> Self {
+        Self {
+            size: 12.0,
+            line_height: 16.0,
+            weight: 400,
+            color,
+            mono: false,
+        }
+    }
+}
+
 /// Lays out documents, reusing unchanged blocks.
 pub struct LayoutEngine {
     shaper: Shaper,
@@ -596,6 +630,12 @@ impl LayoutEngine {
     pub fn placeholder(&self, node: &Node, text: &str, width: f32) -> TextLayout {
         self.shaper.placeholder(node, text, width)
     }
+
+    /// One line of UI text (menus, popovers) in the theme's fonts, cut
+    /// with an ellipsis past `max_width`.
+    pub fn ui_label(&self, text: &str, style: &UiText, max_width: Option<f32>) -> TextLayout {
+        self.shaper.ui_label(text, style, max_width)
+    }
 }
 
 /// Indices of the blocks intersecting `window` (all when `None`).
@@ -777,6 +817,48 @@ impl Shaper {
             text.to_owned(),
             width,
             block.align,
+            block.line_height,
+            block.size * 1.3,
+        )
+    }
+
+    fn ui_label(&self, text: &str, ui: &UiText, max_width: Option<f32>) -> TextLayout {
+        let theme = &self.theme;
+        let block = BlockStyle {
+            size: ui.size,
+            line_height: ui.line_height,
+            weight: ui.weight,
+            letter_spacing_em: 0.0,
+            mono: ui.mono,
+            italic: false,
+            color: ui.color,
+            align: TextAlign::Left,
+        };
+        let style = base_text_style(theme, &block, &self.fallbacks);
+        let mut paragraph_style = ParagraphStyle::new();
+        paragraph_style.set_text_style(&style);
+        paragraph_style.set_strut_style(strut(theme, &block, &self.fallbacks));
+        paragraph_style.turn_hinting_off();
+        paragraph_style.set_apply_rounding_hack(false);
+        if max_width.is_some() {
+            paragraph_style.set_max_lines(1);
+            paragraph_style.set_ellipsis("…");
+        }
+        let mut builder = ParagraphBuilder::new(&paragraph_style, self.fonts.clone());
+        builder.push_style(&style);
+        // One line: hard breaks would start new ones.
+        let text = text.replace(['\n', '\r'], " ");
+        builder.add_text(&text);
+        let mut paragraph = builder.build();
+        paragraph.layout(100_000.0);
+        let natural = paragraph.max_intrinsic_width().ceil();
+        let width = max_width.map_or(natural, |max| natural.min(max.max(1.0)));
+        paragraph.layout(width + 1.0);
+        TextLayout::new(
+            paragraph,
+            text,
+            width,
+            TextAlign::Left,
             block.line_height,
             block.size * 1.3,
         )

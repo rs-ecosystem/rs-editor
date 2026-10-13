@@ -1,7 +1,8 @@
-//! The bubble menu: formatting buttons over a text selection made with a
-//! mouse or trackpad, as in Tiptap's BubbleMenu. Touch selections get the
-//! platform's own selection menu instead (see `touch.rs`), which is what
-//! users of phones expect.
+//! The bubble menu: formatting buttons (and a link button, which opens the
+//! address field) over a text selection made with a mouse or trackpad, as
+//! in Tiptap's BubbleMenu. Touch selections get the platform's own
+//! selection menu instead (see `touch.rs`), which is what users of phones
+//! expect.
 
 use rs_editor_state::Selection;
 use rs_editor_ui::{Appear, Icon, Toolbar, ToolbarButton, ToolbarEntry};
@@ -53,7 +54,15 @@ const ITEMS: &[Item] = &[
         command: "toggleHighlight",
         mark: "highlight",
     },
+    Item {
+        icon: Icon::Link,
+        command: LINK,
+        mark: "link",
+    },
 ];
+
+/// The link button opens the address field instead of running a command.
+const LINK: &str = "setLink";
 
 #[derive(Debug, Default)]
 pub(crate) struct Bubble {
@@ -96,6 +105,7 @@ impl EditorView {
             && !self.touch.active
             && self.drag.is_none()
             && self.composition.is_none()
+            && !self.link_editing()
             && matches!(self.editor.selection(), Selection::Text(_))
             && !self.editor.selection().empty()
     }
@@ -161,7 +171,7 @@ impl EditorView {
                 ToolbarEntry::Button(ToolbarButton {
                     icon: item.icon,
                     active: self.editor.is_active(item.mark, &no_attrs),
-                    enabled: self.editor.can(item.command, &Value::Null),
+                    enabled: item.command == LINK || self.editor.can(item.command, &Value::Null),
                 })
             })
             .collect();
@@ -225,7 +235,11 @@ impl EditorView {
         if self.bubble.toolbar.button_at(x, y) == Some(pressed)
             && let Some(item) = ITEMS.get(pressed)
         {
-            let _ = self.run(item.command, &Value::Null);
+            if item.command == LINK {
+                self.edit_link();
+            } else {
+                let _ = self.run(item.command, &Value::Null);
+            }
         }
         self.request_redraw();
         true

@@ -199,8 +199,18 @@ impl EditorView {
         self.profile
     }
 
+    /// Whether a finger is down in a gesture on the text.
+    pub(crate) fn touch_gesture_active(&self) -> bool {
+        self.touch.gesture.is_some()
+    }
+
     /// A touch event in view coordinates.
     pub fn touch(&mut self, phase: TouchPhase, x: f32, y: f32) {
+        // Popovers and menus take touches on them first.
+        if self.link_touch(phase, x, y) || self.slash_touch(phase, x, y) {
+            self.request_redraw();
+            return;
+        }
         let now = self.clock.now_ms();
         self.touch.finger = (x, y);
         match phase {
@@ -589,7 +599,8 @@ impl EditorView {
 
     /// The handles currently shown.
     pub fn touch_handles(&mut self) -> Vec<Handle> {
-        if !self.touch.active || !self.focused {
+        // The link address field has the input; the text's handles step aside.
+        if !self.touch.active || !self.focused || self.link_editing() {
             return Vec::new();
         }
         let selection = self.editor.selection().clone();
@@ -712,7 +723,7 @@ impl EditorView {
         }
     }
 
-    fn hide_menu(&mut self) {
+    pub(crate) fn hide_menu(&mut self) {
         if self.touch.menu_shown {
             self.touch.menu_shown = false;
             self.push_effect(Effect::SelectionMenu(None));

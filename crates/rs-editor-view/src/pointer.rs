@@ -110,7 +110,10 @@ impl EditorView {
         if event.button != PointerButton::Primary {
             return false;
         }
-        if self.bubble_pointer_down(event.x, event.y) {
+        if self.link_pointer_down(event.x, event.y, event.click_count, event.modifiers.shift)
+            || self.slash_pointer_down(event.x, event.y)
+            || self.bubble_pointer_down(event.x, event.y)
+        {
             return true;
         }
         self.stop_scrolling();
@@ -178,7 +181,10 @@ impl EditorView {
 
     pub fn pointer_move(&mut self, event: PointerEvent) -> bool {
         if self.drag.is_none()
-            && let Some(handled) = self.bubble_pointer_move(event.x, event.y)
+            && let Some(handled) = self
+                .link_pointer_move(event.x, event.y)
+                .or_else(|| self.slash_pointer_move(event.x, event.y))
+                .or_else(|| self.bubble_pointer_move(event.x, event.y))
         {
             return handled;
         }
@@ -217,7 +223,10 @@ impl EditorView {
     }
 
     pub fn pointer_up(&mut self, event: PointerEvent) -> bool {
-        if self.bubble_pointer_up(event.x, event.y) {
+        if self.link_pointer_up(event.x, event.y)
+            || self.slash_pointer_up(event.x, event.y)
+            || self.bubble_pointer_up(event.x, event.y)
+        {
             return true;
         }
         let dragged = self.drag.take().is_some();
@@ -226,6 +235,19 @@ impl EditorView {
             self.request_redraw();
         }
         dragged
+    }
+
+    /// A mouse wheel or trackpad scroll of `dy` with the pointer at
+    /// `(x, y)`: scrolls a menu under the pointer, else the document.
+    pub fn wheel(&mut self, x: f32, y: f32, dy: f32, smooth: bool) {
+        if self.slash_wheel(x, y, dy) {
+            return;
+        }
+        if smooth {
+            self.scroll_smooth_by(dy);
+        } else {
+            self.scroll_by(dy);
+        }
     }
 
     /// The selection as text positions, for hosts that render handles.

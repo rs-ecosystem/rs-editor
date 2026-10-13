@@ -86,6 +86,21 @@ impl NativeEditor {
         self.api.set_bubble_menu(enabled);
     }
 
+    /// Shows a menu of blocks when `/` is typed (on by default).
+    pub fn set_slash_menu(&mut self, enabled: bool) {
+        self.api.set_slash_menu(enabled);
+    }
+
+    /// The language of the editor's own UI, as a BCP 47 tag.
+    pub fn set_locale(&mut self, locale: String) {
+        self.api.set_locale(&locale);
+    }
+
+    /// Opens the link address field; false when there is nothing to link.
+    pub fn edit_link(&mut self) -> bool {
+        self.api.edit_link()
+    }
+
     /// Whether pasted plain text is read as Markdown (off by default).
     pub fn set_markdown_paste(&mut self, markdown: bool) {
         self.api.set_markdown_paste(markdown);

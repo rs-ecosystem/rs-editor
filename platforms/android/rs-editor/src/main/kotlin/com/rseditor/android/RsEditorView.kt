@@ -100,6 +100,8 @@ class RsEditorView private constructor(
         isFocusable = true
         isFocusableInTouchMode = true
         holder.addCallback(this)
+        // The editor's own menus speak the user's language.
+        native.setLocale(java.util.Locale.getDefault().toLanguageTag())
         if (Build.VERSION.SDK_INT >= 30) {
             // Follow the keyboard frame by frame while it slides.
             setWindowInsetsAnimationCallback(object :
@@ -176,6 +178,25 @@ class RsEditorView private constructor(
             field = value
             native.setMarkdownPaste(value)
         }
+
+    /** Shows a menu of blocks (headings, lists, quote, code…) when `/` is typed (on by default). */
+    var slashMenu: Boolean = true
+        set(value) {
+            field = value
+            native.setSlashMenu(value)
+            scheduleFrame()
+        }
+
+    /**
+     * Opens the link address field over the link at the caret or the selected text, for an
+     * app's link button. Returns false when there is nothing to link.
+     */
+    fun editLink(): Boolean {
+        if (!hasFocus()) requestFocus()
+        val opened = native.editLink()
+        afterInput()
+        return opened
+    }
 
     val isEmpty: Boolean get() = native.isEmpty()
 
@@ -381,14 +402,22 @@ class RsEditorView private constructor(
 
     override fun onCreateInputConnection(out: EditorInfo): InputConnection? {
         if (released || !native.isEditable()) return null
-        out.inputType = InputType.TYPE_CLASS_TEXT or
-            InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-            InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
-            InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
-        out.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or
-            EditorInfo.IME_FLAG_NO_FULLSCREEN or
-            EditorInfo.IME_ACTION_NONE
         val state = imeState()
+        if (state.start == LINK_FIELD) {
+            // The link address field: a keyboard for URLs with a Go key.
+            out.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            out.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+                EditorInfo.IME_FLAG_NO_FULLSCREEN or
+                EditorInfo.IME_ACTION_GO
+        } else {
+            out.inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+            out.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+                EditorInfo.IME_FLAG_NO_FULLSCREEN or
+                EditorInfo.IME_ACTION_NONE
+        }
         out.initialSelStart = state.selectionStart
         out.initialSelEnd = state.selectionEnd
         if (Build.VERSION.SDK_INT >= 30) out.setInitialSurroundingText(state.text)
@@ -529,6 +558,8 @@ class RsEditorView private constructor(
 
     private companion object {
         const val TAG = "RsEditorView"
+        /** `ImeState.start` while the link address field takes input. */
+        const val LINK_FIELD = -2
 
         fun log(message: String) {
             if (Log.isLoggable(TAG, Log.DEBUG)) Log.d(TAG, message)

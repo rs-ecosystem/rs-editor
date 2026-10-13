@@ -1,5 +1,5 @@
 //! Drawing a frame: background, document, selection, composition
-//! underline, caret and placeholder.
+//! underline, caret, placeholder, and the menus over them.
 
 use rs_editor_extensions::starter_kit::Placeholder;
 use rs_editor_layout::{Rect, render};
@@ -15,6 +15,8 @@ impl EditorView {
         self.tick_scroll();
         self.tick_touch();
         self.update_bubble();
+        self.update_slash();
+        self.update_link();
         let theme = self.theme().clone();
         let layout = self.layout().clone();
         let scale = self.scale;
@@ -65,6 +67,7 @@ impl EditorView {
         }
 
         if selection.empty()
+            && !self.link_editing()
             && matches!(selection, Selection::Text(_))
             && self.caret_visible()
             && let Some(rect) =
@@ -78,6 +81,8 @@ impl EditorView {
         canvas.scale((scale, scale));
         self.paint_handles(canvas);
         self.paint_bubble(canvas);
+        self.paint_slash(canvas);
+        self.paint_link(canvas);
         canvas.restore();
     }
 
@@ -113,5 +118,66 @@ impl EditorView {
             let label_layout = self.engine.placeholder(&text.node, label, text.rect.width);
             render::paint_placeholder(canvas, &label_layout, text.rect.x, text.rect.y);
         }
+    }
+}
+
+impl EditorView {
+    /// Draws one of each kind of UI the editor shows (panels with their
+    /// shadow, buttons, icons, menu rows, a text field, fading text) onto
+    /// `canvas`. GPU shells call it once on a small offscreen surface
+    /// soon after the first frame, so the GPU programs these need are
+    /// compiled before a menu first opens (WebGL compiles them on first
+    /// use, which would make that frame take hundreds of milliseconds).
+    pub fn paint_ui_warm_up(&self, canvas: &Canvas) {
+        use rs_editor_layout::UiText;
+        use rs_editor_ui::{Icon, Menu, MenuItem, TextField, Toolbar, ToolbarButton, ToolbarEntry};
+
+        let theme = self.theme();
+        let palette = &theme.palette;
+        let mut toolbar = Toolbar::new(
+            [Icon::Bold, Icon::Link]
+                .iter()
+                .enumerate()
+                .map(|(index, &icon)| {
+                    ToolbarEntry::Button(ToolbarButton {
+                        icon,
+                        active: index == 0,
+                        enabled: true,
+                    })
+                })
+                .collect(),
+        );
+        toolbar.hovered = Some(1);
+        toolbar.paint(canvas, theme, 1.0);
+        toolbar.paint(canvas, theme, 0.5);
+
+        let label = |text: &str, style: UiText| self.engine.ui_label(text, &style, Some(120.0));
+        let menu = Menu {
+            items: vec![MenuItem {
+                icon: Icon::Text,
+                label: label("Text", UiText::small(palette.popover_foreground)),
+                hint: Some(label(
+                    "#",
+                    UiText {
+                        mono: true,
+                        ..UiText::extra_small(palette.muted_foreground)
+                    },
+                )),
+            }],
+            origin: (0.0, 48.0),
+            width: 160.0,
+            selected: Some(0),
+            ..Menu::default()
+        };
+        menu.paint(canvas, theme, 1.0);
+        menu.paint(canvas, theme, 0.5);
+
+        let mut field = TextField::new("https://");
+        let layout = label(field.text(), UiText::small(palette.foreground));
+        let rect = skia_safe::Rect::from_xywh(8.0, 96.0, 160.0, 28.0);
+        field.paint(canvas, theme, rect, &layout, None, true);
+        field.move_to(2, false);
+        field.invalid = true;
+        field.paint(canvas, theme, rect, &layout, None, true);
     }
 }

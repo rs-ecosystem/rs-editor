@@ -16,7 +16,8 @@ mod text;
 mod tops;
 
 pub use document::{
-    BlockBox, BulletStyle, Decoration, DocumentLayout, Hit, LayoutEngine, TextBox, VisualDirection,
+    BlockBox, BulletStyle, Decoration, DocumentLayout, Hit, LayoutEngine, TextBox, UiText,
+    VisualDirection,
 };
 pub use geometry::Rect;
 pub use rs_editor_text::Affinity;

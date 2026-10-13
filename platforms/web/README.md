@@ -36,7 +36,13 @@ editor.destroy();
 
 Semua perintah dari extension Rust bisa dipakai sebagai metode chain, dengan argumen yang sama seperti di Tiptap. Tipe TypeScript-nya ada di `src/index.d.ts`.
 
-Saat teks dipilih dengan mouse atau trackpad, editor menampilkan bubble menu (tebal, miring, garis bawah, coret, kode, sorotan) yang digambar di canvas. Matikan dengan `bubbleMenu: false` kalau aplikasi punya menu sendiri. Di HP, seleksi tetap memakai menu Potong/Salin/Tempel.
+## Menu di dalam editor
+
+Menu-menu ini digambar di canvas dengan gaya shadcn/ui, sama di semua platform. Teksnya mengikuti `locale` (default `navigator.language`; saat ini Indonesia dan Inggris).
+
+- **Bubble menu.** Saat teks dipilih dengan mouse atau trackpad, muncul tombol tebal, miring, garis bawah, coret, kode, sorotan, dan tautan. Matikan dengan `bubbleMenu: false` kalau aplikasi punya menu sendiri. Di HP, seleksi tetap memakai menu Potong/Salin/Tempel.
+- **Menu blok.** Mengetik `/` di awal baris atau setelah spasi membuka daftar blok (teks, judul 1–3, list poin, list bernomor, daftar tugas, kutipan, blok kode, pemisah). Teks setelah `/` menyaring daftarnya, termasuk lewat kata kunci seperti `h1`, `todo`, atau `kutipan`. Panah memilih, Enter atau Tab menerapkan, Esc menutup. Blok yang tidak bisa dipakai di posisi itu tidak ditampilkan. Matikan dengan `slashMenu: false`.
+- **Tautan.** Dengan caret di dalam tautan, muncul popover berisi alamatnya dan tombol buka, salin, ubah, dan hapus. Cmd/Ctrl-K, tombol tautan di bubble menu, atau `editor.editLink()` membuka kolom alamat. Alamat tanpa skema dilengkapi (`rs-editor.dev` → `https://…`, alamat email → `mailto:`), dan alamat yang ditolak (misalnya `javascript:`) membuat kolomnya merah. Kolom ini menerima keyboard, IME, dan tempel seperti kolom teks biasa; di HP keyboard-nya berganti ke mode URL.
 
 ## Emoji dan font
 

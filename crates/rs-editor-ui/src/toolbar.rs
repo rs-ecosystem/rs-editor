@@ -5,7 +5,7 @@
 use rs_editor_theme::Theme;
 use skia_safe::{Canvas, Contains, Paint, RRect, Rect};
 
-use crate::{Icon, PANEL_PADDING, paint_panel, sk, with_alpha};
+use crate::{Icon, PANEL_PADDING, begin_appear, paint_panel, sk, with_alpha};
 
 pub const BUTTON_SIZE: f32 = 32.0;
 const ICON_SIZE: f32 = 16.0;
@@ -106,13 +106,14 @@ impl Toolbar {
             return;
         }
         let rect = self.rect();
-        canvas.save();
-        // Zoom from 95% around the center, as shadcn's popovers open.
-        let zoom = 0.95 + 0.05 * progress;
-        canvas.translate((rect.center_x(), rect.center_y()));
-        canvas.scale((zoom, zoom));
-        canvas.translate((-rect.center_x(), -rect.center_y()));
+        begin_appear(canvas, rect, progress);
         paint_panel(canvas, rect, theme, progress);
+        self.paint_buttons(canvas, theme, progress);
+        canvas.restore();
+    }
+
+    /// Paints the buttons alone, for a panel the caller draws.
+    pub fn paint_buttons(&self, canvas: &Canvas, theme: &Theme, progress: f32) {
         let palette = &theme.palette;
         for (index, (entry, entry_rect)) in self.entries.iter().zip(self.entry_rects()).enumerate()
         {
@@ -169,6 +170,5 @@ impl Toolbar {
                 }
             }
         }
-        canvas.restore();
     }
 }

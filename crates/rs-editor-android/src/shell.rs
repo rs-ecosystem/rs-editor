@@ -28,6 +28,8 @@ struct Gl {
     skia: Option<DirectContext>,
     target: Option<Surface>,
     pixels: (i32, i32),
+    /// The UI's GPU programs were compiled ahead of first use.
+    warmed: bool,
 }
 
 /// What the Android side keeps per editor.
@@ -117,6 +119,7 @@ impl Gl {
             skia: None,
             target: None,
             pixels: (1, 1),
+            warmed: false,
         })
     }
 
@@ -225,8 +228,32 @@ impl Gl {
         view.paint(target.canvas());
         skia.flush_and_submit();
         let _ = self.egl.swap_buffers(self.display, surface);
+        if !self.warmed {
+            // Right after the first frame is on screen.
+            self.warmed = true;
+            warm_up(skia, view);
+        }
         self.surface_size(surface)
             .is_some_and(|size| size != self.pixels)
+    }
+}
+
+/// Compiles the GPU programs of the editor's menus and popovers by drawing
+/// them once offscreen (see [`EditorView::paint_ui_warm_up`]).
+fn warm_up(skia: &mut DirectContext, view: &EditorView) {
+    let info = skia_safe::ImageInfo::new_n32_premul((256, 160), None);
+    if let Some(mut surface) = gpu::surfaces::render_target(
+        skia,
+        gpu::Budgeted::Yes,
+        &info,
+        None,
+        SurfaceOrigin::TopLeft,
+        None,
+        false,
+        None,
+    ) {
+        view.paint_ui_warm_up(surface.canvas());
+        skia.flush_and_submit();
     }
 }
 

@@ -11,7 +11,7 @@
 | P2 | Layout inkremental, render Skia, view, tema shadcn, dev harness desktop | **Selesai** |
 | P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Hampir selesai.** Milestone 1–2 selesai, milestone 3 tinggal uji screen reader sungguhan dan Firefox |
 | P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit, library Kotlin dan Compose | **Selesai.** Navigasi TalkBack dan Samsung Keyboard jadi tugas lanjutan |
-| P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | **Berjalan.** Milestone 1 (bubble menu) selesai |
+| P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | **Berjalan.** Milestone 1–2 selesai (bubble menu, menu blok `/`, popover tautan) |
 | P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | Belum dimulai |
 | P7 | Windows dan Linux: winit, IME, AccessKit | Belum dimulai |
 | P8 | Tabel, mention, hardening, API 1.0 | Belum dimulai |
@@ -257,10 +257,33 @@ UI editor digambar Skia di canvas yang sama, sehingga tampilannya identik di sem
   - Android native belum meneruskan mouse dan trackpad ke editor, jadi di sana menu ini belum pernah muncul. Itu tugas lanjutan.
 - **Uji di Chrome desktop:** klik ganda memilih kata dan menu muncul dengan animasi; B membuat teks tebal dan tombolnya menyala; undo dan klik di tempat lain menyembunyikan menu; seleksi tarik dan tema gelap benar.
 
-### Milestone 2: slash menu dan popover link · Belum
+### Milestone 2: menu blok dan popover tautan · Selesai
 
-- Palet `/` dengan filter, navigasi keyboard, dan grup (judul, list, kutipan, kode, pemisah).
-- Popover link: buka, salin, ubah, dan hapus link; input URL di dalam canvas.
+- **Komponen baru di `rs-editor-ui`:**
+  - `Menu`: daftar perintah seperti Command shadcn. Baris 32 px berisi ikon, label, dan petunjuk di kanan; baris terpilih memakai warna accent; isinya bisa di-scroll.
+  - `TextField`: kolom satu baris seperti Input shadcn, dengan ring fokus, warna destructive saat ditolak, seleksi, garis bawah komposisi, dan scroll horizontal. Teks, seleksi, dan komposisinya disimpan dalam satuan UTF-16, satuan yang dipakai IME.
+  - Label UI dibentuk oleh `LayoutEngine::ui_label` dengan font tema, lalu dipotong dengan elipsis.
+- **Menu blok** (`rs-editor-view/src/slash.rs`), seperti Notion dan template slash command Tiptap:
+  - Muncul saat `/` diketik di awal blok atau setelah spasi, tetapi tidak di blok kode. Statusnya diturunkan dari dokumen seperti plugin Suggestion Tiptap, sehingga mengetik, menghapus, undo, dan IME tetap konsisten.
+  - Baris: teks, judul 1–3, list poin, list bernomor, daftar tugas, kutipan, blok kode, pemisah, masing-masing dengan pintasan Markdown-nya. Kueri menyaring label dan kata kunci dalam dua bahasa (`h2`, `todo`, `kutipan`). Baris yang perintahnya tidak bisa jalan di posisi itu (dry run `can`) disembunyikan.
+  - Panah memilih, Enter atau Tab menerapkan, Esc menutup sampai kueri berakhir. Enter dari IME (baris baru) juga menerapkan. Hover memilih, klik menerapkan, roda mouse menggulir menu. Di layar sentuh, ketuk menerapkan dan geser menggulir menu.
+  - Menghapus kueri dan mengubah blok terjadi dalam satu transaksi dengan langkah undo sendiri: undo mengembalikan `/kueri`.
+  - Menu muncul di bawah baris, atau di atasnya kalau ruang di bawah lebih sempit (misalnya tertutup keyboard).
+- **Popover tautan** (`rs-editor-view/src/link.rs`):
+  - Dengan caret di dalam tautan, popover menampilkan alamat dan tombol buka, salin, ubah, dan hapus. Di editor read-only hanya ada buka dan salin. Esc menyembunyikannya sampai caret keluar dari tautan itu.
+  - Kolom alamat dibuka lewat Mod-K, tombol tautan di bubble menu, tombol ubah, atau API (`edit_link`, `editor.editLink()`, `RsEditorView.editLink()`).
+  - Enter menerapkan tautan ke seleksi atau seluruh tautan yang ada. Tanpa seleksi, alamat dimasukkan sebagai teks bertaut. Alamat dilengkapi otomatis (`https://`, `mailto:`). Alamat yang ditolak extension Link membuat kolom merah dan tetap terbuka. Kolom kosong menghapus tautan.
+  - Selama kolom terbuka, semua input teks diarahkan ke kolom: tombol, teks, komposisi IME, salin/potong/tempel, dan seleksi lewat mouse atau sentuhan. IME melihat teks kolom (`ImeContext::field`; `start` −2 di API). Adapter web memasang `inputmode="url"`, dan Android memulai ulang input dengan `TYPE_TEXT_VARIATION_URI` dan tombol Go.
+  - Handle dan menu seleksi native disembunyikan selama kolom terbuka.
+- **Bahasa UI:** `set_locale` (Indonesia, Inggris sebagai cadangan). Web memakai `navigator.language`, Android `Locale.getDefault()`, desktop `LANG`.
+- **Pemanasan shader:** WebGL mengompilasi program GPU saat pertama dipakai, sehingga popover pertama butuh 150–680 ms. Shell web (`rse_warm_up`, saat idle) dan Android (setelah frame pertama) kini menggambar setiap komponen sekali di surface offscreen. Frame terlama saat menu pertama muncul turun menjadi sekitar 19 ms.
+- **Uji:**
+  - 14 tes view baru (menu blok dan tautan) dan 3 tes `rs-editor-ui` (kolom teks, IME, menu).
+  - Chrome desktop, mode EditContext dan textarea: menu blok, popover, dan kolom alamat lewat keyboard sungguhan.
+  - Android dengan Gboard: menu blok di atas keyboard, scroll dengan jari, ketuk Kutipan; kolom alamat dengan keyboard URL dan tombol Go.
+- **Belum:**
+  - Menu dan popover belum masuk pohon aksesibilitas (listbox dan kolom teks untuk screen reader).
+  - Placeholder bawaan ("Write something…") belum ikut `locale`.
 
 ### Milestone 3: blok dan konten · Belum
 
@@ -268,7 +291,7 @@ UI editor digambar Skia di canvas yang sama, sehingga tampilannya identik di sem
 
 ## Berikutnya
 
-1. **P5:** milestone 2 (slash menu dan popover link).
+1. **P5:** milestone 3 (drag handle, placeholder, text-align, character count, gambar), lalu aksesibilitas menu dan popover.
 2. **P3 (web):** uji screen reader sungguhan (VoiceOver, TalkBack di Chrome Android) dan Firefox.
 3. **Tugas lanjutan Android:** navigasi TalkBack (lihat milestone 2), Samsung Keyboard, `addVisibleLineBounds`, paket AAR/Maven.
 4. **Desktop (P7):** menu klik kanan Potong/Salin/Tempel memakai sinyal `SelectionMenu` yang sama.
