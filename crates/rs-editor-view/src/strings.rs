@@ -12,6 +12,10 @@ pub(crate) struct Strings {
     pub code_block: &'static str,
     pub divider: &'static str,
     pub link_placeholder: &'static str,
+    pub image: &'static str,
+    pub image_placeholder: &'static str,
+    /// Shown in an empty line with the caret.
+    pub placeholder: &'static str,
 }
 
 const ENGLISH: Strings = Strings {
@@ -24,6 +28,9 @@ const ENGLISH: Strings = Strings {
     code_block: "Code block",
     divider: "Divider",
     link_placeholder: "Paste or type a link",
+    image: "Image",
+    image_placeholder: "Paste an image link",
+    placeholder: "Write, or type \u{201c}/\u{201d} for commands",
 };
 
 const INDONESIAN: Strings = Strings {
@@ -36,6 +43,9 @@ const INDONESIAN: Strings = Strings {
     code_block: "Blok kode",
     divider: "Pemisah",
     link_placeholder: "Tempel atau ketik tautan",
+    image: "Gambar",
+    image_placeholder: "Tempel tautan gambar",
+    placeholder: "Tulis, atau ketik \u{201c}/\u{201d} untuk perintah",
 };
 
 /// The strings for a BCP 47 language tag (`"id-ID"`, `"en"`); English

@@ -1308,7 +1308,7 @@ mod touch {
     }
 
     #[test]
-    fn handles_grow_by_words_shrink_by_characters_and_never_cross() {
+    fn handles_grow_by_words_shrink_by_characters_and_cross_like_android() {
         let (mut view, clock) = setup(doc(vec![p("halo dunia indah sekali")]));
         let at = point_of(&mut view, 8);
         tap(&mut view, at);
@@ -1343,8 +1343,22 @@ mod touch {
             (6, 24),
             "moving outward again snaps to words"
         );
+        drag_to(&mut view, 6);
+        assert_eq!(
+            selection(&view),
+            (6, 24),
+            "meeting the start keeps the selection"
+        );
+        // Past the start the handles trade places, as on Android: the start
+        // stays as the end and the dragged handle becomes the start.
         drag_to(&mut view, 3);
-        assert_eq!(selection(&view), (6, 24), "the end never passes the start");
+        assert_eq!(selection(&view), (3, 6), "the handles crossed");
+        let kinds: Vec<_> = view.touch_handles().iter().map(|h| h.kind).collect();
+        assert!(kinds.contains(&HandleKind::Start) && kinds.contains(&HandleKind::End));
+        drag_to(&mut view, 2);
+        assert_eq!(selection(&view), (1, 6), "as the start it grows by words");
+        drag_to(&mut view, 9);
+        assert_eq!(selection(&view), (6, 9), "and crosses back");
         view.touch(TouchPhase::Up, grab.0, grab.1);
         assert!(menus(&view.take_effects()).last().unwrap().is_some());
     }
@@ -1744,7 +1758,7 @@ mod slash {
         let (mut view, _) = setup(vec![p("")]);
         type_text(&mut view, "/");
         assert!(view.slash_menu_shown());
-        assert_eq!(view.slash_menu_items().len(), 10);
+        assert_eq!(view.slash_menu_items().len(), 11);
         assert_eq!(view.slash.selected(), Some(0));
 
         type_text(&mut view, "hea");
@@ -2089,5 +2103,277 @@ mod link {
         assert_eq!(normalize_href("#bagian"), "#bagian");
         assert_eq!(normalize_href("/docs"), "/docs");
         assert_eq!(normalize_href("www.a.b/x"), "https://www.a.b/x");
+    }
+}
+
+mod blocks {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn texts(view: &EditorView) -> String {
+        view.editor().get_text("|")
+    }
+
+    fn setup() -> (EditorView, Arc<ManualClock>) {
+        let content = doc(vec![p("satu"), p("dua"), p("tiga"), p("empat")]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        (view, clock)
+    }
+
+    /// The view y of the middle of the block containing `pos`.
+    fn block_y(view: &mut EditorView, pos: usize) -> f32 {
+        view_y_of(view, pos) + 10.0
+    }
+
+    #[test]
+    fn hovering_a_block_shows_its_grip_and_dragging_moves_it() {
+        let (mut view, clock) = setup();
+        let y = block_y(&mut view, 1);
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        assert!(view.drag_handle_shown());
+        assert_eq!(view.blocks.block(), Some(0));
+        let y = block_y(&mut view, 7);
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        assert_eq!(view.blocks.block(), Some(6), "the grip follows the mouse");
+        clock.advance(200);
+        paint(&mut view);
+
+        // Drag "dua" below "tiga".
+        let (gx, gy) = view.blocks.grip_center();
+        assert!(view.pointer_down(PointerEvent::at(gx, gy)));
+        assert!(view.has_node_selection(), "the block is selected");
+        let target = block_y(&mut view, 18) + 4.0;
+        assert!(view.pointer_move(PointerEvent::at(gx, target)));
+        assert!(view.is_dragging_block());
+        paint(&mut view);
+        assert!(view.pointer_up(PointerEvent::at(gx, target)));
+        assert_eq!(texts(&view), "satu|tiga|dua|empat");
+        assert!(view.has_node_selection());
+        assert_eq!(view.editor().selection().from(), 12, "the moved block");
+
+        // One undo puts it back.
+        view.run("undo", &Value::Null).unwrap();
+        assert_eq!(texts(&view), "satu|dua|tiga|empat");
+    }
+
+    #[test]
+    fn a_drag_to_the_top_or_cancelled_with_escape() {
+        let (mut view, clock) = setup();
+        let y = block_y(&mut view, 18);
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let (gx, gy) = view.blocks.grip_center();
+        view.pointer_down(PointerEvent::at(gx, gy));
+        let top = block_y(&mut view, 1) - 8.0;
+        view.pointer_move(PointerEvent::at(gx, top));
+        assert!(key(&mut view, "Escape", plain()));
+        view.pointer_up(PointerEvent::at(gx, top));
+        assert_eq!(texts(&view), "satu|dua|tiga|empat", "cancelled");
+
+        let (gx, gy) = view.blocks.grip_center();
+        view.pointer_down(PointerEvent::at(gx, gy));
+        view.pointer_move(PointerEvent::at(gx, top));
+        view.pointer_up(PointerEvent::at(gx, top));
+        assert_eq!(texts(&view), "empat|satu|dua|tiga");
+    }
+
+    #[test]
+    fn a_click_on_the_grip_selects_the_block() {
+        let (mut view, clock) = setup();
+        let y = block_y(&mut view, 7);
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let (gx, gy) = view.blocks.grip_center();
+        view.pointer_down(PointerEvent::at(gx, gy));
+        view.pointer_up(PointerEvent::at(gx, gy));
+        assert!(view.has_node_selection());
+        assert_eq!(view.editor().selection().from(), 6);
+        // Backspace deletes the selected block.
+        assert!(key(&mut view, "Backspace", plain()));
+        assert_eq!(texts(&view), "satu|tiga|empat");
+
+        // The mouse leaving the view hides the grip.
+        view.pointer_leave();
+        paint(&mut view);
+        assert!(!view.drag_handle_shown());
+    }
+
+    #[test]
+    fn touch_shows_the_grip_of_the_caret_block_and_drags_it() {
+        let (mut view, clock) = setup();
+        let (x, y) = (60.0, block_y(&mut view, 13));
+        view.touch(TouchPhase::Down, x, y);
+        view.touch(TouchPhase::Up, x, y);
+        clock.advance(400);
+        paint(&mut view);
+        assert!(view.drag_handle_shown());
+        assert_eq!(view.blocks.block(), Some(11), "the caret's block");
+        clock.advance(200);
+        paint(&mut view);
+
+        let (gx, gy) = view.blocks.grip_center();
+        view.touch(TouchPhase::Down, gx, gy);
+        assert!(
+            view.take_effects()
+                .contains(&Effect::Haptic(HapticKind::LongPress))
+        );
+        let top = block_y(&mut view, 1) - 8.0;
+        view.touch(TouchPhase::Move, gx, top);
+        view.touch(TouchPhase::Up, gx, top);
+        assert_eq!(texts(&view), "tiga|satu|dua|empat");
+    }
+
+    #[test]
+    fn the_handle_can_be_turned_off() {
+        let (mut view, _) = setup();
+        view.set_drag_handle(false);
+        let y = block_y(&mut view, 1);
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        assert!(!view.drag_handle_shown());
+    }
+}
+
+mod content {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn image(src: &str) -> Value {
+        json!({"type": "image", "attrs": {"src": src}})
+    }
+
+    #[test]
+    fn images_are_loaded_by_the_host_and_take_their_size() {
+        let (mut view, _) = view_with(
+            doc(vec![p("a"), image("x.png"), p("b")]),
+            KeyPlatform::Other,
+        );
+        paint(&mut view);
+        let effects = view.take_effects();
+        assert!(effects.contains(&Effect::MissingImages(vec!["x.png".into()])));
+        let before = view_y_of(&mut view, 6);
+
+        // A 200 × 100 image at 2 pixels per CSS pixel: 100 × 50.
+        let rgba = vec![255u8; 200 * 100 * 4];
+        assert!(view.add_image("x.png", &rgba, 200, 100, 2.0, false));
+        assert!(
+            !view.add_image("x.png", &rgba, 10, 10, 1.0, false),
+            "wrong size"
+        );
+        paint(&mut view);
+        let after = view_y_of(&mut view, 6);
+        let gap = view.theme().spacing.block_gap;
+        let first = view_y_of(&mut view, 1);
+        assert!(after < before, "{after} < {before}");
+        assert!(
+            (after - (first + 24.0 + gap + 50.0 + gap)).abs() < 8.0,
+            "{after}"
+        );
+        // Reported once.
+        assert!(
+            !view
+                .take_effects()
+                .iter()
+                .any(|e| matches!(e, Effect::MissingImages(_)))
+        );
+
+        view.image_failed("y.png");
+        paint(&mut view);
+    }
+
+    #[test]
+    fn the_slash_menu_inserts_images() {
+        let (mut view, _) = view_with(doc(vec![p("")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.insert_text("/");
+        view.insert_text("gam");
+        paint(&mut view);
+        assert_eq!(view.slash_menu_items(), ["Image"]);
+        assert!(key(&mut view, "Enter", plain()));
+        assert!(view.link_editing(), "asks for an address");
+        assert_eq!(view.editor().get_text(""), "");
+        view.insert_text("rs-editor.dev/logo.png");
+        assert!(key(&mut view, "Enter", plain()));
+        let json = view.editor().get_json();
+        let image = json["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["type"] == "image")
+            .unwrap()
+            .clone();
+        assert_eq!(image["attrs"]["src"], "https://rs-editor.dev/logo.png");
+
+        // With the app's picker, the app is asked instead.
+        let (mut view, _) = view_with(doc(vec![p("")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.set_image_picker(true);
+        view.insert_text("/");
+        view.insert_text("image");
+        paint(&mut view);
+        view.take_effects();
+        assert!(key(&mut view, "Enter", plain()));
+        assert!(view.take_effects().contains(&Effect::PickImage));
+        assert!(!view.link_editing());
+        assert_eq!(view.editor().get_text(""), "", "the query is gone");
+    }
+
+    #[test]
+    fn pasting_an_address_makes_a_link() {
+        let (mut view, _) = view_with(doc(vec![p("halo dunia")]), KeyPlatform::Other);
+        view.select_text(6, 11, Affinity::Downstream);
+        assert!(view.paste_text("https://rs-editor.dev"));
+        assert_eq!(view.editor().get_text(""), "halo dunia", "the text stays");
+        assert!(
+            view.editor()
+                .get_json()
+                .to_string()
+                .contains(r#""href":"https://rs-editor.dev""#)
+        );
+
+        let (mut view, _) = view_with(doc(vec![p("lihat ")]), KeyPlatform::Other);
+        view.select_text(7, 7, Affinity::Downstream);
+        assert!(view.paste_text(" www.rs-editor.dev "));
+        assert_eq!(view.editor().get_text(""), "lihat www.rs-editor.dev");
+        assert!(
+            view.editor()
+                .get_json()
+                .to_string()
+                .contains(r#""href":"https://www.rs-editor.dev""#)
+        );
+
+        // Words are not addresses; code takes addresses as text.
+        let (mut view, _) = view_with(doc(vec![json!({"type": "codeBlock"})]), KeyPlatform::Other);
+        view.select_text(1, 1, Affinity::Downstream);
+        assert!(view.paste_text("https://a.b"));
+        assert!(!view.editor().get_json().to_string().contains("link"));
+    }
+
+    #[test]
+    fn the_placeholder_speaks_the_ui_language() {
+        let (mut view, _) = view_with(doc(vec![p("")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.set_locale("id");
+        paint(&mut view);
+        view.set_placeholder(Some("Mulai menulis".into()));
+        paint(&mut view);
+        view.set_placeholder(None);
+        paint(&mut view);
     }
 }

@@ -35,6 +35,7 @@ impl NativeEditor {
         dark: bool,
         content: String,
         markdown: bool,
+        character_limit: i32,
     ) -> Self {
         Self {
             api: EditorApi::new(ApiOptions {
@@ -46,6 +47,7 @@ impl NativeEditor {
                 content,
                 markdown,
                 profile: InteractionProfile::android(),
+                character_limit: usize::try_from(character_limit).ok().filter(|&n| n > 0),
                 ..Default::default()
             }),
             #[cfg(target_os = "android")]
@@ -84,6 +86,51 @@ impl NativeEditor {
     /// default; touch selections get the system's menu).
     pub fn set_bubble_menu(&mut self, enabled: bool) {
         self.api.set_bubble_menu(enabled);
+    }
+
+    /// Shows a grip beside blocks to select and move them (on by default).
+    pub fn set_drag_handle(&mut self, enabled: bool) {
+        self.api.set_drag_handle(enabled);
+    }
+
+    /// The grip's touch area in pixels (`[l, t, r, b]` JSON) while it shows,
+    /// else empty.
+    pub fn drag_handle_rect(&self) -> String {
+        self.api.drag_handle_rect()
+    }
+
+    /// Text in an empty line with the caret; empty restores the default.
+    pub fn set_placeholder(&mut self, text: String) {
+        self.api.set_placeholder(&text);
+    }
+
+    /// `{characters, words, limit}` JSON.
+    pub fn character_count(&self) -> String {
+        self.api.character_count()
+    }
+
+    /// The picture for an image reported by the `missingImages` effect:
+    /// premultiplied RGBA pixels (an `ARGB_8888` bitmap's memory), `scale`
+    /// pixels per CSS pixel.
+    pub fn add_image(
+        &mut self,
+        src: String,
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+        scale: f32,
+    ) -> bool {
+        self.api.add_image(&src, &rgba, width, height, scale, true)
+    }
+
+    /// The image at `src` could not be loaded.
+    pub fn image_failed(&mut self, src: String) {
+        self.api.image_failed(&src);
+    }
+
+    /// Whether the app picks images itself (`pickImage` effect).
+    pub fn set_image_picker(&mut self, on: bool) {
+        self.api.set_image_picker(on);
     }
 
     /// Shows a menu of blocks when `/` is typed (on by default).

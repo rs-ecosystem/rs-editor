@@ -39,18 +39,20 @@ class RsEditorView private constructor(
     attrs: AttributeSet?,
     content: String,
     markdown: Boolean,
+    characterLimit: Int,
 ) : SurfaceView(context, attrs), SurfaceHolder.Callback2, Choreographer.FrameCallback {
 
     @JvmOverloads
-    constructor(context: Context, attrs: AttributeSet? = null) : this(context, attrs, "", false)
+    constructor(context: Context, attrs: AttributeSet? = null) : this(context, attrs, "", false, 0)
 
     /**
      * An editor starting with `content`: a Tiptap JSON document or HTML, or Markdown when
-     * [markdown]. Unlike setting [json] later, this is not an undoable change.
+     * [markdown]. Unlike setting [json] later, this is not an undoable change. A
+     * [characterLimit] above 0 caps the document's characters (Tiptap's CharacterCount).
      */
     @JvmOverloads
-    constructor(context: Context, content: String, markdown: Boolean = false) :
-        this(context, null, content, markdown)
+    constructor(context: Context, content: String, markdown: Boolean = false, characterLimit: Int = 0) :
+        this(context, null, content, markdown, characterLimit)
 
     /** Told whenever the document or the selection may have changed. */
     fun interface OnChangeListener {
@@ -59,7 +61,8 @@ class RsEditorView private constructor(
 
     private val density = resources.displayMetrics.density
     private val imm = context.getSystemService(InputMethodManager::class.java)
-    internal val native = NativeEditor(1f, 1f, density, systemDark(), content, markdown)
+    internal val native = NativeEditor(1f, 1f, density, systemDark(), content, markdown, characterLimit)
+    private val images = ImageLoader(this)
     private val selection = SelectionUi(this)
     private val listeners = mutableListOf<OnChangeListener>()
     private var surfaceReady = false
@@ -140,6 +143,7 @@ class RsEditorView private constructor(
         selection.release()
         holder.removeCallback(this)
         surfaceReady = false
+        images.release()
         native.close()
     }
 
@@ -197,6 +201,42 @@ class RsEditorView private constructor(
         afterInput()
         return opened
     }
+
+    /** Shows a grip beside blocks to select and drag them (on by default). */
+    var dragHandle: Boolean = true
+        set(value) {
+            field = value
+            native.setDragHandle(value)
+            scheduleFrame()
+        }
+
+    /** Text in an empty line with the caret; null shows a hint at the `/` menu. */
+    var placeholder: String? = null
+        set(value) {
+            field = value
+            native.setPlaceholder(value.orEmpty())
+            scheduleFrame()
+        }
+
+    /**
+     * Called when the user inserts an image from the `/` menu: show a picker and call
+     * [insertImage] with the result. Without it the editor asks for an image address.
+     */
+    var onPickImage: (() -> Unit)? = null
+        set(value) {
+            field = value
+            native.setImagePicker(value != null)
+        }
+
+    /** Inserts an image at the caret (`setImage`); `src` is any address the editor can load. */
+    fun insertImage(src: String, alt: String? = null): Boolean =
+        chain().focus().command("setImage", mapOf("src" to src, "alt" to alt)).run()
+
+    /** Characters in the document (graphemes, so an emoji counts once). */
+    val characters: Int get() = JSONObject(native.characterCount()).optInt("characters")
+
+    /** Words in the document. */
+    val words: Int get() = JSONObject(native.characterCount()).optInt("words")
 
     val isEmpty: Boolean get() = native.isEmpty()
 
@@ -298,9 +338,34 @@ class RsEditorView private constructor(
         // A frame can start a long press or bring the menu back after a fling.
         applyEffects()
         notifyIfChanged()
+        updateGestureExclusion()
         when {
             next == NativeSurface.RESIZING || next in 0..16 -> scheduleFrame()
             next > 16 -> postDelayed(::scheduleFrame, next - 8)
+        }
+    }
+
+    private var gripArea: String = ""
+
+    /**
+     * The block grip sits at the screen's left edge, where Android's Back gesture starts:
+     * dragging it must move the block, not leave the app.
+     */
+    private fun updateGestureExclusion() {
+        if (Build.VERSION.SDK_INT < 29) return
+        val area = native.dragHandleRect()
+        if (area == gripArea) return
+        gripArea = area
+        systemGestureExclusionRects = if (area.isEmpty()) {
+            emptyList()
+        } else {
+            val box = JSONArray(area)
+            listOf(
+                Rect(
+                    box.getDouble(0).toInt(), box.getDouble(1).toInt(),
+                    box.getDouble(2).toInt(), box.getDouble(3).toInt(),
+                ),
+            )
         }
     }
 
@@ -426,6 +491,23 @@ class RsEditorView private constructor(
     }
 
     internal fun selectionUi(): SelectionUi = selection
+
+    internal fun loadImage(src: String) = images.load(src)
+
+    internal fun pickImage() {
+        onPickImage?.invoke()
+    }
+
+    /** A picture finished loading (null: it could not be). */
+    internal fun imageLoaded(src: String, image: ImageLoader.Decoded?) {
+        if (released) return
+        if (image != null) {
+            native.addImage(src, image.rgba, image.width.toUInt(), image.height.toUInt(), image.scale)
+        } else {
+            native.imageFailed(src)
+        }
+        afterInput()
+    }
 
     internal fun showKeyboard() {
         requestFocus()

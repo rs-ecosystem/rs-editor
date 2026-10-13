@@ -96,8 +96,9 @@ pub unsafe extern "C" fn rse_result(app_ptr: *mut App) -> *const u8 {
 
 /// Creates the editor in the current WebGL context. `platform` is 1 on
 /// Apple systems, 2 on Windows, 0 elsewhere; `content` is a Tiptap JSON
-/// document, HTML, or empty, or Markdown when `markdown` is 1. Returns
-/// null on failure.
+/// document, HTML, or empty, or Markdown when `markdown` is 1;
+/// `character_limit` above 0 caps the document's characters. Returns null
+/// on failure.
 ///
 /// # Safety
 /// `content` must point to `content_len` bytes of UTF-8.
@@ -111,6 +112,7 @@ pub unsafe extern "C" fn rse_init(
     content: *const u8,
     content_len: usize,
     markdown: u32,
+    character_limit: i32,
 ) -> *mut App {
     let Some(interface) = gpu::gl::Interface::new_native() else {
         return std::ptr::null_mut();
@@ -142,6 +144,7 @@ pub unsafe extern "C" fn rse_init(
             left: 24.0,
         },
         profile,
+        character_limit: usize::try_from(character_limit).ok().filter(|&n| n > 0),
     });
     Box::into_raw(Box::new(App {
         api,
@@ -632,6 +635,84 @@ pub unsafe extern "C" fn rse_add_emoji_image(
         unsafe { std::slice::from_raw_parts(rgba, rgba_len) }
     };
     u32::from(app.api.add_emoji_image(&grapheme, rgba, width, height))
+}
+
+/// The picture for an image reported by the `missingImages` effect:
+/// `width` × `height` unpremultiplied RGBA pixels, `scale` pixels per CSS
+/// pixel. Returns 1 when taken.
+///
+/// # Safety
+/// `app` must be live; the buffers must be readable.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn rse_add_image(
+    app_ptr: *mut App,
+    src: *const u8,
+    src_len: usize,
+    rgba: *const u8,
+    rgba_len: usize,
+    width: u32,
+    height: u32,
+    scale: f32,
+) -> u32 {
+    let app = unsafe { app(app_ptr) };
+    let src = unsafe { read(src, src_len) };
+    let rgba = if rgba.is_null() {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(rgba, rgba_len) }
+    };
+    u32::from(app.api.add_image(&src, rgba, width, height, scale, false))
+}
+
+/// The image at `src` could not be loaded; it shows as broken.
+///
+/// # Safety
+/// `app` must be live; `src` must point to `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_image_failed(app_ptr: *mut App, src: *const u8, len: usize) {
+    let src = unsafe { read(src, len) };
+    unsafe { app(app_ptr) }.api.image_failed(&src);
+}
+
+/// Whether the page picks images itself (`pickImage` effect).
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_image_picker(app_ptr: *mut App, on: u32) {
+    unsafe { app(app_ptr) }.api.set_image_picker(on != 0);
+}
+
+/// Shows the grip beside blocks (1, the default) or not.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_drag_handle(app_ptr: *mut App, on: u32) {
+    unsafe { app(app_ptr) }.api.set_drag_handle(on != 0);
+}
+
+/// Placeholder text for an empty line; empty restores the default.
+///
+/// # Safety
+/// `app` must be live; `text` must point to `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_placeholder(app_ptr: *mut App, text: *const u8, len: usize) {
+    let text = unsafe { read(text, len) };
+    unsafe { app(app_ptr) }.api.set_placeholder(&text);
+}
+
+/// `{characters, words, limit}` as JSON; returns its length (read it with
+/// `rse_result`).
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_character_count(app_ptr: *mut App) -> usize {
+    let app = unsafe { app(app_ptr) };
+    let count = app.api.character_count();
+    app.set_result(&count)
 }
 
 /// Whether pasted plain text is read as Markdown.

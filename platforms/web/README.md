@@ -42,6 +42,7 @@ Menu-menu ini digambar di canvas dengan gaya shadcn/ui, sama di semua platform. 
 
 - **Bubble menu.** Saat teks dipilih dengan mouse atau trackpad, muncul tombol tebal, miring, garis bawah, coret, kode, sorotan, dan tautan. Matikan dengan `bubbleMenu: false` kalau aplikasi punya menu sendiri. Di HP, seleksi tetap memakai menu Potong/Salin/Tempel.
 - **Menu blok.** Mengetik `/` di awal baris atau setelah spasi membuka daftar blok (teks, judul 1–3, list poin, list bernomor, daftar tugas, kutipan, blok kode, pemisah). Teks setelah `/` menyaring daftarnya, termasuk lewat kata kunci seperti `h1`, `todo`, atau `kutipan`. Panah memilih, Enter atau Tab menerapkan, Esc menutup. Blok yang tidak bisa dipakai di posisi itu tidak ditampilkan. Matikan dengan `slashMenu: false`.
+- **Drag handle.** Grip ⠿ di kiri blok yang sedang di-hover (atau blok yang berisi caret, di HP). Klik untuk memilih blok, tarik untuk memindahkannya. Matikan dengan `dragHandle: false`.
 - **Tautan.** Dengan caret di dalam tautan, muncul popover berisi alamatnya dan tombol buka, salin, ubah, dan hapus. Cmd/Ctrl-K, tombol tautan di bubble menu, atau `editor.editLink()` membuka kolom alamat. Alamat tanpa skema dilengkapi (`rs-editor.dev` → `https://…`, alamat email → `mailto:`), dan alamat yang ditolak (misalnya `javascript:`) membuat kolomnya merah. Kolom ini menerima keyboard, IME, dan tempel seperti kolom teks biasa; di HP keyboard-nya berganti ke mode URL.
 
 ## Emoji dan font
@@ -59,6 +60,21 @@ editor.addFont(await (await fetch("/fonts/MyFont.woff")).arrayBuffer(), "My Font
 ```
 
 Format yang didukung adalah TTF, OTF, dan WOFF (bukan WOFF2). Kalau daftar `fonts` memuat font emoji (misalnya `notoFonts.emoji`, 7 MB), emoji digambar dengan font itu, bukan oleh browser. Untuk produksi, font sebaiknya di-host sendiri.
+
+## Gambar
+
+Gambar dimuat dan didekode oleh browser, jadi semua format yang didukung browser bisa dipakai. Gambar dari origin lain butuh header CORS; tanpa header itu gambar tampil sebagai gagal. Ukurannya mengikuti atribut `width`/`height`, atau ukuran asli gambar bila atribut itu tidak ada, dan tidak pernah melebihi lebar kolom.
+
+Untuk memasukkan gambar, beri opsi `uploadImage`. Fungsi ini menerima `File` dan mengembalikan alamat gambar, misalnya setelah diunggah ke server. Fungsi ini dipakai oleh baris Gambar di menu `/` (lewat pemilih file browser), juga saat gambar ditempel atau dijatuhkan ke editor. Tanpa `uploadImage`, menu `/` meminta alamat gambar.
+
+```js
+await createEditor({ element, uploadImage: async (file) => (await upload(file)).url });
+editor.chain().focus().setImage({ src: "/foto.jpg", alt: "Foto" }).run();
+```
+
+## Hitungan karakter dan placeholder
+
+`editor.storage.characterCount.characters()` dan `.words()` sama dengan Tiptap. Opsi `characterLimit` membatasi jumlah karakter. Baris kosong menampilkan petunjuk menu `/` dalam bahasa UI; ganti dengan opsi `placeholder` atau `setPlaceholder()`.
 
 ## Markdown
 

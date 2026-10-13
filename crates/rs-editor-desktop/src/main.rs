@@ -208,6 +208,7 @@ impl ApplicationHandler<accesskit_winit::Event> for App {
                 shell.key(&event);
             }
             WindowEvent::Ime(ime) => shell.ime(ime),
+            WindowEvent::CursorLeft { .. } => shell.view.pointer_leave(),
             WindowEvent::CursorMoved { position, .. } => {
                 let position: LogicalPosition<f32> =
                     position.to_logical(shell.window.scale_factor());
@@ -502,11 +503,19 @@ impl Shell {
                     CursorIcon::Text => winit::window::CursorIcon::Text,
                     CursorIcon::Pointer => winit::window::CursorIcon::Pointer,
                     CursorIcon::Default => winit::window::CursorIcon::Default,
+                    CursorIcon::Grab => winit::window::CursorIcon::Grab,
+                    CursorIcon::Grabbing => winit::window::CursorIcon::Grabbing,
                 }),
                 Effect::OpenUrl(url) => eprintln!("buka tautan: {url}"),
                 Effect::Clipboard(content) => {
                     if let Some(clipboard) = self.clipboard.as_mut() {
                         let _ = clipboard.set_html(content.html, Some(content.text));
+                    }
+                }
+                // The dev harness loads no images yet: they show as broken.
+                Effect::MissingImages(sources) => {
+                    for src in sources {
+                        self.view.image_failed(&src);
                     }
                 }
                 // Touch-only effects; the desktop shell has no touch input.
@@ -515,7 +524,8 @@ impl Shell {
                 | Effect::Magnifier(_)
                 | Effect::ShowKeyboard
                 | Effect::MissingCharacters(_)
-                | Effect::MissingEmoji(_) => {}
+                | Effect::MissingEmoji(_)
+                | Effect::PickImage => {}
             }
         }
     }

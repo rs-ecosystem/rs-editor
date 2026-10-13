@@ -65,6 +65,9 @@ enum Part {
 struct Editing {
     field: TextField,
     range: LinkRange,
+    /// The field asks for an image's address (from the slash menu), not
+    /// a link's.
+    image: bool,
 }
 
 #[derive(Debug, Default)]
@@ -154,6 +157,7 @@ impl EditorView {
         self.link.editing = Some(Editing {
             field: TextField::new(&range.href),
             range,
+            image: false,
         });
         self.link.pressed = None;
         self.hide_menu();
@@ -255,7 +259,9 @@ impl EditorView {
     fn build_link_parts(&mut self, shown: Option<&LinkRange>) {
         let editable = self.editor.is_editable();
         let actions = match (&self.link.editing, shown) {
-            (Some(editing), _) if editing.range.href.is_empty() => vec![Action::Apply],
+            (Some(editing), _) if editing.image || editing.range.href.is_empty() => {
+                vec![Action::Apply]
+            }
             (Some(_), _) => vec![Action::Apply, Action::Remove],
             (None, _) if editable => {
                 vec![Action::Open, Action::Copy, Action::Edit, Action::Remove]
@@ -385,7 +391,11 @@ impl EditorView {
         if let Some(editing) = &self.link.editing {
             let layout = self.field_layout(editing.field.text());
             let placeholder = self.engine.ui_label(
-                self.strings.link_placeholder,
+                if editing.image {
+                    self.strings.image_placeholder
+                } else {
+                    self.strings.link_placeholder
+                },
                 &UiText::small(theme.palette.muted_foreground),
                 None,
             );
@@ -479,6 +489,10 @@ impl EditorView {
         };
         let text = editing.field.text().trim().to_owned();
         let range = editing.range.clone();
+        if editing.image {
+            self.apply_image(&text);
+            return;
+        }
         if text.is_empty() {
             if !range.href.is_empty() {
                 self.run_link_action(Action::Remove);
@@ -509,6 +523,44 @@ impl EditorView {
                 // just made.
                 self.link.dismissed = Some((from, to));
             }
+            _ => {
+                if let Some(editing) = &mut self.link.editing {
+                    editing.field.invalid = true;
+                }
+                self.request_redraw();
+            }
+        }
+    }
+
+    /// Opens the address field for an image to insert at the caret (the
+    /// slash menu's Image row, when the host has no image picker).
+    pub(crate) fn edit_image_address(&mut self) {
+        let head = self.editor.selection().head();
+        self.link.editing = Some(Editing {
+            field: TextField::new(""),
+            range: LinkRange {
+                from: head,
+                to: head,
+                href: String::new(),
+            },
+            image: true,
+        });
+        self.link.pressed = None;
+        self.hide_menu();
+        self.reset_blink();
+        self.request_redraw();
+        self.after_field_change();
+    }
+
+    /// Inserts an image from the field's address; an empty field gives up.
+    fn apply_image(&mut self, text: &str) {
+        if text.is_empty() {
+            self.close_link_editor();
+            return;
+        }
+        let src = normalize_href(text);
+        match self.run_chain(&[step("setImage", json!({"src": src}))]) {
+            Ok(true) => self.close_link_editor(),
             _ => {
                 if let Some(editing) = &mut self.link.editing {
                     editing.field.invalid = true;

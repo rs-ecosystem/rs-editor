@@ -11,7 +11,7 @@
 | P2 | Layout inkremental, render Skia, view, tema shadcn, dev harness desktop | **Selesai** |
 | P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Hampir selesai.** Milestone 1–2 selesai, milestone 3 tinggal uji screen reader sungguhan dan Firefox |
 | P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit, library Kotlin dan Compose | **Selesai.** Navigasi TalkBack dan Samsung Keyboard jadi tugas lanjutan |
-| P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | **Berjalan.** Milestone 1–2 selesai (bubble menu, menu blok `/`, popover tautan) |
+| P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | **Berjalan.** Milestone 1–3 selesai (bubble menu, menu blok `/`, popover tautan, drag handle, gambar). Sisa: aksesibilitas menu, drag item list |
 | P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | Belum dimulai |
 | P7 | Windows dan Linux: winit, IME, AccessKit | Belum dimulai |
 | P8 | Tabel, mention, hardening, API 1.0 | Belum dimulai |
@@ -285,13 +285,40 @@ UI editor digambar Skia di canvas yang sama, sehingga tampilannya identik di sem
   - Menu dan popover belum masuk pohon aksesibilitas (listbox dan kolom teks untuk screen reader).
   - Placeholder bawaan ("Write something…") belum ikut `locale`.
 
-### Milestone 3: blok dan konten · Belum
+### Milestone 3: blok dan konten · Selesai
 
-- Drag handle dengan drag-and-drop blok, placeholder, text-align, character count, gambar, paste rule, list bertingkat.
+- **Drag handle** (`rs-editor-view/src/blocks.rs`), seperti Notion dan DragHandle Tiptap:
+  - Grip ikon Lucide di margin kiri, sejajar baris pertama blok. Dengan mouse, grip mengikuti blok di bawah kursor dan hilang saat kursor keluar dari editor (`pointer_leave`). Di layar sentuh, grip muncul untuk blok yang berisi caret.
+  - Klik grip memilih blok (NodeSelection), sehingga Backspace menghapus blok dan salin menyalinnya.
+  - Menarik grip memindahkan blok. Selama ditarik, blok asal diredupkan dan garis menunjukkan posisi jatuhnya. Di dekat tepi atas atau bawah, view ikut scroll. Esc membatalkan. Satu pemindahan menjadi satu langkah undo.
+  - Di Android, area grip dikecualikan dari gesture Back sistem (`systemGestureExclusionRects`), karena grip berada di tepi kiri layar.
+  - Bisa dimatikan: `set_drag_handle(false)`, `dragHandle: false`, `RsEditorView.dragHandle`.
+  - Yang dipindahkan adalah blok tingkat atas, jadi list berpindah utuh.
+- **Gambar:**
+  - Layout mencatat `src` yang belum punya gambar (efek `MissingImages`). Host mendekode gambar dan memberikan pikselnya lewat `add_image`, atau memanggil `image_failed`. Gambar tanpa atribut `width`/`height` memakai ukuran aslinya, dibatasi lebar kolom. Saat menunggu, gambar tampil sebagai kotak muted; kalau gagal, kotak itu diberi tanda silang. Gambar digambar dengan sudut membulat dan sampling mipmap.
+  - Web: browser mendekode gambar (format apa pun yang didukungnya; gambar lintas origin butuh CORS), maksimal 2048 px.
+  - Android: `ImageLoader` membaca `data:`, `content:`/`file:`, dan `http(s)`, lalu `BitmapFactory` mendekodenya dengan inSampleSize di thread latar.
+  - Menu `/` punya baris Gambar. Kalau aplikasi punya pemilih gambar (`uploadImage` di web, `onPickImage` di Android/Compose), editor mengirim efek `PickImage`. Kalau tidak, editor meminta alamat gambar lewat kolom yang sama dengan tautan.
+  - Web juga menerima gambar yang ditempel atau dijatuhkan ke editor bila `uploadImage` ada. Sampel Android memakai Photo Picker sistem.
+  - Node selection gambar kini membungkus gambarnya, bukan seluruh lebar kolom.
+- **Tempel tautan** (seperti `linkOnPaste` Tiptap): alamat yang ditempel di atas teks terpilih menautkan teks itu; tanpa seleksi, alamat masuk sebagai tautan. Di blok kode, alamat ditempel sebagai teks biasa.
+- **Placeholder:** teks bawaan mengikuti bahasa UI. Baris kosong menampilkan "Tulis, atau ketik “/” untuk perintah", dan judul kosong menampilkan namanya ("Judul 1"). Aplikasi bisa menggantinya (`placeholder`).
+- **Character count:** `character_count()` di API, `editor.storage.characterCount.characters()`/`words()` di web (sama dengan Tiptap), `characters`/`words` di Kotlin dan Compose. Batas karakter diatur saat editor dibuat (`characterLimit`).
+- **Text-align dan list bertingkat** sudah ada sejak P1–P2: perintah `setTextAlign`, pintasan Mod-Shift-L/E/R/J, serta Tab dan Shift-Tab di list.
+- **Perbaikan dari uji pengguna:** handle seleksi sentuh kini boleh saling melewati seperti di Android native. Handle yang ditarik melewati handle lain bertukar peran (awal ↔ akhir), dan seleksi terus mengikuti jari.
+- **Uji:**
+  - 9 tes view baru (drag handle dengan mouse dan sentuhan, gambar, menu Gambar, tempel tautan, placeholder). Tes handle seleksi diperbarui untuk perilaku saling melewati.
+  - Golden image placeholder diperbarui.
+  - Chrome: gambar SVG dimuat, grip muncul saat hover, blok gambar dipindah lewat drag dengan garis jatuh terlihat, undo.
+  - Android (perangkat): gambar `data:` dimuat lewat BitmapFactory, grip muncul untuk blok caret, paragraf dipindah ke bawah list dengan jari (gesture Back tidak terpicu), handle seleksi saling melewati.
+- **Belum:**
+  - Menarik item list satu per satu (grip baru ada untuk blok tingkat atas).
+  - Aksesibilitas menu, popover, dan grip.
+  - Gambar di harness desktop (masih tampil sebagai gagal).
 
 ## Berikutnya
 
-1. **P5:** milestone 3 (drag handle, placeholder, text-align, character count, gambar), lalu aksesibilitas menu dan popover.
+1. **P5 sisa:** aksesibilitas menu, popover, dan grip; drag item list. Setelah itu P6 (iOS dan macOS).
 2. **P3 (web):** uji screen reader sungguhan (VoiceOver, TalkBack di Chrome Android) dan Firefox.
 3. **Tugas lanjutan Android:** navigasi TalkBack (lihat milestone 2), Samsung Keyboard, `addVisibleLineBounds`, paket AAR/Maven.
 4. **Desktop (P7):** menu klik kanan Potong/Salin/Tempel memakai sinyal `SelectionMenu` yang sama.

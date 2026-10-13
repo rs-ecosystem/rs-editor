@@ -53,10 +53,12 @@
         item(t("Ketik "), t("# ", ["code"]), t(", "), t("- ", ["code"]), t(" atau "), t("[ ] ", ["code"]), t(" di awal baris.")),
         item(t("Klik ganda memilih kata; Cmd/Ctrl-Z untuk undo.")),
         item(t("Ketik "), t("/", ["code"]), t(" untuk menu blok; Cmd/Ctrl-K untuk tautan.")),
+        item(t("Arahkan mouse ke blok, lalu tarik pegangan di kirinya untuk memindahkan blok.")),
         item(t("Di HP: ketuk, tekan lama, tarik handle, geser untuk scroll.")),
       ]},
       { type: "taskList", content: [task(true, "Skia di WebAssembly"), task(false, "EditContext dan fallback textarea")] },
       { type: "blockquote", content: [p(t("Satu jalur render untuk semua platform."))] },
+      { type: "image", attrs: { src: "sample.svg", alt: "Pegunungan" } },
       h(3, "Aksara"),
       p(t("العربية من اليمين إلى اليسار، हिन्दी देवनागरी.")),
       p(t("日本語のテキスト、한국어 텍스트, emoji 👩‍💻🎉 — dimuat saat dibutuhkan.")),
@@ -100,7 +102,15 @@
         cdn: [notoFonts.emoji, notoFonts.japanese, notoFonts.korean],
         local: [{ family: "Arial Unicode MS", url: "local-fonts/ArialUnicode.ttf", ranges: [[0x1100, 0x11ff], [0x3000, 0x9fff], [0xac00, 0xd7af], [0xff00, 0xffef]] }],
       }[choice] ?? [];
-      const editor = await createEditor({ element: document.getElementById("editor"), content, input, fonts, pasteMarkdown: true });
+      // The demo keeps picked, pasted and dropped images inline as data
+      // URLs; an app would upload them and return their address.
+      const uploadImage = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const editor = await createEditor({ element: document.getElementById("editor"), content, input, fonts, pasteMarkdown: true, uploadImage });
       const loadMs = Math.round(performance.now() - started);
 
       const buttons = tools.map(([label, [command, args], active, style]) => {
@@ -132,7 +142,8 @@
       applyTheme();
       themeButton.onclick = () => { dark = !dark; applyTheme(); editor.focus(); };
       setInterval(() => {
-        status.textContent = `${editor.inputMode} · muat ${loadMs} ms · frame ${editor.stats.lastFrameMs.toFixed(1)} ms`;
+        const count = editor.storage.characterCount;
+        status.textContent = `${count.characters()} karakter · ${count.words()} kata · ${editor.inputMode} · muat ${loadMs} ms · frame ${editor.stats.lastFrameMs.toFixed(1)} ms`;
       }, 500);
       document.getElementById("markdown").onclick = () => {
         const markdown = editor.getMarkdown();

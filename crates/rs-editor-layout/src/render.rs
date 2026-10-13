@@ -122,9 +122,41 @@ fn paint_decoration(canvas: &Canvas, decoration: &Decoration, theme: &Theme, vie
                 canvas.draw_rect(rect.to_skia(), &fill(palette.border));
             }
         }
-        Decoration::Image { rect, .. } => {
+        Decoration::Image {
+            rect,
+            image: Some(image),
+            ..
+        } => {
             if rect.intersects(&viewport) {
+                // Rounded like shadcn's cards, smooth when scaled down.
+                canvas.save();
+                canvas.clip_rrect(rounded(*rect, theme.radius.md), None, true);
+                canvas.draw_image_rect_with_sampling_options(
+                    image,
+                    None,
+                    rect.to_skia(),
+                    skia_safe::SamplingOptions::new(
+                        skia_safe::FilterMode::Linear,
+                        skia_safe::MipmapMode::Linear,
+                    ),
+                    &Paint::default(),
+                );
+                canvas.restore();
+            }
+        }
+        Decoration::Image { rect, failed, .. } => {
+            if rect.intersects(&viewport) {
+                // A muted box while loading; a broken one, crossed, when
+                // the image could not load.
                 canvas.draw_rrect(rounded(*rect, theme.radius.md), &fill(palette.muted));
+                if *failed {
+                    let (cx, cy) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+                    let arm = (rect.width.min(rect.height) * 0.08).clamp(6.0, 14.0);
+                    let mut cross = stroke(palette.muted_foreground, 2.0);
+                    cross.set_stroke_cap(PaintCap::Round);
+                    canvas.draw_line((cx - arm, cy - arm), (cx + arm, cy + arm), &cross);
+                    canvas.draw_line((cx + arm, cy - arm), (cx - arm, cy + arm), &cross);
+                }
                 let inset = Rect::new(
                     rect.x + 0.5,
                     rect.y + 0.5,

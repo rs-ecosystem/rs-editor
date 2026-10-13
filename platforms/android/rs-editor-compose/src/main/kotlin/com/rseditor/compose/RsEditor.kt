@@ -24,6 +24,7 @@ import com.rseditor.android.RsEditorView
 class RsEditorState internal constructor(
     internal val content: String,
     internal val contentIsMarkdown: Boolean,
+    internal val characterLimit: Int,
 ) {
     /** The view while the editor is in the composition. */
     var view: RsEditorView? by mutableStateOf(null)
@@ -46,6 +47,23 @@ class RsEditorState internal constructor(
      * button); false when there is nothing to link or the editor is not shown.
      */
     fun editLink(): Boolean = view?.editLink() ?: false
+
+    /** Inserts an image at the caret, such as one picked for [RsEditor]'s `onPickImage`. */
+    fun insertImage(src: String, alt: String? = null): Boolean = view?.insertImage(src, alt) ?: false
+
+    /** Characters in the document (an emoji counts once); 0 while the editor is not shown. */
+    val characters: Int
+        get() {
+            revision
+            return view?.characters ?: 0
+        }
+
+    /** Words in the document. */
+    val words: Int
+        get() {
+            revision
+            return view?.words ?: 0
+        }
 
     fun isActive(name: String, attrs: Map<String, Any?> = emptyMap()): Boolean {
         revision // Recompose readers when the selection changes.
@@ -79,11 +97,14 @@ class RsEditorState internal constructor(
 
 /**
  * Remembers editor state starting from `content`: a Tiptap JSON document or HTML, or Markdown
- * when [markdown].
+ * when [markdown]. A [characterLimit] above 0 caps the document's characters.
  */
 @Composable
-fun rememberRsEditorState(content: String = "", markdown: Boolean = false): RsEditorState =
-    remember { RsEditorState(content, markdown) }
+fun rememberRsEditorState(
+    content: String = "",
+    markdown: Boolean = false,
+    characterLimit: Int = 0,
+): RsEditorState = remember { RsEditorState(content, markdown, characterLimit) }
 
 /**
  * The Rs Editor. [dark] null follows the system theme. The Rust editor
@@ -93,6 +114,9 @@ fun rememberRsEditorState(content: String = "", markdown: Boolean = false): RsEd
  * keyboard sliding over it and scrolls the caret clear, which is smoother
  * than resizing its surface every frame. [overlayBottom] is the height of the
  * app's own UI drawn over its bottom, such as a toolbar above the keyboard.
+ *
+ * [onPickImage] shows the app's image picker when the user inserts an image from the `/` menu;
+ * insert the result with [RsEditorState.insertImage]. Without it the editor asks for an address.
  */
 @Composable
 fun RsEditor(
@@ -101,11 +125,13 @@ fun RsEditor(
     editable: Boolean = true,
     dark: Boolean? = null,
     overlayBottom: Dp = 0.dp,
+    placeholder: String? = null,
+    onPickImage: (() -> Unit)? = null,
 ) {
     val overlayPixels = with(LocalDensity.current) { overlayBottom.roundToPx() }
     AndroidView(
         factory = { context ->
-            RsEditorView(context, state.content, state.contentIsMarkdown).also { view ->
+            RsEditorView(context, state.content, state.contentIsMarkdown, state.characterLimit).also { view ->
                 view.addOnChangeListener(state.onChange)
                 state.view = view
             }
@@ -115,6 +141,8 @@ fun RsEditor(
             if (view.isEditable != editable) view.isEditable = editable
             if (view.dark != dark) view.dark = dark
             view.overlayBottom = overlayPixels
+            if (view.placeholder != placeholder) view.placeholder = placeholder
+            if (view.onPickImage !== onPickImage) view.onPickImage = onPickImage
         },
         onRelease = { view ->
             view.removeOnChangeListener(state.onChange)

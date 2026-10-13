@@ -22,6 +22,9 @@ pub enum Granularity {
 impl EditorView {
     /// A key press. Returns whether the editor used it.
     pub fn key_down(&mut self, event: &KeyEvent) -> bool {
+        if event.key == "Escape" && self.cancel_block_drag() {
+            return true;
+        }
         self.end_touch_mode();
         if let Some(handled) = self.field_input(FieldInput::Key(event)) {
             return handled;
@@ -548,6 +551,9 @@ impl EditorView {
         if !self.editor.is_editable() || text.is_empty() {
             return false;
         }
+        if self.paste_link(text) {
+            return true;
+        }
         if self.markdown_paste {
             return self.paste_markdown(text);
         }
@@ -576,6 +582,46 @@ impl EditorView {
             }
         }
         self.paste_slice(Slice::new(Fragment::from_array(blocks), 1, 1))
+    }
+
+    /// A pasted address, as Tiptap's Link does: over selected text it
+    /// links the text, else it goes in as a link. False when `text` is not
+    /// a single address or links are not allowed here (code).
+    fn paste_link(&mut self, text: &str) -> bool {
+        let text = text.trim();
+        if text.is_empty() || text.contains(char::is_whitespace) {
+            return false;
+        }
+        let Some(href) = rs_editor_extensions::starter_kit::detect_link(text) else {
+            return false;
+        };
+        let selection = self.editor.selection().clone();
+        if !matches!(selection, Selection::Text(_)) {
+            return false;
+        }
+        self.finish_composition();
+        let step = |name: &str, args: Value| (name.to_owned(), args);
+        let steps = if selection.empty() {
+            let (from, to) = (
+                selection.from(),
+                selection.from() + text.encode_utf16().count(),
+            );
+            vec![
+                step("insertContent", Value::String(text.to_owned())),
+                step(
+                    "setTextSelection",
+                    serde_json::json!({"from": from, "to": to}),
+                ),
+                step("setLink", serde_json::json!({"href": href})),
+                step(
+                    "setTextSelection",
+                    serde_json::json!({"from": to, "to": to}),
+                ),
+            ]
+        } else {
+            vec![step("setLink", serde_json::json!({"href": href}))]
+        };
+        self.run_chain(&steps).unwrap_or(false)
     }
 
     /// Pastes a JSON slice produced by [`EditorView::copy`].

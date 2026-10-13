@@ -15,6 +15,8 @@ const decoder = new TextDecoder();
 
 const MOD_SHIFT = 1, MOD_CTRL = 2, MOD_ALT = 4, MOD_META = 8;
 const LINE_HEIGHT = 40;
+/** Images are decoded at most this many pixels on their longer side. */
+const MAX_IMAGE = 2048;
 const DEFAULT_WASM = new URL("../dist/rs-editor-web.js", import.meta.url).href;
 
 function mods(e) {
@@ -63,10 +65,10 @@ export async function createEditor(options) {
 }
 
 class Editor {
-  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, bubbleMenu = true, slashMenu = true, locale = navigator.language, fonts = [], accessibility = true, wasmUrl = DEFAULT_WASM, input } = {}) {
+  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, bubbleMenu = true, slashMenu = true, dragHandle = true, placeholder, characterLimit, uploadImage, locale = navigator.language, fonts = [], accessibility = true, wasmUrl = DEFAULT_WASM, input } = {}) {
     if (!element) throw new Error("Rs Editor: `element` is required");
     this.element = element;
-    this._options = { content, contentType, dark, editable, pasteMarkdown, bubbleMenu, slashMenu, locale, accessibility, wasmUrl, input };
+    this._options = { content, contentType, dark, editable, pasteMarkdown, bubbleMenu, slashMenu, dragHandle, placeholder, characterLimit, uploadImage, locale, accessibility, wasmUrl, input };
     // Fonts to load when text needs them: { family, url, ranges }.
     this._fonts = fonts.map((font) => ({ ...font, state: "idle" }));
     this._listeners = new Map();
@@ -109,12 +111,15 @@ class Editor {
       : JSON.stringify(this._options.content);
     const markdown = this._options.contentType === "markdown" ? 1 : 0;
     this._app = this._withString(content, (ptr, len) =>
-      M._rse_init(width, height, dpr, platformCode(), this._options.dark ? 1 : 0, ptr, len, markdown));
+      M._rse_init(width, height, dpr, platformCode(), this._options.dark ? 1 : 0, ptr, len, markdown, this._options.characterLimit ?? 0));
     if (!this._app) throw new Error("Rs Editor: the editor could not be created");
     if (!this._options.editable) M._rse_set_editable(this._app, 0);
     if (this._options.pasteMarkdown) M._rse_set_markdown_paste(this._app, 1);
     if (!this._options.bubbleMenu) M._rse_set_bubble_menu(this._app, 0);
     if (!this._options.slashMenu) M._rse_set_slash_menu(this._app, 0);
+    if (!this._options.dragHandle) M._rse_set_drag_handle(this._app, 0);
+    if (this._options.uploadImage) M._rse_set_image_picker(this._app, 1);
+    if (this._options.placeholder) this.setPlaceholder(this._options.placeholder);
     if (this._options.locale) this._withString(this._options.locale, (ptr, len) => M._rse_set_locale(this._app, ptr, len));
     // Emoji come from the system's emoji font through the browser, unless
     // the app brings its own emoji font.
@@ -329,6 +334,11 @@ class Editor {
     }
     target.addEventListener("paste", (e) => {
       e.preventDefault();
+      const images = imageFiles(e.clipboardData);
+      if (images.length && this._options.uploadImage) {
+        for (const file of images) this._insertImageFile(file);
+        return;
+      }
       this._paste(e.clipboardData.getData("text/plain"), e.clipboardData.getData("text/html"));
     });
   }
@@ -426,6 +436,8 @@ class Editor {
         case "magnifier": this._ui.showMagnifier(effect.at); break;
         case "missingCharacters": this._loadFontsFor(effect.characters); break;
         case "missingEmoji": this._drawEmoji(effect.emoji); break;
+        case "missingImages": for (const src of effect.sources) this._loadImage(src); break;
+        case "pickImage": this._pickImage(); break;
       }
     }
   }
@@ -449,6 +461,67 @@ class Editor {
     this._docRevision = docRevision;
     this._emit("transaction", { editor: this });
     this._emit(docChanged ? "update" : "selectionUpdate", { editor: this });
+  }
+
+  // --- images -----------------------------------------------------------------
+
+  /**
+   * Decodes the image at `src` with the browser (any format it reads) and
+   * gives the editor its pixels. Images from other origins need CORS
+   * headers; without them the image shows as broken.
+   */
+  async _loadImage(src) {
+    const M = this._M;
+    try {
+      const image = new Image();
+      image.crossOrigin = "anonymous";
+      image.decoding = "async";
+      image.src = src;
+      await image.decode();
+      // SVGs without a size report 0; browsers draw those at 300 × 150.
+      const natural = [image.naturalWidth || 300, image.naturalHeight || 150];
+      const fit = Math.min(1, MAX_IMAGE / Math.max(...natural));
+      const [width, height] = natural.map((n) => Math.max(1, Math.round(n * fit)));
+      const canvas = Object.assign(document.createElement("canvas"), { width, height });
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      context.drawImage(image, 0, 0, width, height);
+      const pixels = context.getImageData(0, 0, width, height).data;
+      if (this._destroyed) return;
+      const ptr = M._rse_alloc(pixels.length);
+      M.HEAPU8.set(pixels, ptr);
+      try {
+        this._withString(src, (sp, sl) => M._rse_add_image(this._app, sp, sl, ptr, pixels.length, width, height, width / natural[0]));
+      } finally {
+        M._rse_free(ptr, pixels.length);
+      }
+    } catch {
+      if (this._destroyed) return;
+      this._withString(src, (ptr, len) => M._rse_image_failed(this._app, ptr, len));
+    }
+    this._afterInput();
+  }
+
+  /** The `/` menu's Image row with `uploadImage`: the browser's file picker. */
+  _pickImage() {
+    const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/*" });
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file) this._insertImageFile(file);
+    });
+    input.click();
+  }
+
+  /** Uploads `file` with the app's `uploadImage` and inserts the image at the caret. */
+  async _insertImageFile(file) {
+    let src;
+    try {
+      src = await this._options.uploadImage(file);
+    } catch (error) {
+      console.error("Rs Editor: uploadImage failed", error);
+      return;
+    }
+    if (!src || this._destroyed) return;
+    this.chain().focus().setImage({ src, alt: file.name || null }).run();
   }
 
   // --- fonts ------------------------------------------------------------------
@@ -692,6 +765,21 @@ class Editor {
       this._afterInput();
     };
     canvas.addEventListener("pointerup", (e) => end(e, 2));
+    canvas.addEventListener("pointerleave", (e) => {
+      if (e.pointerType === "touch") return;
+      M._rse_pointer(app, 3, 0, 0, 1, 0);
+      this._afterInput();
+    });
+    // Image files dropped on the editor go in at the caret.
+    canvas.addEventListener("dragover", (e) => {
+      if (this._options.uploadImage && e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    });
+    canvas.addEventListener("drop", (e) => {
+      const images = imageFiles(e.dataTransfer);
+      if (!images.length || !this._options.uploadImage) return;
+      e.preventDefault();
+      for (const file of images) this._insertImageFile(file);
+    });
     canvas.addEventListener("pointercancel", (e) => end(e, 3));
     canvas.addEventListener("contextmenu", (e) => {
       e.preventDefault();
@@ -789,6 +877,18 @@ class Editor {
     return opened;
   }
 
+  /** Text in an empty line with the caret; "" restores the default (a hint at the `/` menu). */
+  setPlaceholder(text) {
+    this._withString(text ?? "", (ptr, len) => this._M._rse_set_placeholder(this._app, ptr, len));
+    this._requestFrame();
+  }
+
+  /** Tiptap's `editor.storage`: `storage.characterCount.characters()` and `.words()`. */
+  get storage() {
+    const count = () => this._json(this._M._rse_character_count(this._app));
+    return { characterCount: { characters: () => count().characters, words: () => count().words, limit: () => count().limit } };
+  }
+
   /** The language of the editor's own menus, such as `"id-ID"`. */
   setLocale(locale) {
     this._withString(locale, (ptr, len) => this._M._rse_set_locale(this._app, ptr, len));
@@ -856,6 +956,11 @@ class Editor {
 }
 
 /** Han, kana and CJK punctuation. */
+/** The image files in a clipboard or a drop. */
+function imageFiles(data) {
+  return [...(data?.files ?? [])].filter((file) => file.type.startsWith("image/"));
+}
+
 const CJK_RANGES = [[0x3000, 0x30ff], [0x31f0, 0x31ff], [0x3400, 0x4dbf], [0x4e00, 0x9fff], [0xf900, 0xfaff], [0xff00, 0xffef]];
 
 /**

@@ -39,6 +39,10 @@ editor.json = "..."   // atau editor.html, editor.markdown; editor.text, editor.
 editor.pasteMarkdown = true                                  // teks polos yang ditempel dibaca sebagai Markdown
 editor.editLink()     // kolom alamat tautan, untuk tombol tautan di toolbar aplikasi
 editor.slashMenu = false                                     // matikan menu blok saat mengetik "/"
+editor.dragHandle = false                                    // matikan grip untuk memindahkan blok
+editor.placeholder = "Mulai menulis"                          // default: petunjuk menu "/"
+editor.onPickImage = { pickImage.launch(…) }                 // lalu editor.insertImage(uri.toString())
+editor.characters; editor.words                              // RsEditorView(context, content, characterLimit = 280)
 editor.addOnChangeListener { refreshToolbar() }
 editor.release()      // saat view dibuang
 ```
@@ -62,3 +66,5 @@ Menu di dalam editor digambar Skia, sama seperti di web, dalam bahasa perangkat 
 - Mengetik `/` di awal baris atau setelah spasi membuka menu blok (judul, list, kutipan, kode, pemisah). Teks setelah `/` menyaring isinya. Ketuk untuk memilih; geser untuk scroll menu.
 - Dengan caret di dalam tautan, muncul popover berisi alamatnya dan tombol buka, salin, ubah, dan hapus.
 - Kolom alamat tautan (`editLink()` atau tombol ubah) memakai keyboard URL dengan tombol Go.
+- Grip di kiri blok yang berisi caret: ketuk untuk memilih blok, tarik untuk memindahkannya. Area grip dikecualikan dari gesture Back sistem.
+- Gambar (`data:`, `content:`, `file:`, `http(s)`) dimuat di thread latar dan didekode `BitmapFactory`. Untuk alamat `http(s)`, aplikasi butuh izin `INTERNET`.

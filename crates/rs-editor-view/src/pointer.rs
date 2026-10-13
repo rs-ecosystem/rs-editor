@@ -113,6 +113,7 @@ impl EditorView {
         if self.link_pointer_down(event.x, event.y, event.click_count, event.modifiers.shift)
             || self.slash_pointer_down(event.x, event.y)
             || self.bubble_pointer_down(event.x, event.y)
+            || self.block_pointer_down(event.x, event.y)
         {
             return true;
         }
@@ -182,7 +183,8 @@ impl EditorView {
     pub fn pointer_move(&mut self, event: PointerEvent) -> bool {
         if self.drag.is_none()
             && let Some(handled) = self
-                .link_pointer_move(event.x, event.y)
+                .block_pointer_move(event.x, event.y)
+                .or_else(|| self.link_pointer_move(event.x, event.y))
                 .or_else(|| self.slash_pointer_move(event.x, event.y))
                 .or_else(|| self.bubble_pointer_move(event.x, event.y))
         {
@@ -223,7 +225,8 @@ impl EditorView {
     }
 
     pub fn pointer_up(&mut self, event: PointerEvent) -> bool {
-        if self.link_pointer_up(event.x, event.y)
+        if self.block_pointer_up()
+            || self.link_pointer_up(event.x, event.y)
             || self.slash_pointer_up(event.x, event.y)
             || self.bubble_pointer_up(event.x, event.y)
         {

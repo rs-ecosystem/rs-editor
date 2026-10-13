@@ -9,6 +9,9 @@
 //! objects and stay in the shells.
 
 use rs_editor_commands::{KeyEvent, KeyPlatform, Modifiers};
+use std::sync::Arc;
+
+use rs_editor_extensions::starter_kit::CharacterCount;
 use rs_editor_extensions::{Editor, EditorOptions};
 use rs_editor_model::fragment_to_json;
 use rs_editor_theme::Theme;
@@ -50,6 +53,9 @@ pub struct ApiOptions {
     /// Space around the document, in logical pixels.
     pub padding: Insets,
     pub profile: InteractionProfile,
+    /// The most characters the document may hold (Tiptap's CharacterCount
+    /// `limit`); edits past it are refused.
+    pub character_limit: Option<usize>,
 }
 
 impl Default for ApiOptions {
@@ -71,6 +77,7 @@ impl Default for ApiOptions {
                 left: 20.0,
             },
             profile: InteractionProfile::default(),
+            character_limit: None,
         }
     }
 }
@@ -140,10 +147,22 @@ impl EditorApi {
             Units::Logical => 1.0,
             Units::Device => options.scale,
         };
+        let extensions = || {
+            let mut extensions = rs_editor_extensions::starter_kit::starter_kit();
+            if let Some(limit) = options.character_limit {
+                extensions.retain(|e| e.name() != "characterCount");
+                extensions.push(Arc::new(CharacterCount {
+                    limit: Some(limit),
+                    ..Default::default()
+                }));
+            }
+            extensions
+        };
         let view_options = |content: Option<Value>| ViewOptions {
             editor: EditorOptions {
                 content,
                 platform: options.platform,
+                extensions: extensions(),
                 ..Default::default()
             },
             theme: theme(options.dark),
@@ -235,6 +254,23 @@ impl EditorApi {
         self.view.set_bubble_menu(enabled);
     }
 
+    /// Shows a grip beside blocks to select and move them (on by default).
+    pub fn set_drag_handle(&mut self, enabled: bool) {
+        self.view.set_drag_handle(enabled);
+    }
+
+    /// The grip's touch area as `[left, top, right, bottom]` JSON while it
+    /// shows, else `""`: Android keeps its Back gesture off it.
+    pub fn drag_handle_rect(&self) -> String {
+        let unit = self.unit();
+        self.view
+            .drag_handle_rect()
+            .map(|r| {
+                json!([r.x * unit, r.y * unit, r.right() * unit, r.bottom() * unit]).to_string()
+            })
+            .unwrap_or_default()
+    }
+
     /// Shows a menu of blocks when `/` is typed (on by default).
     pub fn set_slash_menu(&mut self, enabled: bool) {
         self.view.set_slash_menu(enabled);
@@ -243,6 +279,61 @@ impl EditorApi {
     /// The language of the editor's own UI, as a BCP 47 tag (`"id-ID"`).
     pub fn set_locale(&mut self, locale: &str) {
         self.view.set_locale(locale);
+    }
+
+    /// Characters and words in the document, and the limit if any:
+    /// `{characters, words, limit}` JSON (Tiptap's
+    /// `storage.characterCount`).
+    pub fn character_count(&self) -> String {
+        let doc = self.view.editor().doc();
+        let count = self
+            .view
+            .editor()
+            .manager()
+            .extension::<CharacterCount>("characterCount")
+            .cloned()
+            .unwrap_or_default();
+        json!({
+            "characters": count.characters(doc),
+            "words": count.words(doc),
+            "limit": count.limit,
+        })
+        .to_string()
+    }
+
+    /// The picture for image nodes with `src` (see the `missingImages`
+    /// effect): RGBA pixels (`premultiplied` or not), `scale` pixels per
+    /// CSS pixel.
+    pub fn add_image(
+        &mut self,
+        src: &str,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+        scale: f32,
+        premultiplied: bool,
+    ) -> bool {
+        self.view
+            .add_image(src, rgba, width, height, scale, premultiplied)
+    }
+
+    /// `src` could not be loaded; the image shows as broken.
+    pub fn image_failed(&mut self, src: &str) {
+        self.view.image_failed(src);
+    }
+
+    /// Whether the app picks images itself (`pickImage` effect) when the
+    /// user inserts one from the slash menu; otherwise the editor asks for
+    /// an address.
+    pub fn set_image_picker(&mut self, on: bool) {
+        self.view.set_image_picker(on);
+    }
+
+    /// Text in an empty line with the caret; empty restores the default
+    /// (a hint at the slash menu, in the UI's language).
+    pub fn set_placeholder(&mut self, text: &str) {
+        self.view
+            .set_placeholder((!text.is_empty()).then(|| text.to_owned()));
     }
 
     /// Opens the address field for the link at the caret or the selected
@@ -410,7 +501,8 @@ impl EditorApi {
         self.view.touch(phase, x / unit, y / unit);
     }
 
-    /// A mouse event; `kind` is 0 down, 1 move, 2 up. `modifiers` has bits
+    /// A mouse event; `kind` is 0 down, 1 move, 2 up, 3 leave (the pointer
+    /// left the view). `modifiers` has bits
     /// 1 shift, 2 ctrl, 4 alt, 8 meta. Returns whether the view used it.
     pub fn pointer(&mut self, kind: i32, x: f32, y: f32, clicks: u32, modifiers: u32) -> bool {
         let unit = self.unit();
@@ -424,6 +516,10 @@ impl EditorApi {
         match kind {
             0 => self.view.pointer_down(event),
             1 => self.view.pointer_move(event),
+            3 => {
+                self.view.pointer_leave();
+                true
+            }
             _ => self.view.pointer_up(event),
         }
     }
@@ -438,7 +534,7 @@ impl EditorApi {
     }
 
     /// Effects since the last call, as a JSON array of
-    /// `{type: haptic|menu|magnifier|showKeyboard|clipboard|openUrl|cursor|imeArea|redraw|missingCharacters, …}`.
+    /// `{type: haptic|menu|magnifier|showKeyboard|clipboard|openUrl|cursor|imeArea|redraw|missingCharacters|missingEmoji|missingImages|pickImage, …}`.
     /// Rectangles are `[left, top, right, bottom]`.
     pub fn take_effects(&mut self) -> String {
         let unit = self.unit();
@@ -467,6 +563,10 @@ impl EditorApi {
                     json!({"type": "missingCharacters", "characters": characters})
                 }
                 Effect::MissingEmoji(emoji) => json!({"type": "missingEmoji", "emoji": emoji}),
+                Effect::MissingImages(sources) => {
+                    json!({"type": "missingImages", "sources": sources})
+                }
+                Effect::PickImage => json!({"type": "pickImage"}),
                 Effect::Clipboard(content) => {
                     json!({"type": "clipboard", "text": content.text, "html": content.html})
                 }
@@ -475,6 +575,8 @@ impl EditorApi {
                     CursorIcon::Text => "text",
                     CursorIcon::Pointer => "pointer",
                     CursorIcon::Default => "default",
+                    CursorIcon::Grab => "grab",
+                    CursorIcon::Grabbing => "grabbing",
                 }}),
                 Effect::ImeCursorArea(r) => json!({"type": "imeArea", "rect": rect(r)}),
             })

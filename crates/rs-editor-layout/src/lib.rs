@@ -10,6 +10,7 @@ mod document;
 mod emoji;
 pub mod fonts;
 mod geometry;
+mod images;
 pub mod render;
 mod style;
 mod text;

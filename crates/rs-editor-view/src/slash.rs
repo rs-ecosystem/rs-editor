@@ -38,6 +38,7 @@ enum Label {
     Quote,
     CodeBlock,
     Divider,
+    Image,
 }
 
 impl Label {
@@ -51,6 +52,7 @@ impl Label {
             Label::Quote => strings.quote,
             Label::CodeBlock => strings.code_block,
             Label::Divider => strings.divider,
+            Label::Image => strings.image,
         }
     }
 }
@@ -148,6 +150,14 @@ const ITEMS: &[Item] = &[
             "garis",
         ],
         steps: || vec![step("setHorizontalRule", Value::Null)],
+    },
+    Item {
+        icon: Icon::Image,
+        label: Label::Image,
+        hint: "",
+        keywords: &["image", "picture", "photo", "img", "gambar", "foto"],
+        // For the dry run only: picking asks for the picture first.
+        steps: || vec![step("setImage", json!({"src": ""}))],
     },
 ];
 
@@ -450,7 +460,18 @@ impl EditorView {
         self.finish_composition();
         // Its own undo step: undo brings the typed query back.
         self.close_history_now();
-        let _ = self.run_chain(&slash_steps(&trigger, index));
+        if matches!(ITEMS[index].label, Label::Image) {
+            // The query goes; the picture comes from the host's picker or
+            // an address typed into the field.
+            let _ = self.run_chain(&slash_steps(&trigger, index)[..1]);
+            if self.image_picker {
+                self.push_effect(Effect::PickImage);
+            } else {
+                self.edit_image_address();
+            }
+        } else {
+            let _ = self.run_chain(&slash_steps(&trigger, index));
+        }
         self.update_slash();
     }
 

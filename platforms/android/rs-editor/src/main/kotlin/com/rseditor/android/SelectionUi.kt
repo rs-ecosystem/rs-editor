@@ -47,6 +47,10 @@ internal class SelectionUi(private val view: RsEditorView) : ActionMode.Callback
                 "showKeyboard" -> view.showKeyboard()
                 "clipboard" -> setClipboard(effect.optString("text"), effect.optString("html"))
                 "openUrl" -> openUrl(effect.optString("url"))
+                "missingImages" -> effect.optJSONArray("sources")?.let { sources ->
+                    for (j in 0 until sources.length()) view.loadImage(sources.optString(j))
+                }
+                "pickImage" -> view.pickImage()
             }
         }
     }

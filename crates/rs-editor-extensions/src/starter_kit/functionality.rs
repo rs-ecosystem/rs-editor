@@ -658,7 +658,7 @@ pub struct Placeholder {
 impl Default for Placeholder {
     fn default() -> Self {
         Self {
-            text: "Write something…".into(),
+            text: Self::DEFAULT_TEXT.into(),
             per_type: Vec::new(),
             show_only_current: true,
             empty_document_only: false,
@@ -667,6 +667,9 @@ impl Default for Placeholder {
 }
 
 impl Placeholder {
+    /// The text when the app sets none (views may show a localized one).
+    pub const DEFAULT_TEXT: &str = "Write something…";
+
     /// The placeholder to show for the empty textblock `node`, if any.
     pub fn text_for(&self, node: &Node, doc_is_empty: bool) -> Option<&str> {
         if !node.is_textblock()

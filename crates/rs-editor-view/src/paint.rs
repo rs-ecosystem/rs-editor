@@ -17,6 +17,7 @@ impl EditorView {
         self.update_bubble();
         self.update_slash();
         self.update_link();
+        self.update_block_handle();
         let theme = self.theme().clone();
         let layout = self.layout().clone();
         let scale = self.scale;
@@ -41,7 +42,16 @@ impl EditorView {
                     .iter()
                     .find(|b| b.pos == selection.from() && b.node.ptr_eq(node.node()))
                 {
-                    render::paint_node_selection(canvas, block.rect, &theme);
+                    // An image narrower than the column gets its own ring.
+                    let image = layout.decorations.iter().find_map(|d| match d {
+                        rs_editor_layout::Decoration::Image { rect, .. }
+                            if block.rect.contains(rect.x + 1.0, rect.y + 1.0) =>
+                        {
+                            Some(*rect)
+                        }
+                        _ => None,
+                    });
+                    render::paint_node_selection(canvas, image.unwrap_or(block.rect), &theme);
                 }
             }
             _ if !selection.empty() => {
@@ -80,6 +90,7 @@ impl EditorView {
         canvas.save();
         canvas.scale((scale, scale));
         self.paint_handles(canvas);
+        self.paint_block_handle(canvas);
         self.paint_bubble(canvas);
         self.paint_slash(canvas);
         self.paint_link(canvas);
@@ -114,6 +125,22 @@ impl EditorView {
             }
             let Some(label) = placeholder.text_for(&text.node, doc_empty) else {
                 continue;
+            };
+            let label = match self.placeholder_override() {
+                Some(custom) => custom,
+                // The default text, in the UI's language: a block's name
+                // for headings, a hint at the slash menu elsewhere.
+                None if label == Placeholder::DEFAULT_TEXT => {
+                    let level = text.node.attr("level").and_then(|v| v.as_u64());
+                    match (text.node.type_name(), level) {
+                        ("heading", Some(level @ 1..=3)) => {
+                            self.strings.heading[level as usize - 1]
+                        }
+                        _ if text.node.node_type().spec().code => continue,
+                        _ => self.strings.placeholder,
+                    }
+                }
+                None => label,
             };
             let label_layout = self.engine.placeholder(&text.node, label, text.rect.width);
             render::paint_placeholder(canvas, &label_layout, text.rect.x, text.rect.y);

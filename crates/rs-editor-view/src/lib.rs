@@ -7,6 +7,7 @@
 //! editor behaves the same everywhere.
 
 mod a11y;
+mod blocks;
 mod bubble;
 mod ime;
 mod input;
@@ -69,6 +70,10 @@ pub enum CursorIcon {
     Text,
     Pointer,
     Default,
+    /// Over the drag handle.
+    Grab,
+    /// Dragging a block.
+    Grabbing,
 }
 
 /// Requests from the view to the platform adapter.
@@ -98,6 +103,13 @@ pub enum Effect {
     /// Emoji (graphemes) laid out without an image, when emoji are drawn
     /// from images ([`EditorView::set_emoji_images`]).
     MissingEmoji(Vec<String>),
+    /// Image sources laid out without a picture: load each and give it to
+    /// [`EditorView::add_image`] (or [`EditorView::image_failed`]).
+    MissingImages(Vec<String>),
+    /// The user chose to insert an image: show the app's image picker and
+    /// insert the result (`setImage`) at the caret. Only with
+    /// [`EditorView::set_image_picker`].
+    PickImage,
 }
 
 /// Copied content in the formats the clipboard takes.
@@ -197,10 +209,15 @@ pub struct EditorView {
     pub(crate) touch: touch::TouchState,
     pub(crate) profile: InteractionProfile,
     pub(crate) bubble: bubble::Bubble,
+    pub(crate) blocks: blocks::BlockHandle,
     pub(crate) slash: slash::Slash,
     pub(crate) link: link::LinkPopover,
     /// The UI's words, in the user's language.
     pub(crate) strings: strings::Strings,
+    /// The host picks images ([`Effect::PickImage`]).
+    pub(crate) image_picker: bool,
+    /// Placeholder text set by the app, over the localized default.
+    placeholder: Option<String>,
 }
 
 impl fmt::Debug for EditorView {
@@ -264,9 +281,12 @@ impl EditorView {
             touch: touch::TouchState::default(),
             profile: InteractionProfile::default(),
             bubble: bubble::Bubble::new(),
+            blocks: blocks::BlockHandle::new(),
             slash: slash::Slash::new(),
             link: link::LinkPopover::default(),
             strings: strings::strings_for("en"),
+            image_picker: false,
+            placeholder: None,
         })
     }
 
@@ -449,6 +469,10 @@ impl EditorView {
             if !emoji.is_empty() {
                 self.push_effect(Effect::MissingEmoji(emoji));
             }
+            let images = self.engine.take_missing_images();
+            if !images.is_empty() {
+                self.push_effect(Effect::MissingImages(images));
+            }
         }
         self.layout
             .as_ref()
@@ -495,16 +519,84 @@ impl EditorView {
         true
     }
 
-    /// Adds a font (file bytes) for characters the bundled fonts lack, such
-    /// as emoji or CJK; text is laid out again. Returns the font's family,
-    /// or `None` for bytes that are not a font.
-    pub fn add_font(&mut self, bytes: &[u8], family: Option<&str>) -> Option<String> {
-        let family = self.engine.add_font(bytes, family)?;
+    /// The picture for image nodes with `src`: `width` × `height` pixels of
+    /// RGBA (`premultiplied` or not), `scale` pixels per CSS pixel. Images without
+    /// `width` and `height` attributes take its size. Returns false for a
+    /// buffer of the wrong size.
+    pub fn add_image(
+        &mut self,
+        src: &str,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+        scale: f32,
+        premultiplied: bool,
+    ) -> bool {
+        let row = width as usize * 4;
+        if width == 0 || height == 0 || rgba.len() != row * height as usize {
+            return false;
+        }
+        let info = skia_safe::ImageInfo::new(
+            (width as i32, height as i32),
+            skia_safe::ColorType::RGBA8888,
+            if premultiplied {
+                skia_safe::AlphaType::Premul
+            } else {
+                skia_safe::AlphaType::Unpremul
+            },
+            None,
+        );
+        let Some(image) =
+            skia_safe::images::raster_from_data(&info, skia_safe::Data::new_copy(rgba), row)
+        else {
+            return false;
+        };
+        self.engine.add_image(src, image, scale);
+        self.relayout_keeping_place();
+        true
+    }
+
+    /// `src` could not be loaded; its image shows as broken.
+    pub fn image_failed(&mut self, src: &str) {
+        self.engine.image_failed(src);
+        self.relayout_keeping_place();
+    }
+
+    /// Whether the app shows its own image picker ([`Effect::PickImage`])
+    /// when the user inserts an image; otherwise the editor asks for an
+    /// address.
+    pub fn set_image_picker(&mut self, on: bool) {
+        self.image_picker = on;
+    }
+
+    /// Text shown in an empty line with the caret (and in an empty
+    /// document); `None` restores the default, which hints at the slash
+    /// menu in the UI's language.
+    pub fn set_placeholder(&mut self, text: Option<String>) {
+        self.placeholder = text;
+        self.request_redraw();
+    }
+
+    pub(crate) fn placeholder_override(&self) -> Option<&str> {
+        self.placeholder.as_deref()
+    }
+
+    /// Lays out again (fonts or images changed sizes) with the block at the
+    /// top of the view staying in place.
+    fn relayout_keeping_place(&mut self) {
         self.pending_anchor = self
             .pending_anchor
             .or_else(|| self.layout.as_ref().and_then(|l| self.anchor_in(&l.layout)));
         self.layout = None;
         self.request_redraw();
+    }
+
+    /// Adds a font (file bytes) for characters the bundled fonts lack, such
+    /// as emoji or CJK; text is laid out again. Returns the font's family,
+    /// or `None` for bytes that are not a font.
+    pub fn add_font(&mut self, bytes: &[u8], family: Option<&str>) -> Option<String> {
+        let family = self.engine.add_font(bytes, family)?;
+        self.relayout_keeping_place();
         Some(family)
     }
 
@@ -598,6 +690,7 @@ impl EditorView {
             || self.bubble_animating()
             || self.slash_animating()
             || self.link_animating()
+            || self.block_handle_animating()
         {
             return Some(FRAME_MS);
         }

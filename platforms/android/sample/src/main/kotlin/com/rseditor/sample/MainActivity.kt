@@ -2,7 +2,10 @@ package com.rseditor.sample
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -72,12 +75,27 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = colors) {
                 Surface(Modifier.fillMaxSize()) {
                     val editor = rememberRsEditorState(sample)
+                    // The `/` menu's Image row opens the system photo picker. The sample
+                    // inserts the picked photo's content URI, readable while the app runs;
+                    // an app would upload it or copy it to its own storage.
+                    val pickImage = rememberLauncherForActivityResult(
+                        ActivityResultContracts.PickVisualMedia(),
+                    ) { uri -> if (uri != null) editor.insertImage(uri.toString()) }
                     var toolbarHeight by remember { mutableStateOf(0.dp) }
                     val density = LocalDensity.current
                     // The editor keeps its size; the keyboard and the toolbar riding on
                     // it slide over its bottom.
                     Box(Modifier.fillMaxSize().systemBarsPadding()) {
-                        RsEditor(editor, Modifier.fillMaxSize(), overlayBottom = toolbarHeight)
+                        RsEditor(
+                            editor,
+                            Modifier.fillMaxSize(),
+                            overlayBottom = toolbarHeight,
+                            onPickImage = {
+                                pickImage.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                                )
+                            },
+                        )
                         Column(
                             Modifier.align(Alignment.BottomCenter)
                                 .imePadding()

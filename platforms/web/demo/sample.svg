@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="280" viewBox="0 0 640 280">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e0e7ff"/>
+      <stop offset="1" stop-color="#fce7f3"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="280" fill="url(#sky)"/>
+  <circle cx="520" cy="80" r="36" fill="#fde68a"/>
+  <path d="M0 230 L140 120 L250 210 L360 100 L520 230 L640 170 L640 280 L0 280 Z" fill="#a5b4fc"/>
+  <path d="M0 260 L180 180 L320 250 L460 190 L640 260 L640 280 L0 280 Z" fill="#818cf8"/>
+  <text x="32" y="56" font-family="system-ui, sans-serif" font-size="28" font-weight="600" fill="#1e1b4b">Gambar di Rs Editor</text>
+</svg>

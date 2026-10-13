@@ -207,7 +207,10 @@ impl EditorView {
     /// A touch event in view coordinates.
     pub fn touch(&mut self, phase: TouchPhase, x: f32, y: f32) {
         // Popovers and menus take touches on them first.
-        if self.link_touch(phase, x, y) || self.slash_touch(phase, x, y) {
+        if self.link_touch(phase, x, y)
+            || self.slash_touch(phase, x, y)
+            || self.block_touch(phase, x, y)
+        {
             self.request_redraw();
             return;
         }
@@ -281,7 +284,10 @@ impl EditorView {
                 }
                 // The drag starts: the menu steps aside until it ends.
                 self.hide_menu();
-                let last = self.drag_handle(kind, offset, last, x, y).or(last);
+                let (kind, last) = match self.drag_handle(kind, offset, last, x, y) {
+                    Some((kind, pos)) => (kind, Some(pos)),
+                    None => (kind, last),
+                };
                 self.touch.gesture = Some(Gesture::Handle {
                     kind,
                     offset,
@@ -517,7 +523,7 @@ impl EditorView {
         last: Option<usize>,
         x: f32,
         y: f32,
-    ) -> Option<usize> {
+    ) -> Option<(HandleKind, usize)> {
         let tip = (x - offset.0, y - offset.1);
         // The handle hangs below its line; aim just above the tip.
         let Some(Hit::Text { pos, .. }) = self.hit_at(tip.0, tip.1 - 2.0) else {
@@ -527,11 +533,28 @@ impl EditorView {
         let (from, to) = (selection.from(), selection.to());
         // Android's rule: moving outward never shrinks the selection and
         // jumps to whole words; moving back moves by character.
+        // Dragged past the other handle, the handles trade places as on
+        // Android: the other end stays, the dragged one becomes the start
+        // (or the end) and keeps following the finger.
+        let kind = match kind {
+            HandleKind::Start if pos > to => {
+                self.select_with_tick(to, pos);
+                self.show_endpoint_magnifier(pos, HandleKind::End);
+                return Some((HandleKind::End, pos));
+            }
+            HandleKind::End if pos < from => {
+                self.select_with_tick(from, pos);
+                self.show_endpoint_magnifier(pos, HandleKind::Start);
+                return Some((HandleKind::Start, pos));
+            }
+            kind => kind,
+        };
         let (anchor, head) = match kind {
             HandleKind::Caret => (pos, pos),
             HandleKind::Start => {
                 if pos >= to {
-                    return Some(pos);
+                    // Meeting the other end: the selection never empties.
+                    return Some((kind, pos));
                 }
                 let outward = last.is_none_or(|last| pos <= last);
                 let head = if !outward {
@@ -546,7 +569,7 @@ impl EditorView {
             }
             HandleKind::End => {
                 if pos <= from {
-                    return Some(pos);
+                    return Some((kind, pos));
                 }
                 let outward = last.is_none_or(|last| pos >= last);
                 let head = if !outward {
@@ -560,6 +583,12 @@ impl EditorView {
             }
         };
         self.select_with_tick(anchor, head);
+        self.show_endpoint_magnifier(head, kind);
+        Some((kind, pos))
+    }
+
+    /// The magnifier over the selection end a handle of `kind` holds.
+    fn show_endpoint_magnifier(&mut self, head: usize, kind: HandleKind) {
         let affinity = if kind == HandleKind::End {
             Affinity::Upstream
         } else {
@@ -568,7 +597,6 @@ impl EditorView {
         if let Some(line) = self.endpoint_line(head, affinity) {
             self.set_magnifier(Some((line.x, line.center_y())));
         }
-        Some(pos)
     }
 
     /// Selects without scrolling, with a haptic tick when it changed.

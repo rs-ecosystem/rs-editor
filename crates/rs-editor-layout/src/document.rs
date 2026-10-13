@@ -24,6 +24,7 @@ use skia_safe::textlayout::{
 use crate::emoji::{self, SharedEmoji};
 use crate::fonts::{font_collection, register_font};
 use crate::geometry::Rect;
+use crate::images::Images;
 use crate::style::{BlockStyle, base_text_style, block_style, run_style, strut};
 use crate::text::{CaretStop, Placeholders, Squeeze, TextLayout};
 use crate::tops::{CHUNK, Chunk, Slot, Tops};
@@ -100,6 +101,10 @@ pub enum Decoration {
         rect: Rect,
         src: Option<String>,
         alt: Option<String>,
+        /// The decoded image, once the host supplied it.
+        image: Option<skia_safe::Image>,
+        /// The host could not load it.
+        failed: bool,
     },
 }
 
@@ -219,6 +224,8 @@ struct Shaper {
     missing: RefCell<BTreeSet<u32>>,
     /// Emoji images from the host, when emoji are drawn that way.
     emoji: Option<SharedEmoji>,
+    /// Pictures of image nodes, decoded by the host.
+    images: RefCell<Images>,
     theme: Theme,
 }
 
@@ -309,6 +316,7 @@ impl LayoutEngine {
                 fallbacks: Vec::new(),
                 missing: RefCell::new(BTreeSet::new()),
                 emoji: None,
+                images: RefCell::new(Images::default()),
                 theme,
             },
             texts: HashMap::new(),
@@ -386,6 +394,29 @@ impl LayoutEngine {
                 .into_iter()
                 .collect()
         })
+    }
+
+    /// The picture for image nodes with `src`, decoded by the host; `scale`
+    /// is its pixels per CSS pixel (2 for a 2× image), which sets the size
+    /// it shows at without `width` and `height` attributes. Blocks are laid
+    /// out again, since images without those attributes take its size.
+    pub fn add_image(&mut self, src: &str, image: skia_safe::Image, scale: f32) {
+        self.shaper.images.borrow_mut().add(src, image, scale);
+        self.reset();
+    }
+
+    /// The host could not load `src`: it stays a placeholder.
+    pub fn image_failed(&mut self, src: &str) {
+        self.shaper.images.borrow_mut().fail(src);
+        self.reset();
+    }
+
+    /// Image sources laid out since the last call that are neither loaded
+    /// nor failed, for the host to load.
+    pub fn take_missing_images(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.shaper.images.borrow_mut().missing)
+            .into_iter()
+            .collect()
     }
 
     /// Characters laid out since the last call that no font could show
@@ -664,7 +695,7 @@ impl Shaper {
             return lines * style.line_height + pad;
         }
         if node.is_leaf() {
-            return leaf_height(node, width);
+            return leaf_height(node, width, &self.images.borrow());
         }
         let list = is_list(node);
         let indent = if list {
@@ -905,19 +936,34 @@ fn is_list(node: &Node) -> bool {
 }
 
 /// Height of a leaf block (rule, image) at `width`.
-fn leaf_height(node: &Node, width: f32) -> f32 {
+fn leaf_height(node: &Node, width: f32, images: &Images) -> f32 {
     match node.type_name() {
-        "image" => image_size(node, width).1,
+        "image" => image_size(node, width, images).1,
         _ => 24.0,
     }
 }
 
-fn image_size(node: &Node, width: f32) -> (f32, f32) {
+/// The size an image shows at in a column `width` wide: its `width` and
+/// `height` attributes, else the loaded image's own size (in CSS pixels),
+/// else a 16:9 box until it loads; never wider than the column.
+fn image_size(node: &Node, width: f32, images: &Images) -> (f32, f32) {
     let attr = |name: &str| node.attr(name).and_then(|v| v.as_f64()).map(|v| v as f32);
-    match (attr("width"), attr("height")) {
-        (Some(w), Some(h)) if w > 0.0 && h > 0.0 => {
+    let natural = node
+        .attr("src")
+        .and_then(|v| v.as_str())
+        .and_then(|src| images.size(src));
+    match (attr("width"), attr("height"), natural) {
+        (Some(w), Some(h), _) if w > 0.0 && h > 0.0 => {
             let shown = w.min(width);
             (shown, shown * h / w)
+        }
+        (Some(w), _, Some((nw, nh))) if w > 0.0 => {
+            let shown = w.min(width);
+            (shown, shown * nh / nw)
+        }
+        (_, _, Some((nw, nh))) => {
+            let shown = nw.min(width);
+            (shown, shown * nh / nw)
         }
         _ => (width.min(640.0), width.min(640.0) * 9.0 / 16.0),
     }
@@ -1157,12 +1203,20 @@ impl Builder<'_> {
                 height
             }
             "image" => {
-                let (w, h) = image_size(node, width);
+                let mut images = self.shaper.images.borrow_mut();
+                let (w, h) = image_size(node, width, &images);
                 let text = |name: &str| node.attr(name).and_then(|v| v.as_str()).map(str::to_owned);
+                let src = text("src");
+                let (image, failed) = match &src {
+                    Some(src) => images.lookup(src),
+                    None => (None, true),
+                };
                 self.out.decorations.push(Decoration::Image {
                     rect: Rect::new(x, y, w, h),
-                    src: text("src"),
+                    src,
                     alt: text("alt"),
+                    image,
+                    failed,
                 });
                 h
             }

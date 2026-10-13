@@ -48,6 +48,18 @@ export interface EditorOptions {
   bubbleMenu?: boolean;
   /** Shows a menu of blocks (headings, lists, quote, code…) when `/` is typed. Default true. */
   slashMenu?: boolean;
+  /** A grip beside the block under the mouse (or with the caret, on touch screens) to select and drag blocks. Default true. */
+  dragHandle?: boolean;
+  /** Text in an empty line with the caret. Default: a hint at the `/` menu in the UI's language. */
+  placeholder?: string;
+  /** The most characters the document may hold (Tiptap's CharacterCount `limit`). */
+  characterLimit?: number;
+  /**
+   * Stores an image file (picked from the `/` menu, pasted or dropped) and
+   * resolves to its address, for example after uploading it to your server.
+   * Without it, the `/` menu asks for an image address instead.
+   */
+  uploadImage?: (file: File) => Promise<string>;
   /** Language of the editor's own menus, as a BCP 47 tag. Default `navigator.language`; English when there is no translation. */
   locale?: string;
   /**
@@ -156,6 +168,12 @@ export interface Editor {
   setPasteMarkdown(markdown: boolean): void;
   /** Opens the link address field over the link at the caret or the selected text, as Mod-K does. False when there is nothing to link. */
   editLink(): boolean;
+  /** Text in an empty line with the caret; "" restores the default. */
+  setPlaceholder(text: string): void;
+  /** Tiptap's storage: `storage.characterCount.characters()`, `.words()` and `.limit()`. */
+  readonly storage: {
+    characterCount: { characters(): number; words(): number; limit(): number | null };
+  };
   /** Language of the editor's own menus, such as "id-ID". */
   setLocale(locale: string): void;
   /** Adds a font (TTF/OTF/WOFF bytes); returns its family, or "" when the bytes are not a font. */
