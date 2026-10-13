@@ -28,9 +28,12 @@ const VISUALLY_HIDDEN = "position:absolute;width:1px;height:1px;margin:-1px;padd
 export class AccessibilityMirror {
   constructor(editor) {
     this.editor = editor;
+    /** Node data by id, as last received. */
+    this.nodes = new Map();
     this.elements = new Map();
-    this.tree = null;
-    this.runs = new Map();
+    this.parents = new Map();
+    this.selection = null;
+    this.full = true;
 
     const root = this.root = document.createElement("div");
     root.className = "rs-editor-a11y";
@@ -52,7 +55,7 @@ export class AccessibilityMirror {
     this.scheduled = false;
   }
 
-  /** Rebuilds the mirror soon (at most once per idle period). */
+  /** Brings the mirror up to date soon (at most once per idle period). */
   schedule() {
     if (this.scheduled) return;
     this.scheduled = true;
@@ -64,67 +67,110 @@ export class AccessibilityMirror {
     else setTimeout(run, 100);
   }
 
+  /**
+   * Applies the nodes that changed since the last update (everything the
+   * first time): only their elements, and their children's places, change.
+   */
   update() {
     const editor = this.editor;
     if (editor._destroyed) return;
-    const tree = editor._json(editor._M._rse_accessibility_tree(editor._app));
-    this.tree = tree;
-    this.runs.clear();
-    const seen = new Set();
-    const children = (tree.children ?? []).map((child) => this.build(child, tree.bounds ?? [0, 0, 0, 0], seen));
-    replaceChildren(this.root, children);
-    for (const [id, element] of this.elements) {
-      if (!seen.has(id)) this.elements.delete(id);
-    }
+    const len = editor._M._rse_accessibility_update(editor._app, this.full ? 1 : 0);
+    this.full = false;
+    if (!len) return;
+    const update = editor._json(len);
+    this.rootId = update.root;
+    if (update.selection) this.selection = update.selection;
+    const changed = update.nodes.map((node) => node.id);
+    const previous = new Map(changed.map((id) => [id, this.nodes.get(id)]));
+    for (const node of update.nodes) this.nodes.set(node.id, node);
+    for (const id of changed) this.render(id, previous.get(id));
   }
 
-  /** The element for `node`, reusing the one with the same id. */
-  build(node, parentBounds, seen) {
-    seen.add(node.id);
-    const tag = node.role === "Heading" ? `h${Math.min(6, Math.max(1, node.level ?? 2))}` : ROLE_ELEMENTS[node.role] ?? (node.role === "TextRun" ? "span" : "div");
-    let element = this.elements.get(node.id);
-    if (!element || element.localName !== tag) {
-      element = document.createElement(tag);
-      this.elements.set(node.id, element);
-      if (node.role === "CheckBox") {
-        element.setAttribute("role", "checkbox");
-        element.tabIndex = -1;
-        // Screen readers activate it with a click, which reaches the element
-        // directly even though the mirror ignores the pointer.
-        element.addEventListener("click", (e) => {
-          e.preventDefault();
-          this.action(element.dataset.id, "click");
-        });
-      } else if (node.role === "Image") {
-        element.setAttribute("role", "img");
-      } else if (node.role === "List") {
-        element.setAttribute("role", "list");
-      }
+  /** The element for node `id`, created (with its subtree) when missing. */
+  element(id) {
+    if (id === this.rootId) return this.root;
+    let element = this.elements.get(id);
+    if (!element && this.nodes.has(id)) {
+      this.render(id, undefined);
+      element = this.elements.get(id);
     }
-    element.dataset.id = node.id;
-    const bounds = node.bounds ?? parentBounds;
-    const style = element.style;
-    style.position = "absolute";
-    style.margin = "0";
-    style.padding = "0";
-    style.left = `${bounds[0] - parentBounds[0]}px`;
-    style.top = `${bounds[1] - parentBounds[1]}px`;
-    style.width = `${bounds[2]}px`;
-    style.height = `${bounds[3]}px`;
+    return element;
+  }
+
+  /** Updates node `id`'s element and children (`before`: its old data). */
+  render(id, before) {
+    const node = this.nodes.get(id);
+    if (!node) return;
+    let element = id === this.rootId ? this.root : this.elements.get(id);
+    const tag = tagOf(node);
+    if (!element || (element !== this.root && element.localName !== tag)) {
+      const old = element;
+      element = createElement(node, tag, (target, action) => this.action(target, action));
+      this.elements.set(id, element);
+      old?.replaceWith(element);
+    }
+    element.dataset.id = id;
     if (node.role === "CheckBox") element.setAttribute("aria-checked", String(node.checked === true));
     if (node.role === "Image") element.setAttribute("aria-label", node.label ?? "");
     if (node.role === "TextRun") {
-      this.runs.set(node.id, node);
       const text = (node.text ?? "").replace(/\n$/, "");
       if (element.textContent !== text) element.textContent = text;
-      style.whiteSpace = "pre";
-      style.overflow = "hidden";
-      style.fontSize = `${Math.max(1, bounds[3] * 0.75)}px`;
-      style.lineHeight = `${bounds[3]}px`;
     } else {
-      replaceChildren(element, (node.children ?? []).map((child) => this.build(child, bounds, seen)));
+      // Children sit relative to this node's box: they move only when it
+      // does (not when only its transform does, as in scrolling).
+      const origin = (box) => (box ? `${box[0]},${box[1]}` : "");
+      const moved = !before || origin(before.bounds) !== origin(node.bounds);
+      const known = new Set(before?.children ?? []);
+      const children = [];
+      for (const child of node.children) {
+        const fresh = !this.elements.has(child);
+        this.parents.set(child, id);
+        const childElement = this.element(child);
+        if (childElement) {
+          if (moved || fresh || !known.has(child)) this.place(child);
+          children.push(childElement);
+        }
+      }
+      replaceChildren(element, children);
+      const current = new Set(node.children);
+      for (const old of before?.children ?? []) {
+        if (!current.has(old)) this.forget(old);
+      }
+      labelCheckbox(node, children);
     }
-    return element;
+    if (element !== this.root) this.place(id);
+  }
+
+  /** Positions node `id` inside its parent's box. */
+  place(id) {
+    const node = this.nodes.get(id);
+    const element = this.elements.get(id);
+    if (!node || !element) return;
+    const parent = this.nodes.get(this.parents.get(id));
+    const origin = parent?.bounds ?? [0, 0, 0, 0];
+    const [x0, y0, x1, y1] = transformBox(node.transform, node.bounds ?? origin);
+    const style = element.style;
+    style.left = `${x0 - origin[0]}px`;
+    style.top = `${y0 - origin[1]}px`;
+    style.width = `${x1 - x0}px`;
+    style.height = `${y1 - y0}px`;
+    if (node.role === "TextRun") {
+      style.fontSize = `${Math.max(1, (y1 - y0) * 0.75)}px`;
+      style.lineHeight = `${y1 - y0}px`;
+    }
+  }
+
+  /** Drops node `id` and its subtree. */
+  forget(id) {
+    const node = this.nodes.get(id);
+    if (!node) return;
+    for (const child of node.children) {
+      if (this.parents.get(child) === id) this.forget(child);
+    }
+    this.nodes.delete(id);
+    this.elements.get(id)?.remove();
+    this.elements.delete(id);
+    this.parents.delete(id);
   }
 
   action(id, action) {
@@ -150,21 +196,20 @@ export class AccessibilityMirror {
    * would: the character, word or line reached, or the selected text.
    */
   announceMove(event) {
-    const tree = this.editor._json(this.editor._M._rse_accessibility_tree(this.editor._app));
-    this.tree = tree;
-    const runs = new Map();
-    collectRuns(tree, runs);
-    const selection = tree.selection;
+    // Bring the mirror (and its idea of the selection) up to date now.
+    this.update();
+    const selection = this.selection;
     if (!selection) return;
-    const after = this.editor.selection;
     const text = labels();
-    if (event.shiftKey && !after.empty) {
+    if (event.shiftKey && !this.editor.selection.empty) {
+      const runs = new Map();
+      collectRuns(this.nodes, this.rootId, runs);
       const selected = selectedText(runs, selection);
       this.announce(selected.length <= 80 ? `${selected} ${text.selected}` : `${selected.length} ${text.characters}`);
       return;
     }
     const [runId, index] = selection.focus;
-    const run = runs.get(runId);
+    const run = this.nodes.get(runId);
     if (!run) return;
     const line = (run.text ?? "").replace(/\n$/, "");
     const characters = graphemes(line);
@@ -200,9 +245,65 @@ function graphemes(text) {
   return Array.from(text);
 }
 
-function collectRuns(node, runs) {
+/** Text runs under node `id`, in document order. */
+function collectRuns(nodes, id, runs) {
+  const node = nodes.get(id);
+  if (!node) return;
   if (node.role === "TextRun") runs.set(node.id, node);
-  for (const child of node.children ?? []) collectRuns(child, runs);
+  for (const child of node.children) collectRuns(nodes, child, runs);
+}
+
+function tagOf(node) {
+  if (node.role === "Heading") return `h${Math.min(6, Math.max(1, node.level ?? 2))}`;
+  return ROLE_ELEMENTS[node.role] ?? (node.role === "TextRun" ? "span" : "div");
+}
+
+function createElement(node, tag, action) {
+  const element = document.createElement(tag);
+  const style = element.style;
+  style.position = "absolute";
+  style.margin = "0";
+  style.padding = "0";
+  if (node.role === "TextRun") {
+    style.whiteSpace = "pre";
+    style.overflow = "hidden";
+  } else if (node.role === "CheckBox") {
+    element.setAttribute("role", "checkbox");
+    element.tabIndex = -1;
+    // Screen readers activate it with a click, which reaches the element
+    // directly even though the mirror ignores the pointer.
+    element.addEventListener("click", (e) => {
+      e.preventDefault();
+      action(element.dataset.id, "click");
+    });
+  } else if (node.role === "Image") {
+    element.setAttribute("role", "img");
+  } else if (node.role === "List") {
+    element.setAttribute("role", "list");
+  }
+  return element;
+}
+
+/** A task's checkbox is named by the text next to it. */
+function labelCheckbox(node, children) {
+  if (node.role !== "ListItem") return;
+  const checkbox = children.find((child) => child.getAttribute("role") === "checkbox");
+  const text = children.find((child) => child !== checkbox);
+  if (!checkbox || !text) return;
+  text.id ||= `rs-editor-a11y-${text.dataset.id}`;
+  checkbox.setAttribute("aria-labelledby", text.id);
+}
+
+/** The bounding box of `box` ([x0, y0, x1, y1]) under affine `t`. */
+function transformBox(t, box) {
+  if (!t) return box;
+  const [a, b, c, d, e, f] = t;
+  const xs = [], ys = [];
+  for (const [x, y] of [[box[0], box[1]], [box[2], box[1]], [box[0], box[3]], [box[2], box[3]]]) {
+    xs.push(a * x + c * y + e);
+    ys.push(b * x + d * y + f);
+  }
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
 /** The text between the selection's ends, in document order of the runs. */
@@ -226,10 +327,17 @@ function selectedText(runs, selection) {
 
 /** Replaces `parent`'s children with `children`, moving rather than recreating. */
 function replaceChildren(parent, children) {
-  let index = 0;
+  let current = parent.firstChild;
   for (const child of children) {
-    if (parent.childNodes[index] !== child) parent.insertBefore(child, parent.childNodes[index] ?? null);
-    index++;
+    if (current === child) {
+      current = current.nextSibling;
+    } else {
+      parent.insertBefore(child, current);
+    }
   }
-  while (parent.childNodes.length > children.length) parent.lastChild.remove();
+  while (current) {
+    const next = current.nextSibling;
+    current.remove();
+    current = next;
+  }
 }

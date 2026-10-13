@@ -227,3 +227,27 @@ fn the_accessibility_tree_mirrors_structure_and_toggles_tasks() {
     assert!(editor.accessibility_action(checkbox["id"].as_str().unwrap(), "click"));
     assert!(editor.get_json().contains(r#""checked":true"#));
 }
+
+#[test]
+fn accessibility_updates_send_only_what_changed() {
+    let blocks: Vec<Value> = (0..200)
+        .map(|i| json!({"type": "paragraph", "content": [{"type": "text", "text": format!("baris {i}")}]}))
+        .collect();
+    let mut editor = EditorApi::new(ApiOptions {
+        content: json!({"type": "doc", "content": blocks}).to_string(),
+        ..Default::default()
+    });
+    let full: Value = serde_json::from_str(&editor.accessibility_update_json(true)).unwrap();
+    let all = full["nodes"].as_array().unwrap().len();
+    assert!(all > 200, "{all}");
+    assert_eq!(
+        editor.accessibility_update_json(false),
+        "",
+        "nothing changed"
+    );
+    editor.insert_text("x");
+    let update: Value = serde_json::from_str(&editor.accessibility_update_json(false)).unwrap();
+    let changed = update["nodes"].as_array().unwrap().len();
+    assert!(changed < 10, "{changed} of {all}");
+    assert!(update["selection"]["focus"][0].is_string());
+}

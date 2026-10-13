@@ -125,6 +125,8 @@ Sudah:
   - Paket web membangunnya menjadi DOM tak terlihat yang ditumpuk di atas canvas: `h1`–`h6`, `ul`/`li`, `pre`, `blockquote`, `role="checkbox"` dengan `aria-checked`, dan satu span per baris di posisi aslinya.
   - Elemen yang tidak berubah dipakai ulang berdasarkan id, dan pembaruan dijalankan saat browser senggang.
   - Klik pada checkbox dari screen reader diteruskan sebagai aksi AccessKit `Click`.
+- **Pembaruan inkremental:** `accessibility_update_json` hanya mengirim node yang berubah, memakai diff yang sama dengan adapter Android. Cermin memposisikan elemen relatif terhadap parent-nya lewat transform AccessKit, sehingga scroll hanya menggeser satu elemen. Pengukuran di dokumen 10.000 blok: pembaruan setelah mengetik turun dari 2.020 ms menjadi 47 ms, scroll dari 290 ms menjadi 20 ms, dan pengumuman tombol panah dari 64 ms menjadi 9 ms.
+- **Label checkbox** diambil dari teks task-nya (`aria-labelledby`).
 - **Umpan balik suara untuk navigasi keyboard** lewat `aria-live`: karakter (kiri/kanan), kata (Ctrl/Alt), baris (atas/bawah, Page), atau teks yang dipilih (Shift).
 - **Diuji di Chrome lewat pohon aksesibilitasnya:** judul, list, checkbox, dan semua baris teks terekspos; klik checkbox dari cermin mengubah dokumen; pengumuman cocok dengan tiap tombol.
 - **Emoji tanpa unduhan di web:** layout menjadikan setiap kluster emoji (ZWJ, bendera, keycap, warna kulit, `FE0F`) satu placeholder kotak berukuran sekitar 1,2 em, sedangkan `TextLayout` memetakan offset dokumen ↔ paragraf sehingga caret, seleksi, dan hit-test tetap per grapheme. Browser menggambar emoji dengan font sistem di canvas 2D (effect `missingEmoji` → `add_emoji_image`), lalu Skia menempelkan gambarnya. Kalau aplikasi memberi font emoji lewat `fonts`, emoji kembali dirender sebagai teks. Di Chrome, warna kulit, bendera, keycap, keluarga ZWJ, dan ❤️ tampil benar; panah melompati satu emoji utuh; dan pengumuman screen reader menyebut emojinya (indeks dihitung per grapheme).
@@ -136,8 +138,8 @@ Belum:
 
 - Uji dengan screen reader sungguhan (VoiceOver, NVDA, TalkBack di Chrome Android).
 - Uji di Safari (macOS, iOS) dan Firefox.
-- Cermin seleksi DOM (sekarang seleksi diumumkan, bukan dicerminkan), dan label checkbox dari teks item.
-- Pohon aksesibilitas penuh tiap pembaruan bisa berat untuk dokumen sangat besar (10k+ blok); perlu pembaruan bertahap seperti di Android.
+- Cermin seleksi DOM (sekarang seleksi diumumkan, bukan dicerminkan).
+- Node konten masih membawa daftar semua blok setiap kali berubah (sekitar 140 KB JSON untuk 10.000 blok). Kalau perlu, daftar ini bisa dikirim sebagai selisih saja.
 
 ## P4 — Android · Selesai
 

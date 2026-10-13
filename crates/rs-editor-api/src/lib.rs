@@ -681,6 +681,87 @@ impl EditorApi {
         tree.to_string()
     }
 
+    /// Accessibility nodes changed since the last call (all of them when
+    /// `full`), for hosts that keep a mirror of the tree up to date:
+    /// `{root, nodes: [{id, role, children: [ids], transform?: [a, b, c, d,
+    /// e, f], bounds?: [x0, y0, x1, y1], text?, label?, level?, checked?}],
+    /// selection?}`, or `""` when nothing changed. Bounds are in the node's
+    /// own coordinates; `transform` maps them to its parent's (shell units
+    /// at the root).
+    pub fn accessibility_update_json(&mut self, full: bool) -> String {
+        use rs_editor_view::accesskit::{Node, NodeId, Toggled};
+
+        let update = if full {
+            Some(self.view.accessibility_tree())
+        } else {
+            self.view.accessibility_update()
+        };
+        let Some(update) = update else {
+            return String::new();
+        };
+        let root = rs_editor_view::EDITOR_NODE;
+        let scale = match self.units {
+            Units::Logical => 1.0,
+            Units::Device => f64::from(self.view.size().2),
+        };
+        let node_json = |id: NodeId, node: &Node| {
+            let mut out = Map::new();
+            out.insert("id".into(), json!(id.0.to_string()));
+            out.insert("role".into(), json!(format!("{:?}", node.role())));
+            let children: Vec<String> = node.children().iter().map(|c| c.0.to_string()).collect();
+            out.insert("children".into(), json!(children));
+            // The root's transform scales to device pixels; logical shells
+            // do without it.
+            let transform = if id == root {
+                Some([scale, 0.0, 0.0, scale, 0.0, 0.0])
+            } else {
+                node.transform().map(|t| t.as_coeffs())
+            };
+            if let Some(t) = transform {
+                out.insert("transform".into(), json!(t));
+            }
+            if let Some(b) = node.bounds() {
+                out.insert("bounds".into(), json!([b.x0, b.y0, b.x1, b.y1]));
+            }
+            if let Some(text) = node.value() {
+                out.insert("text".into(), json!(text));
+            }
+            if let Some(label) = node.label() {
+                out.insert("label".into(), json!(label));
+            }
+            if let Some(level) = node.level() {
+                out.insert("level".into(), json!(level));
+            }
+            if let Some(toggled) = node.toggled() {
+                out.insert("checked".into(), json!(toggled == Toggled::True));
+            }
+            Value::Object(out)
+        };
+        let mut out = Map::new();
+        out.insert("root".into(), json!(root.0.to_string()));
+        let selection = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == root)
+            .and_then(|(_, node)| node.text_selection());
+        if let Some(selection) = selection {
+            let position = |p: rs_editor_view::accesskit::TextPosition| {
+                json!([p.node.0.to_string(), p.character_index])
+            };
+            out.insert(
+                "selection".into(),
+                json!({"anchor": position(selection.anchor), "focus": position(selection.focus)}),
+            );
+        }
+        let nodes: Vec<Value> = update
+            .nodes
+            .iter()
+            .map(|(id, node)| node_json(*id, node))
+            .collect();
+        out.insert("nodes".into(), Value::Array(nodes));
+        Value::Object(out).to_string()
+    }
+
     /// An accessibility action on node `id` (from [`EditorApi::accessibility_json`]):
     /// `click` (toggles a checkbox) or `focus`. Returns whether it applied.
     pub fn accessibility_action(&mut self, id: &str, action: &str) -> bool {

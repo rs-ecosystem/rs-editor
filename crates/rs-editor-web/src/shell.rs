@@ -684,6 +684,19 @@ pub unsafe extern "C" fn rse_accessibility_tree(app_ptr: *mut App) -> usize {
     app.set_result(&tree)
 }
 
+/// Accessibility nodes changed since the last call (all when `full` is 1),
+/// as JSON (see `EditorApi::accessibility_update_json`); returns the
+/// length, 0 when nothing changed.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_accessibility_update(app_ptr: *mut App, full: u32) -> usize {
+    let app = unsafe { app(app_ptr) };
+    let update = app.api.accessibility_update_json(full != 0);
+    app.set_result(&update)
+}
+
 /// An accessibility action (`click`, `focus`) on a node of that tree;
 /// returns 1 when it applied.
 ///
