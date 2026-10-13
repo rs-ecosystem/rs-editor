@@ -16,6 +16,7 @@ use accesskit::{
 };
 use openrich_layout::{Affinity, BlockBox, Decoration, DocumentLayout, TextBox, TextLayout};
 use openrich_model::Node;
+use openrich_state::Selection;
 use openrich_text::TextIndexMap;
 
 use crate::EditorView;
@@ -536,8 +537,21 @@ impl EditorView {
         let subtree = self.a11y.subtrees.get(&base)?;
         let top = self.locate(base)?;
         let run = subtree.runs.iter().find(|run| run.id == position.node)?;
-        let index = position.character_index.min(run.offsets.len() - 1);
-        Some(top + run.offsets[index])
+        let chars = run.offsets.len() - 1;
+        let index = position.character_index.min(chars);
+        let pos = top + run.offsets[index];
+        if run.last && index == chars {
+            // After a block's closing line break: the start of the next
+            // textblock (the document has no position between them).
+            let doc = self.editor.doc();
+            let next = doc
+                .resolve((pos + 1).min(doc.content().size()))
+                .ok()
+                .map(|at| Selection::near(&at, 1).head())
+                .filter(|&next| next > pos);
+            return Some(next.unwrap_or(pos));
+        }
+        Some(pos)
     }
 }
 

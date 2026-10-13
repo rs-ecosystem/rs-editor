@@ -50,7 +50,8 @@ impl ActivationHandler for Accessibility {
 impl ActionHandler for Accessibility {
     fn do_action(&mut self, request: ActionRequest) {
         let app = app(self.0);
-        if !app.view.accessibility_action(&request) {
+        let handled = app.view.accessibility_action(&request);
+        if !handled {
             return;
         }
         // Let the Java view redraw and resync the IME.

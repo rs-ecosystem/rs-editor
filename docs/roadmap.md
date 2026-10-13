@@ -113,7 +113,7 @@ Adapter Android:
 
 Tes: skenario gesture headless (posisi, granularitas, auto-scroll, urutan sinyal haptik dan menu) dan uji manual di perangkat.
 
-### Milestone 2: input dan platform · Selesai, tinggal uji TalkBack oleh pengguna
+### Milestone 2: input dan platform · Selesai (TalkBack jadi tugas lanjutan)
 
 Sudah:
 
@@ -122,7 +122,14 @@ Sudah:
 - Salin menghasilkan teks + HTML dan tempel memakai HTML lebih dulu, di desktop (arboard), web (`text/html`) dan Android (`ClipData.newHtmlText`). Di perangkat: kata tebal yang disalin lalu ditempel tetap tebal.
 - TalkBack lewat AccessKit (`accesskit_android`, delegate tertanam sebagai dex). `uiautomator dump` di perangkat menunjukkan editor sebagai `EditText` berisi seluruh teks dokumen, blok sebagai `View`, list sebagai `ListView`, task sebagai `CheckBox` dengan status yang benar, semuanya dengan posisi di layar.
 
-Belum: uji TalkBack langsung (oleh pengguna), Samsung Keyboard (tidak ada di perangkat uji), `addVisibleLineBounds` (API 34) untuk tulisan tangan stylus.
+Belum: Samsung Keyboard (tidak ada di perangkat uji), `addVisibleLineBounds` (API 34) untuk tulisan tangan stylus.
+
+**Tugas lanjutan: TalkBack.** Uji langsung di perangkat (TalkBack 17.0.1, 2026-10-13):
+
+- Berjalan: editor dibacakan sebagai kolom edit berisi seluruh teks; struktur (judul, paragraf, list, checkbox dengan statusnya) dan posisinya terekspos.
+- Probe debug yang meniru TalkBack (`adb shell am broadcast -a dev.openrich.demo.A11Y_PROBE --ei granularity 4`) memindahkan kursor per baris dengan benar. Pemetaan posisi di batas paragraf sudah diperbaiki, dan algoritma traversal AccessKit diuji di `screen_reader_line_steps_move_forward_through_every_line`.
+- Belum berjalan: dengan kontrol membaca "Lines", usapan TalkBack di perangkat tidak mengirim `ACTION_NEXT_AT_MOVEMENT_GRANULARITY` (log hanya menunjukkan lepas/pasang fokus), sehingga pengguna tidak bisa bergerak per baris. Juga, usap kanan/kiri tidak berpindah per judul/paragraf karena semuanya berada di dalam satu kolom edit.
+- Arah: pelajari cara Chrome mengekspos `contenteditable` ke TalkBack (navigasi per paragraf dan judul tanpa membaca dua kali) dan terapkan lewat AccessKit; cari tahu kenapa TalkBack tidak mengirim aksi granularitas ke node kita.
 
 Rencana awal milestone:
 

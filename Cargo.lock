@@ -1836,6 +1836,7 @@ name = "openrich-view"
 version = "0.1.0"
 dependencies = [
  "accesskit",
+ "accesskit_consumer",
  "openrich-commands",
  "openrich-extensions",
  "openrich-history",

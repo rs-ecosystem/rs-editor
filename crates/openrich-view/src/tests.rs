@@ -688,6 +688,120 @@ mod accessibility {
     }
 
     #[test]
+    fn the_position_after_a_block_break_is_the_next_block_start() {
+        let (mut view, _) = view_with(doc(vec![p("satu"), p("dua")]), KeyPlatform::Other);
+        let mut tree = Tree(HashMap::new());
+        tree.apply(view.accessibility_tree());
+        let mut runs = Vec::new();
+        tree.runs(EDITOR_NODE, &mut runs);
+        // "satu\n" has five characters; index 5 is after the line break.
+        let after_break = TextPosition {
+            node: runs[0],
+            character_index: 5,
+        };
+        assert!(view.accessibility_action(&ActionRequest {
+            action: Action::SetTextSelection,
+            target_tree: TreeId::ROOT,
+            target_node: EDITOR_NODE,
+            data: Some(ActionData::SetTextSelection(TextSelection {
+                anchor: after_break,
+                focus: after_break,
+            })),
+        }));
+        assert_eq!(view.editor().selection().head(), 7, "the start of `dua`");
+    }
+
+    /// Moves to the next line the way AccessKit's Android adapter does for
+    /// TalkBack, on a consumer-side copy of the tree.
+    fn next_line(tree: &accesskit_consumer::Tree) -> Option<TextSelection> {
+        let state = tree.state();
+        let node = state.root();
+        let current = node
+            .text_selection_focus()
+            .unwrap_or_else(|| node.document_range().start());
+        if current.is_document_end() {
+            return None;
+        }
+        let current = current.biased_to_start();
+        let start = if current.is_line_start() {
+            current
+        } else {
+            let start = current.forward_to_line_start();
+            if start.is_document_end() {
+                return None;
+            }
+            start
+        };
+        let end = start.forward_to_line_end().to_raw();
+        Some(TextSelection {
+            anchor: end,
+            focus: end,
+        })
+    }
+
+    struct Ignore;
+
+    impl accesskit_consumer::TreeChangeHandler for Ignore {
+        fn node_added(&mut self, _: &accesskit_consumer::NodeRef) {}
+        fn node_updated(
+            &mut self,
+            _: &accesskit_consumer::NodeRef,
+            _: &accesskit_consumer::NodeRef,
+        ) {
+        }
+        fn focus_moved(
+            &mut self,
+            _: Option<&accesskit_consumer::NodeRef>,
+            _: Option<&accesskit_consumer::NodeRef>,
+        ) {
+        }
+        fn node_removed(&mut self, _: &accesskit_consumer::NodeRef) {}
+    }
+
+    #[test]
+    fn screen_reader_line_steps_move_forward_through_every_line() {
+        let content = doc(vec![
+            json!({"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": "Judul"}]}),
+            p(&"kata panjang yang membungkus ".repeat(6)),
+            json!({"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": "Coba"}]}),
+            json!({"type": "bulletList", "content": [
+                {"type": "listItem", "content": [p("satu")]},
+                {"type": "listItem", "content": [p("dua")]},
+            ]}),
+            p("akhir"),
+        ]);
+        let (mut view, _) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        view.select_text(1, 1, Affinity::Downstream);
+        let mut tree = accesskit_consumer::Tree::new(view.accessibility_tree(), true);
+        let mut heads = vec![view.editor().selection().head()];
+        for _ in 0..14 {
+            let Some(selection) = next_line(&tree) else {
+                break;
+            };
+            assert!(view.accessibility_action(&ActionRequest {
+                action: Action::SetTextSelection,
+                target_tree: TreeId::ROOT,
+                target_node: EDITOR_NODE,
+                data: Some(ActionData::SetTextSelection(selection)),
+            }));
+            heads.push(view.editor().selection().head());
+            if let Some(update) = view.accessibility_update() {
+                tree.update_and_process_changes(update, &mut Ignore);
+            }
+        }
+        assert!(
+            heads.windows(2).all(|w| w[1] > w[0]),
+            "the caret went back: {heads:?}"
+        );
+        assert_eq!(
+            heads.last(),
+            Some(&(view.editor().doc().content().size() - 1)),
+            "{heads:?}"
+        );
+    }
+
+    #[test]
     fn typing_sends_only_the_edited_block() {
         let blocks: Vec<Value> = (0..200).map(|i| p(&format!("paragraf {i}"))).collect();
         let (mut view, _) = view_with(doc(blocks), KeyPlatform::Other);

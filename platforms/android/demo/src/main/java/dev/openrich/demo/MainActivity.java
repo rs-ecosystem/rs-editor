@@ -35,6 +35,58 @@ public final class MainActivity extends Activity {
         });
         setContentView(root);
         editor.requestFocus();
+        registerAccessibilityProbe();
+    }
+
+    /**
+     * Debug aid: `adb shell am broadcast -a dev.openrich.demo.A11Y_PROBE --ei granularity 4
+     * --ez forward true` performs what TalkBack does when moving through text and logs the
+     * result under the tag OpenRichProbe.
+     */
+    private void registerAccessibilityProbe() {
+        if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) == 0) return;
+        android.content.BroadcastReceiver probe = new android.content.BroadcastReceiver() {
+            @Override
+            public void onReceive(android.content.Context context, android.content.Intent intent) {
+                android.view.accessibility.AccessibilityNodeProvider provider = editor.getAccessibilityNodeProvider();
+                if (provider == null) {
+                    android.util.Log.d("OpenRichProbe", "no node provider");
+                    return;
+                }
+                int host = android.view.View.NO_ID; // AccessibilityNodeProvider.HOST_VIEW_ID
+                android.view.accessibility.AccessibilityNodeInfo info = provider.createAccessibilityNodeInfo(host);
+                if (info == null) {
+                    android.util.Log.d("OpenRichProbe", "no host node");
+                    return;
+                }
+                android.util.Log.d("OpenRichProbe", "host: class=" + info.getClassName()
+                        + " editable=" + info.isEditable() + " focused=" + info.isFocused()
+                        + " a11yFocused=" + info.isAccessibilityFocused()
+                        + " granularities=" + info.getMovementGranularities()
+                        + " selection=" + info.getTextSelectionStart() + ".." + info.getTextSelectionEnd()
+                        + " textLength=" + (info.getText() == null ? -1 : info.getText().length())
+                        + " actions=" + info.getActionList());
+                int granularity = intent.getIntExtra("granularity", 4);
+                boolean forward = intent.getBooleanExtra("forward", true);
+                Bundle args = new Bundle();
+                args.putInt(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT, granularity);
+                args.putBoolean(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_EXTEND_SELECTION_BOOLEAN, false);
+                int action = forward
+                        ? android.view.accessibility.AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY
+                        : android.view.accessibility.AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY;
+                boolean result = provider.performAction(host, action, args);
+                android.view.accessibility.AccessibilityNodeInfo after = provider.createAccessibilityNodeInfo(host);
+                android.util.Log.d("OpenRichProbe", "performAction(" + (forward ? "next" : "previous")
+                        + ", granularity " + granularity + ") = " + result + ", selection now "
+                        + (after == null ? "?" : after.getTextSelectionStart() + ".." + after.getTextSelectionEnd()));
+            }
+        };
+        android.content.IntentFilter filter = new android.content.IntentFilter("dev.openrich.demo.A11Y_PROBE");
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(probe, filter, android.content.Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(probe, filter);
+        }
     }
 
     @Override
