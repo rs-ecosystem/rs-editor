@@ -17,6 +17,7 @@ impl EditorView {
         self.update_bubble();
         self.update_slash();
         self.update_link();
+        self.tick_block_drag();
         self.update_block_handle();
         let theme = self.theme().clone();
         let layout = self.layout().clone();

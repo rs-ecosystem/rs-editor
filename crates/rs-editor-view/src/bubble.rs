@@ -73,6 +73,8 @@ pub(crate) struct Bubble {
     toolbar: Toolbar,
     /// The editor revision the buttons' states were computed at.
     revision: Option<u64>,
+    /// Closed with Escape: stays closed while the selection stays.
+    dismissed: Option<(usize, usize)>,
 }
 
 impl Bubble {
@@ -101,15 +103,28 @@ impl EditorView {
     }
 
     fn bubble_wanted(&self) -> bool {
+        let selection = self.editor.selection();
         self.bubble.enabled
             && self.focused
             && self.editor.is_editable()
-            && !self.touch.active
+            && !self.touch.finger_used
             && self.drag.is_none()
             && self.composition.is_none()
             && !self.link_editing()
-            && matches!(self.editor.selection(), Selection::Text(_))
-            && !self.editor.selection().empty()
+            && matches!(selection, Selection::Text(_) | Selection::All(_))
+            && !selection.empty()
+            && self.bubble.dismissed != Some((selection.from(), selection.to()))
+    }
+
+    /// Escape over the menu closes it until the selection changes.
+    pub(crate) fn bubble_escape(&mut self) -> bool {
+        if !self.bubble.appear.target() {
+            return false;
+        }
+        let selection = self.editor.selection();
+        self.bubble.dismissed = Some((selection.from(), selection.to()));
+        self.update_bubble();
+        true
     }
 
     /// Brings the menu in line with the selection: shows or hides it,

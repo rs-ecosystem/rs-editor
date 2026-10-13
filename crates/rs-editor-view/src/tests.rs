@@ -2287,18 +2287,21 @@ mod blocks {
         clock.advance(200);
         paint(&mut view);
 
-        // Drag "dua" below "tiga".
+        // Drag "dua" below "tiga" (just above "empat").
         let (gx, gy) = view.blocks.grip_center();
         assert!(view.pointer_down(PointerEvent::at(gx, gy)));
         assert!(view.has_node_selection(), "the block is selected");
-        let target = block_y(&mut view, 18) + 4.0;
+        let target = view_y_of(&mut view, 18) - 4.0;
         assert!(view.pointer_move(PointerEvent::at(gx, target)));
         assert!(view.is_dragging_block());
         paint(&mut view);
         assert!(view.pointer_up(PointerEvent::at(gx, target)));
         assert_eq!(texts(&view), "satu|tiga|dua|empat");
-        assert!(view.has_node_selection());
-        assert_eq!(view.editor().selection().from(), 12, "the moved block");
+        assert_eq!(
+            view.editor().selection().head(),
+            16,
+            "the caret ends the moved block"
+        );
 
         // One undo puts it back.
         view.run("undo", &Value::Null).unwrap();
@@ -2365,10 +2368,19 @@ mod blocks {
         paint(&mut view);
 
         let (gx, gy) = view.blocks.grip_center();
+        view.take_effects();
         view.touch(TouchPhase::Down, gx, gy);
         assert!(
+            !view
+                .take_effects()
+                .contains(&Effect::Haptic(HapticKind::LongPress)),
+            "no buzz for a mere press"
+        );
+        view.touch(TouchPhase::Move, gx, gy - 20.0);
+        assert!(
             view.take_effects()
-                .contains(&Effect::Haptic(HapticKind::LongPress))
+                .contains(&Effect::Haptic(HapticKind::LongPress)),
+            "the block comes loose"
         );
         let top = block_y(&mut view, 1) - 8.0;
         view.touch(TouchPhase::Move, gx, top);
@@ -2988,7 +3000,83 @@ mod grip_after_move {
         view.touch(TouchPhase::Up, gx, above_dua);
         assert_eq!(view.editor().get_text("|"), "satu|tiga|dua|empat");
         paint(&mut view);
-        assert_eq!(view.editor().selection().from(), 6, "tiga, now second");
+        // The caret at the end of "tiga" (typing goes on there, rather than
+        // replacing a selected block), its grip shown.
+        assert!(view.editor().selection().empty());
+        assert_eq!(view.editor().selection().head(), 11, "tiga, now second");
         assert_eq!(view.blocks.block(), Some(6), "its grip, not dua's");
+        view.insert_text("!");
+        assert_eq!(view.editor().get_text("|"), "satu|tiga!|dua|empat");
+    }
+}
+
+mod audit_blocks {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    #[test]
+    fn inserted_images_leave_the_caret_after_them() {
+        let (mut view, _) = view_with(doc(vec![p("awal")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.select_text(5, 5, Affinity::Downstream);
+        for src in ["a.png", "b.png", "c.png"] {
+            assert!(view.run("setImage", &json!({"src": src})).unwrap());
+        }
+        let json = view.editor().get_json();
+        let srcs: Vec<_> = json["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n["type"] == "image")
+            .map(|n| n["attrs"]["src"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(srcs, ["a.png", "b.png", "c.png"], "none replaced another");
+        assert!(view.editor().selection().empty(), "a caret, not the image");
+        view.insert_text("teks");
+        assert!(view.editor().get_text("|").ends_with("|teks"));
+    }
+
+    #[test]
+    fn copying_an_image_gives_text_too() {
+        let content = doc(vec![
+            p("a"),
+            json!({"type": "image", "attrs": {"src": "x.png", "alt": "Gunung"}}),
+        ]);
+        let (mut view, _) = view_with(content, KeyPlatform::Other);
+        assert!(view.select_node(3));
+        let copied = view.copy().unwrap();
+        assert_eq!(copied.text, "Gunung");
+        assert!(copied.html.contains("<img"));
+    }
+
+    #[test]
+    fn an_address_pasted_in_code_goes_in_once() {
+        let (mut view, _) = view_with(doc(vec![json!({"type": "codeBlock"})]), KeyPlatform::Other);
+        view.select_text(1, 1, Affinity::Downstream);
+        assert!(view.paste_text("https://a.b"));
+        assert_eq!(view.editor().get_text(""), "https://a.b");
+    }
+
+    /// A click on the grip selects the block; typing then goes on at its
+    /// end instead of replacing it.
+    #[test]
+    fn typing_over_a_selected_block_goes_on_at_its_end() {
+        let (mut view, clock) = view_with(doc(vec![p("satu"), p("dua")]), KeyPlatform::Other);
+        view.set_focused(true);
+        let y = view_y_of(&mut view, 7) + 10.0;
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let (gx, gy) = view.blocks.grip_center();
+        view.pointer_down(PointerEvent::at(gx, gy));
+        view.pointer_up(PointerEvent::at(gx, gy));
+        assert!(view.has_node_selection());
+        view.insert_text("!");
+        assert_eq!(view.editor().get_text("|"), "satu|dua!");
     }
 }

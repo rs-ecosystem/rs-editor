@@ -210,11 +210,11 @@ internal class SelectionUi(private val view: RsEditorView) : ActionMode.Callback
 
     /** Puts copied content on the clipboard, as HTML with a plain text fallback. */
     private fun setClipboard(text: String?, html: String?) {
-        if (text.isNullOrEmpty()) return
+        if (text.isNullOrEmpty() && html.isNullOrEmpty()) return
         val clip = if (html.isNullOrEmpty()) {
             ClipData.newPlainText("Rs Editor", text)
         } else {
-            ClipData.newHtmlText("Rs Editor", text, html)
+            ClipData.newHtmlText("Rs Editor", text.orEmpty(), html)
         }
         clipboard().setPrimaryClip(clip)
     }

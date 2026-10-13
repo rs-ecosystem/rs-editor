@@ -52,7 +52,7 @@ impl EditorView {
         if command && !m.shift && !m.alt && event.key.eq_ignore_ascii_case("k") {
             return self.edit_link();
         }
-        if event.key == "Escape" && self.link_escape() {
+        if event.key == "Escape" && (self.link_escape() || self.bubble_escape()) {
             return true;
         }
         let handled = {
@@ -115,6 +115,7 @@ impl EditorView {
         if (text == "\n" || text == "\r") && self.composition.is_none() && self.slash_newline() {
             return true;
         }
+        self.collapse_block_selection();
         self.finish_composition();
         let selection = self.editor.selection().clone();
         let ok = self
@@ -393,6 +394,9 @@ impl EditorView {
         if let Some(handled) = self.field_input(FieldInput::SetComposing(text)) {
             return handled;
         }
+        if self.composition.is_none() {
+            self.collapse_block_selection();
+        }
         if !self.editor.is_editable() {
             return false;
         }
@@ -493,9 +497,35 @@ impl EditorView {
             return None;
         }
         let slice = selection.content();
-        let text = slice
+        let mut text = slice
             .content
             .text_between(0, slice.content.size(), Some("\n"), Some(""));
+        if text.trim().is_empty() {
+            // Only images: their descriptions (or addresses) for plain text.
+            let mut images = Vec::new();
+            slice.content.nodes_between(
+                0,
+                slice.content.size(),
+                &mut |node, _, _, _| {
+                    if node.type_name() == "image" {
+                        let attr = |name: &str| {
+                            node.attr(name)
+                                .and_then(Value::as_str)
+                                .filter(|s| !s.is_empty())
+                        };
+                        if let Some(text) = attr("alt").or_else(|| attr("src")) {
+                            images.push(text.to_owned());
+                        }
+                    }
+                    true
+                },
+                0,
+                None,
+            );
+            if !images.is_empty() {
+                text = images.join("\n");
+            }
+        }
         let json = serde_json::json!({
             "content": rs_editor_model::fragment_to_json(&slice.content),
             "openStart": slice.open_start,
@@ -640,6 +670,10 @@ impl EditorView {
         } else {
             vec![step("setLink", serde_json::json!({"href": href}))]
         };
+        // Where links are not allowed (code), the address is plain text.
+        if !self.can_chain(&steps).unwrap_or(false) {
+            return false;
+        }
         self.run_chain(&steps).unwrap_or(false)
     }
 

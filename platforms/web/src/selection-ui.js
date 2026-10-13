@@ -151,7 +151,7 @@ export class SelectionUi {
 
   /** Puts copied content on the clipboard, as HTML with a plain text fallback. */
   writeClipboard(text, html) {
-    if (!text) return;
+    if (!text && !html) return;
     const clipboard = navigator.clipboard;
     if (html && clipboard?.write && typeof ClipboardItem !== "undefined") {
       clipboard.write([new ClipboardItem({

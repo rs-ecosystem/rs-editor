@@ -770,6 +770,50 @@ pub struct Image {
     pub inline: bool,
 }
 
+/// After inserting a block image (which selects it), the caret goes to
+/// the textblock after it, a new paragraph when there is none: typing on
+/// does not replace the image, and the next image goes below this one.
+fn caret_after_block() -> Command {
+    Arc::new(
+        |state: &EditorState, dispatch: Dispatch, _view: Option<&dyn ViewContext>| {
+            let selection = state.selection();
+            let Selection::Node(node) = selection else {
+                return true;
+            };
+            if !node.node().is_leaf() || node.node().is_inline() {
+                return true;
+            }
+            if let Some(dispatch) = dispatch {
+                let after = selection.to();
+                let mut tr = state.tr();
+                let next_is_text = tr
+                    .doc
+                    .resolve(after)
+                    .ok()
+                    .and_then(|at| at.node_after())
+                    .is_some_and(|next| next.is_textblock());
+                if !next_is_text {
+                    let Ok(paragraph) = state.schema().node_type("paragraph") else {
+                        return true;
+                    };
+                    let Ok(empty) = paragraph.create(None, Fragment::empty(), MarkSet::none())
+                    else {
+                        return true;
+                    };
+                    if tr.insert(after, Fragment::from_node(empty)).is_err() {
+                        return true;
+                    }
+                }
+                if let Ok(caret) = tr.doc.resolve(after + 1) {
+                    tr.set_selection(Selection::near(&caret, 1));
+                }
+                dispatch(tr);
+            }
+            true
+        },
+    )
+}
+
 impl Extension for Image {
     extension_basics!("image");
 
@@ -799,7 +843,10 @@ impl Extension for Image {
             let node = image
                 .create(Some(&attrs), Fragment::empty(), MarkSet::none())
                 .map_err(crate::ExtensionError::Schema)?;
-            Ok(insert_content(vec![node]))
+            Ok(crate::helpers::chain(vec![
+                insert_content(vec![node]),
+                caret_after_block(),
+            ]))
         });
         vec![("setImage".into(), set)]
     }

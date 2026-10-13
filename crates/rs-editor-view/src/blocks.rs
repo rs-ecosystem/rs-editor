@@ -13,7 +13,7 @@
 use accesskit::{Action, NodeId, Role};
 use rs_editor_layout::{DocumentLayout, Rect};
 use rs_editor_model::Fragment;
-use rs_editor_state::{NodeSelection, Selection, TextSelection};
+use rs_editor_state::{NodeSelection, Selection};
 use rs_editor_ui::{Appear, Icon};
 use skia_safe::{Canvas, Contains, Paint, RRect};
 
@@ -65,9 +65,14 @@ struct Drop {
 struct BlockDrag {
     unit: Unit,
     start: (f32, f32),
-    /// The scroll offset when the drag started (the ghost follows the
-    /// pointer across scrolling).
-    start_scroll: f32,
+    /// How far below the block's top the pointer took hold of it: the
+    /// ghost keeps that relation to the pointer, whatever layout and
+    /// scrolling do meanwhile.
+    grab: f32,
+    /// When the view last scrolled for the drag at an edge.
+    last_tick: u64,
+    /// The scroll offset the drop place was found at.
+    drop_scroll: f32,
     pointer: (f32, f32),
     moved: bool,
     drop: Option<Drop>,
@@ -201,7 +206,12 @@ impl EditorView {
             return None;
         }
         let (_, doc_y) = self.to_document(x, y);
-        let item = innermost_item(&layout, |b| b.rect.y <= doc_y && doc_y < b.rect.bottom());
+        // The gap below an item is that item's, so the grip does not jump
+        // to the whole list between items.
+        let gap = self.theme().spacing.list_item_gap;
+        let item = innermost_item(&layout, |b| {
+            b.rect.y <= doc_y && doc_y < b.rect.bottom() + gap
+        });
         if item.is_some() {
             return item;
         }
@@ -240,7 +250,15 @@ impl EditorView {
 
     /// Brings the grip in line with the pointer, the caret and a drag.
     pub(crate) fn update_block_handle(&mut self) {
-        self.tick_block_drag();
+        if let Some(mut drag) = self.blocks.drag {
+            // Blocks measured since (scrolling a long document) move it.
+            drag.unit = self.fresh_unit(&drag.unit);
+            self.blocks.drag = Some(drag);
+            // A wheel scrolled under a still pointer: a new place.
+            if drag.moved && drag.drop_scroll != self.scroll_y {
+                self.move_block_drag(drag.pointer.0, drag.pointer.1);
+            }
+        }
         let block = self.handle_block();
         let wanted = block.is_some_and(|b| {
             let grip = self.grip_rect(&b);
@@ -294,10 +312,13 @@ impl EditorView {
             tr.set_selection(selection);
             self.dispatch(tr);
         }
+        let grab = y - self.to_view(unit.rect).y;
         self.blocks.drag = Some(BlockDrag {
             unit,
             start: (x, y),
-            start_scroll: self.scroll_y,
+            grab,
+            last_tick: self.clock.now_ms(),
+            drop_scroll: self.scroll_y,
             pointer: (x, y),
             moved: false,
             drop: None,
@@ -312,9 +333,18 @@ impl EditorView {
             return;
         };
         drag.pointer = (x, y);
-        drag.moved |= (x - drag.start.0).hypot(y - drag.start.1) > DRAG_SLOP;
+        let started = !drag.moved && (x - drag.start.0).hypot(y - drag.start.1) > DRAG_SLOP;
+        drag.moved |= started;
+        if started && self.touch.finger_used {
+            // The block comes loose under the finger.
+            self.push_effect(Effect::Haptic(HapticKind::LongPress));
+        }
         if drag.moved {
-            drag.drop = self.drop_target(&drag.unit, x, y, drag.drop);
+            // Depth follows how far the pointer moved sideways from where
+            // it took hold, not where on the grip it happened to press.
+            let reach = self.to_view(drag.unit.rect).x + (x - drag.start.0);
+            drag.drop = self.drop_target(&drag.unit, reach, y, drag.drop);
+            drag.drop_scroll = self.scroll_y;
         }
         self.blocks.drag = Some(drag);
         self.request_redraw();
@@ -383,8 +413,10 @@ impl EditorView {
         if doc_y >= unit.rect.y && doc_y <= unit.rect.bottom() {
             return None;
         }
-        // Never inside itself; its own edges are where it already is.
-        candidates.retain(|c| c.pos <= unit.pos || c.pos >= unit.end());
+        // Never inside itself; its own edges are where it already is (a
+        // list's only item: the list's edges).
+        let (from, to) = self.removed_range(unit);
+        candidates.retain(|c| c.pos <= from || c.pos >= to);
         let nearest = candidates
             .iter()
             .map(|c| (c.y - doc_y).abs())
@@ -426,10 +458,47 @@ impl EditorView {
         });
         let place = kept.unwrap_or(best);
         // Nearest to where it is: no move (and no line).
-        (place.pos != unit.pos && place.pos != unit.end()).then_some(place)
+        let stays = [from, to, unit.pos, unit.end()].contains(&place.pos);
+        (!stays).then_some(place)
     }
 
-    /// Scroll speed (pixels per frame) for a pointer at view `y` during a
+    /// What moving `unit` removes: the item, or its list when it is the
+    /// list's only item.
+    fn removed_range(&self, unit: &Unit) -> (usize, usize) {
+        let doc = self.editor.doc();
+        match doc.resolve(unit.pos) {
+            Ok(at) if unit.item && at.parent().child_count() == 1 => {
+                let list = at.before(at.depth());
+                (list, list + at.parent().node_size())
+            }
+            _ => (unit.pos, unit.end()),
+        }
+    }
+
+    /// `unit` as currently laid out (its box moves when blocks above it
+    /// are measured).
+    fn fresh_unit(&mut self, unit: &Unit) -> Unit {
+        let layout = self.layout();
+        let rect = if unit.item {
+            layout
+                .blocks
+                .iter()
+                .find(|b| b.pos == unit.pos)
+                .map(|b| b.rect)
+        } else {
+            layout
+                .top_at_pos(unit.pos)
+                .and_then(|i| layout.tops.get(i))
+                .filter(|b| b.pos == unit.pos)
+                .map(|b| Rect::new(0.0, b.y, layout.width, b.height))
+        };
+        Unit {
+            rect: rect.unwrap_or(unit.rect),
+            ..*unit
+        }
+    }
+
+    /// Scroll speed (pixels per 16 ms) for a pointer at view `y` during a
     /// drag: faster the closer it is to an edge.
     fn edge_speed(&self, y: f32) -> f32 {
         let visible = self.visible_height();
@@ -442,12 +511,17 @@ impl EditorView {
         }
     }
 
-    /// Scrolls while a drag holds the pointer near an edge.
-    fn tick_block_drag(&mut self) {
-        let Some(drag) = self.blocks.drag.filter(|d| d.moved) else {
+    /// Scrolls while a drag holds the pointer near an edge, by time (the
+    /// same speed at 60 and 120 frames a second). Called once a frame.
+    pub(crate) fn tick_block_drag(&mut self) {
+        let Some(mut drag) = self.blocks.drag.filter(|d| d.moved) else {
             return;
         };
-        let speed = self.edge_speed(drag.pointer.1);
+        let now = self.clock.now_ms();
+        let elapsed = now.saturating_sub(drag.last_tick).min(50) as f32;
+        drag.last_tick = now;
+        self.blocks.drag = Some(drag);
+        let speed = self.edge_speed(drag.pointer.1) * elapsed / 16.0;
         if speed != 0.0 {
             let before = self.scroll_y;
             self.scroll_to_inner(self.scroll_y + speed);
@@ -510,21 +584,47 @@ impl EditorView {
         {
             return false;
         }
-        // Select the moved block itself, inside a list made for it.
+        // The moved block, inside a list made for it: the caret goes to
+        // its end (typing goes on there), an image stays selected.
         let target = if unit.item && drop.top_level {
             target + 1
         } else {
             target
         };
-        let selection = match NodeSelection::create(&tr.doc, target) {
-            Ok(selection) => selection,
-            Err(_) => match tr.doc.resolve(target + 1) {
-                Ok(inside) => Selection::Text(TextSelection::new(inside.clone(), inside)),
-                Err(_) => return false,
-            },
+        let moved = tr.doc.node_at(target);
+        let selection = match moved {
+            Some(node) if node.is_leaf() => NodeSelection::create(&tr.doc, target).ok(),
+            Some(node) => tr
+                .doc
+                .resolve(target + node.node_size())
+                .ok()
+                .map(|end| Selection::near(&end, -1)),
+            None => None,
+        };
+        let Some(selection) = selection else {
+            return false;
         };
         tr.set_selection(selection);
         self.dispatch(tr)
+    }
+
+    /// Typing over a selected block (a click on its grip) goes on at the
+    /// block's end instead of replacing the block; a selected image is
+    /// replaced, as anywhere.
+    pub(crate) fn collapse_block_selection(&mut self) {
+        let selection = self.editor.selection().clone();
+        let Selection::Node(node) = &selection else {
+            return;
+        };
+        if node.node().is_leaf() {
+            return;
+        }
+        let doc = self.editor.doc().clone();
+        if let Ok(end) = doc.resolve(selection.to()) {
+            let mut tr = self.editor.state().tr();
+            tr.set_selection(Selection::near(&end, -1));
+            self.dispatch(tr);
+        }
     }
 
     /// The grip as a button for screen readers: activating it selects the
@@ -605,7 +705,6 @@ impl EditorView {
                     return false;
                 }
                 self.hide_menu();
-                self.push_effect(Effect::Haptic(HapticKind::LongPress));
                 true
             }
             TouchPhase::Move => {
@@ -669,7 +768,7 @@ impl EditorView {
     /// How far the ghost (and the grip with it) sits below the block it
     /// lifts: the pointer's travel, across scrolling.
     fn ghost_offset(&self, drag: &BlockDrag) -> f32 {
-        (drag.pointer.1 - drag.start.1) + (self.scroll_y - drag.start_scroll)
+        drag.pointer.1 - drag.grab - self.to_view(drag.unit.rect).y
     }
 
     /// A lifted copy of the dragged block under the pointer, on a card

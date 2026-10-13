@@ -210,10 +210,14 @@ impl EditorView {
     /// A touch event in view coordinates.
     pub fn touch(&mut self, phase: TouchPhase, x: f32, y: f32) {
         self.touch.finger_used = true;
+        // Selection handles and checkboxes win over the grip and the link
+        // popover reaching near them.
+        let free = phase != TouchPhase::Down
+            || (self.handle_at(x, y).is_none() && self.checkbox_under_finger(x, y).is_none());
         // Popovers and menus take touches on them first.
-        if self.link_touch(phase, x, y)
+        if (free && self.link_touch(phase, x, y))
             || self.slash_touch(phase, x, y)
-            || self.block_touch(phase, x, y)
+            || (free && self.block_touch(phase, x, y))
         {
             self.request_redraw();
             return;
