@@ -187,3 +187,43 @@ fn initial_content_can_be_markdown() {
     assert_eq!(editor.get_html(), "<h2>Hai <em>dunia</em></h2>");
     assert!(!editor.run("undo", ""), "not an undoable change");
 }
+
+#[test]
+fn the_accessibility_tree_mirrors_structure_and_toggles_tasks() {
+    let mut editor = EditorApi::new(ApiOptions {
+        content: json!({"type": "doc", "content": [
+            {"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": "Judul"}]},
+            {"type": "taskList", "content": [{"type": "taskItem", "attrs": {"checked": false}, "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "tugas"}]}
+            ]}]},
+        ]})
+        .to_string(),
+        ..Default::default()
+    });
+    let tree: Value = serde_json::from_str(&editor.accessibility_json()).unwrap();
+    assert_eq!(tree["role"], "MultilineTextInput");
+    let mut found = Vec::new();
+    fn collect(node: &Value, found: &mut Vec<Value>) {
+        found.push(node.clone());
+        for child in node["children"].as_array().into_iter().flatten() {
+            collect(child, found);
+        }
+    }
+    collect(&tree, &mut found);
+    let heading = found.iter().find(|n| n["role"] == "Heading").unwrap();
+    assert_eq!(heading["level"], 2);
+    let run = found
+        .iter()
+        .find(|n| n["text"] == "Judul\n" || n["text"] == "Judul")
+        .unwrap();
+    let bounds = run["bounds"].as_array().unwrap();
+    assert!(
+        bounds[2].as_f64().unwrap() > 10.0,
+        "laid-out text has a width"
+    );
+    let checkbox = found.iter().find(|n| n["role"] == "CheckBox").unwrap();
+    assert_eq!(checkbox["checked"], false);
+    assert!(tree["selection"]["focus"][0].is_string());
+    assert!(editor.accessibility_action(checkbox["id"].as_str().unwrap(), "click"));
+    assert!(editor.get_json().contains(r#""checked":true"#));
+}

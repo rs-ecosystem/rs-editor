@@ -584,6 +584,105 @@ impl EditorApi {
         json!({"caret": caret, "bounds": bounds}).to_string()
     }
 
+    // --- accessibility ------------------------------------------------------
+
+    /// The accessibility tree (the one AccessKit adapters get) as nested
+    /// JSON for hosts that mirror it into their own UI tree, such as an ARIA
+    /// DOM on the web: `{id, role, bounds: [x, y, width, height], children,
+    /// text?, label?, level?, checked?}` with bounds in shell units, plus
+    /// `selection: {anchor: [id, index], focus: [id, index]}` in text runs.
+    pub fn accessibility_json(&mut self) -> String {
+        use rs_editor_view::accesskit::{Affine, Node, NodeId, Toggled};
+        use std::collections::HashMap;
+
+        let update = self.view.accessibility_tree();
+        let nodes: HashMap<NodeId, Node> = update.nodes.into_iter().collect();
+        // The editor node scales logical pixels to device pixels; shells in
+        // logical units do without it.
+        let base = match self.units {
+            Units::Logical => Affine::IDENTITY,
+            Units::Device => Affine::scale(f64::from(self.view.size().2)),
+        };
+        fn walk(
+            nodes: &HashMap<NodeId, Node>,
+            id: NodeId,
+            parent: Affine,
+            root: bool,
+        ) -> Option<Value> {
+            let node = nodes.get(&id)?;
+            let transform = if root {
+                parent
+            } else {
+                node.transform().map_or(parent, |t| parent * *t)
+            };
+            let mut out = Map::new();
+            out.insert("id".into(), json!(id.0.to_string()));
+            out.insert("role".into(), json!(format!("{:?}", node.role())));
+            if let Some(bounds) = node.bounds() {
+                let r = transform.transform_rect_bbox(bounds);
+                out.insert(
+                    "bounds".into(),
+                    json!([r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0]),
+                );
+            }
+            if let Some(text) = node.value() {
+                out.insert("text".into(), json!(text));
+            }
+            if let Some(label) = node.label() {
+                out.insert("label".into(), json!(label));
+            }
+            if let Some(level) = node.level() {
+                out.insert("level".into(), json!(level));
+            }
+            if let Some(toggled) = node.toggled() {
+                out.insert("checked".into(), json!(toggled == Toggled::True));
+            }
+            let children: Vec<Value> = node
+                .children()
+                .iter()
+                .filter_map(|&child| walk(nodes, child, transform, false))
+                .collect();
+            if !children.is_empty() {
+                out.insert("children".into(), Value::Array(children));
+            }
+            Some(Value::Object(out))
+        }
+        let root = rs_editor_view::EDITOR_NODE;
+        let mut tree = walk(&nodes, root, base, true).unwrap_or(Value::Null);
+        if let Some(selection) = nodes.get(&root).and_then(|n| n.text_selection())
+            && let Value::Object(object) = &mut tree
+        {
+            let position = |p: rs_editor_view::accesskit::TextPosition| {
+                json!([p.node.0.to_string(), p.character_index])
+            };
+            object.insert(
+                "selection".into(),
+                json!({"anchor": position(selection.anchor), "focus": position(selection.focus)}),
+            );
+        }
+        tree.to_string()
+    }
+
+    /// An accessibility action on node `id` (from [`EditorApi::accessibility_json`]):
+    /// `click` (toggles a checkbox) or `focus`. Returns whether it applied.
+    pub fn accessibility_action(&mut self, id: &str, action: &str) -> bool {
+        use rs_editor_view::accesskit::{Action, ActionRequest, NodeId, TreeId};
+        let Ok(id) = id.parse::<u64>() else {
+            return false;
+        };
+        let action = match action {
+            "click" => Action::Click,
+            "focus" => Action::Focus,
+            _ => return false,
+        };
+        self.view.accessibility_action(&ActionRequest {
+            action,
+            target_tree: TreeId::ROOT,
+            target_node: NodeId(id),
+            data: None,
+        })
+    }
+
     // --- clipboard -----------------------------------------------------------
 
     /// Copies or cuts the selection; `{text, html}` JSON (empty strings

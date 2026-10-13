@@ -34,6 +34,11 @@ export interface EditorOptions {
    * (Latin, Arabic, Devanagari) lack, such as emoji or CJK. See `notoFonts`.
    */
   fonts?: FontSource[];
+  /**
+   * Mirror the document into invisible DOM for screen readers and announce
+   * caret moves (on by default).
+   */
+  accessibility?: boolean;
   dark?: boolean;
   editable?: boolean;
   /** URL of `rs-editor-web.js` (default: `../dist/` next to this module). */

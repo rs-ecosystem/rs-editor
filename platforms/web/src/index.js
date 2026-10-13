@@ -7,6 +7,7 @@
 // for geometry) and shows what Rust asks for: the selection menu, the
 // magnifier, haptics and the on-screen keyboard.
 
+import { AccessibilityMirror } from "./a11y.js";
 import { SelectionUi } from "./selection-ui.js";
 
 const encoder = new TextEncoder();
@@ -62,10 +63,10 @@ export async function createEditor(options) {
 }
 
 class Editor {
-  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, fonts = [], wasmUrl = DEFAULT_WASM, input } = {}) {
+  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, fonts = [], accessibility = true, wasmUrl = DEFAULT_WASM, input } = {}) {
     if (!element) throw new Error("Rs Editor: `element` is required");
     this.element = element;
-    this._options = { content, contentType, dark, editable, pasteMarkdown, wasmUrl, input };
+    this._options = { content, contentType, dark, editable, pasteMarkdown, accessibility, wasmUrl, input };
     // Fonts to load when text needs them: { family, url, ranges }.
     this._fonts = fonts.map((font) => ({ ...font, state: "idle" }));
     this._listeners = new Map();
@@ -116,6 +117,7 @@ class Editor {
     this._revision = M._rse_revision(this._app, 0);
     this._docRevision = M._rse_revision(this._app, 1);
     this._ui = new SelectionUi(this);
+    if (this._options.accessibility) this._a11y = new AccessibilityMirror(this);
     this._setUpInput();
     this._setUpPointer();
     this._setUpViewport();
@@ -181,6 +183,8 @@ class Editor {
     // A frame can start a long press or bring the menu back after a fling.
     this._applyEffects();
     this._ui.afterFrame();
+    // Scrolling moves the mirror's boxes too.
+    if (next >= 0) this._a11y?.schedule();
     if (next >= 0 && next <= 16) this._requestFrame();
     else if (next > 16) this._timer = setTimeout(() => this._requestFrame(), next - 8);
   }
@@ -252,7 +256,11 @@ class Editor {
     } else {
       const textarea = this._textarea = document.createElement("textarea");
       textarea.setAttribute("autocapitalize", "sentences");
-      textarea.setAttribute("aria-hidden", "true");
+      // The focused element, so it is the text box screen readers know; the
+      // canvas then stays out of their way.
+      textarea.setAttribute("aria-multiline", "true");
+      textarea.setAttribute("aria-label", canvas.getAttribute("aria-label") ?? "Editor");
+      canvas.setAttribute("aria-hidden", "true");
       textarea.tabIndex = -1;
       textarea.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1em;opacity:0;padding:0;border:0;resize:none;overflow:hidden;white-space:pre;font-size:16px;caret-color:transparent";
       document.body.append(textarea);
@@ -319,6 +327,7 @@ class Editor {
     if (handled) {
       e.preventDefault();
       this._afterInput();
+      if (/^(Arrow|Home$|End$|Page)/.test(e.key)) this._a11y?.announceMove(e);
     }
   }
 
@@ -396,6 +405,7 @@ class Editor {
     this._syncInput();
     this._requestFrame();
     this._notify();
+    this._a11y?.schedule();
   }
 
   _notify() {
@@ -547,6 +557,7 @@ class Editor {
       else if (e.deltaMode === 2) M._rse_wheel(app, e.deltaY * this._size.height, 1);
       else M._rse_wheel(app, e.deltaY, 0);
       this._requestFrame();
+      this._a11y?.schedule();
     }, { passive: false });
   }
 
@@ -654,6 +665,7 @@ class Editor {
     window.visualViewport?.removeEventListener("resize", this._onViewport);
     window.visualViewport?.removeEventListener("scroll", this._onViewport);
     this._ui.destroy();
+    this._a11y?.destroy();
     this._textarea?.remove();
     const M = this._M;
     M.GL.makeContextCurrent(this._gl);

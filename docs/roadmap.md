@@ -116,10 +116,25 @@ Target: editor di web HP terasa seperti di Android native, dengan API yang sama 
 - **Klik ganda/tiga kali di web:** dihitung sendiri ketika `pointerdown.detail` bernilai 0, yang diizinkan oleh spesifikasi Pointer Events.
 - **`selection`** (`{anchor, head, from, to, empty}`) tersedia di API.
 
-### Milestone 3: aksesibilitas dan browser lain
+### Milestone 3: aksesibilitas dan browser lain · Berjalan
 
-- DOM ARIA offscreen dari pohon aksesibilitas yang sama dengan AccessKit.
-- Uji di Safari (macOS dan iOS) dan Firefox, termasuk fallback textarea.
+Sudah:
+
+- **DOM cermin untuk screen reader (`platforms/web/src/a11y.js`):**
+  - `EditorApi::accessibility_json` mengekspor pohon yang sama dengan yang diterima AccessKit, lengkap dengan koordinat absolut.
+  - Paket web membangunnya menjadi DOM tak terlihat yang ditumpuk di atas canvas: `h1`–`h6`, `ul`/`li`, `pre`, `blockquote`, `role="checkbox"` dengan `aria-checked`, dan satu span per baris di posisi aslinya.
+  - Elemen yang tidak berubah dipakai ulang berdasarkan id, dan pembaruan dijalankan saat browser senggang.
+  - Klik pada checkbox dari screen reader diteruskan sebagai aksi AccessKit `Click`.
+- **Umpan balik suara untuk navigasi keyboard** lewat `aria-live`: karakter (kiri/kanan), kata (Ctrl/Alt), baris (atas/bawah, Page), atau teks yang dipilih (Shift).
+- **Diuji di Chrome lewat pohon aksesibilitasnya:** judul, list, checkbox, dan semua baris teks terekspos; klik checkbox dari cermin mengubah dokumen; pengumuman cocok dengan tiap tombol.
+- **Jalur textarea** (Safari, Firefox) diuji di Chrome dengan `?input=textarea`: ketik, Backspace, Enter, dan undo berfungsi. Textarea kini menjadi kotak teks berlabel, sedangkan canvas disembunyikan dari pohon aksesibilitas.
+
+Belum:
+
+- Uji dengan screen reader sungguhan (VoiceOver, NVDA, TalkBack di Chrome Android).
+- Uji di Safari (macOS, iOS) dan Firefox.
+- Cermin seleksi DOM (sekarang seleksi diumumkan, bukan dicerminkan), dan label checkbox dari teks item.
+- Pohon aksesibilitas penuh tiap pembaruan bisa berat untuk dokumen sangat besar (10k+ blok); perlu pembaruan bertahap seperti di Android.
 
 ## P4 — Android · Selesai
 

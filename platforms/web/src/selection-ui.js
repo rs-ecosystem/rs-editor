@@ -201,8 +201,11 @@ export class SelectionUi {
   // --- haptics --------------------------------------------------------------
 
   haptic(kind) {
-    // Android browsers; iOS Safari has no vibration API.
-    navigator.vibrate?.(kind === "longPress" ? 12 : 4);
+    // Android browsers only (iOS Safari has no vibration API). Pulses
+    // shorter than about 10 ms are too weak to feel on many phones; Chrome
+    // vibrates only after the page had a user gesture, and silent mode may
+    // mute it.
+    navigator.vibrate?.(kind === "longPress" ? 25 : 10);
   }
 
   destroy() {

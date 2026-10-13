@@ -66,3 +66,9 @@ Format yang didukung adalah TTF dan OTF (bukan WOFF/WOFF2). Preset `notoFonts` m
 - Keyboard layar muncul saat teks diketuk.
 - Jika keyboard menutupi halaman tanpa mengubah ukurannya (Safari iOS), editor membaca `visualViewport` dan menggeser caret supaya tidak tertutup keyboard.
 - Dengan mouse, klik kanan membuka menu yang sama di posisi kursor.
+
+## Aksesibilitas
+
+Canvas tidak punya teks yang bisa dibaca screen reader. Karena itu paket ini membuat DOM tak terlihat yang ditumpuk di atas canvas, dari pohon aksesibilitas yang sama dengan yang dipakai screen reader native (lewat AccessKit) di Android dan desktop. Isinya judul, list, checkbox yang bisa diaktifkan, dan teks per baris di posisi aslinya. Navigasi caret dan seleksi dengan keyboard diumumkan lewat region `aria-live`. Matikan dengan `accessibility: false` kalau aplikasi menyediakan aksesibilitasnya sendiri.
+
+Getar di Android: Chrome tidak meneruskan `navigator.vibrate` saat HP dalam mode senyap, dan Safari iOS tidak mendukung getar sama sekali.

@@ -638,6 +638,37 @@ pub unsafe extern "C" fn rse_selection(app_ptr: *mut App) -> usize {
     app.set_result(&selection)
 }
 
+/// The accessibility tree as nested JSON (see
+/// `EditorApi::accessibility_json`); returns the length.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_accessibility_tree(app_ptr: *mut App) -> usize {
+    let app = unsafe { app(app_ptr) };
+    let tree = app.api.accessibility_json();
+    app.set_result(&tree)
+}
+
+/// An accessibility action (`click`, `focus`) on a node of that tree;
+/// returns 1 when it applied.
+///
+/// # Safety
+/// `app` must be live; the strings must be readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_accessibility_action(
+    app_ptr: *mut App,
+    id: *const u8,
+    id_len: usize,
+    action: *const u8,
+    action_len: usize,
+) -> u32 {
+    let app = unsafe { app(app_ptr) };
+    let id = unsafe { read(id, id_len) };
+    let action = unsafe { read(action, action_len) };
+    u32::from(app.api.accessibility_action(&id, &action))
+}
+
 /// Revisions (wrapping): `doc` 0 changes with any transaction, 1 only with
 /// document changes.
 ///
