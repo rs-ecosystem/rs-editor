@@ -83,6 +83,10 @@ def main():
     # Cargo does not track those, so use a target directory of its own.
     generate_env = os.environ.copy()
     generate_env["CARGO_TARGET_DIR"] = str(target_dir / "boltffi-metadata")
+    # Only the macros' output matters there: without debug info and the
+    # incremental cache the directory is a fraction of its size.
+    generate_env["CARGO_PROFILE_DEV_DEBUG"] = "0"
+    generate_env["CARGO_INCREMENTAL"] = "0"
     run("boltffi", "generate", "kotlin", cwd=crate, env=generate_env)
 
     for arch in [args.arch] if args.arch else android["architectures"]:
