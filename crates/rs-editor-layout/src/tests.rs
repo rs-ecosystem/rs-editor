@@ -46,6 +46,12 @@ fn tiptap(json: serde_json::Value) -> Node {
             )
             .node("horizontalRule", NodeSpec::new().group("block"))
             .node(
+                "image",
+                NodeSpec::new()
+                    .group("block")
+                    .attr("src", AttrSpec::with_default("")),
+            )
+            .node(
                 "hardBreak",
                 NodeSpec::new().inline().group("inline").leaf_text("\n"),
             )
@@ -569,4 +575,33 @@ fn emoji_drawn_from_images_keep_content_offsets() {
         pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60,
         "{pixel:?}"
     );
+}
+
+#[test]
+fn a_loaded_image_lays_out_only_its_block_again() {
+    let mut engine = engine();
+    let doc = tiptap(json!({"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "satu"}]},
+        {"type": "image", "attrs": {"src": "x.png"}},
+        {"type": "paragraph", "content": [{"type": "text", "text": "dua"}]},
+    ]}));
+    let first = engine.layout(&doc, 400.0);
+    assert_eq!(engine.take_missing_images(), ["x.png"]);
+    assert_eq!(engine.cached_blocks(), 3);
+    let mut surface = skia_safe::surfaces::raster_n32_premul((40, 20)).unwrap();
+    engine.add_image("x.png", surface.image_snapshot(), 1.0);
+    assert_eq!(engine.cached_blocks(), 2, "only the image's block");
+    let second = engine.layout(&doc, 400.0);
+    assert!(Rc::ptr_eq(&first.texts[0].layout, &second.texts[0].layout));
+    let image = |layout: &DocumentLayout| {
+        layout
+            .blocks
+            .iter()
+            .find(|b| b.node.type_name() == "image")
+            .unwrap()
+            .rect
+            .height
+    };
+    assert!((image(&second) - 20.0).abs() < 0.5, "takes its size");
+    assert!(image(&first) != image(&second));
 }

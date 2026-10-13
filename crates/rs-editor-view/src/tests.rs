@@ -3470,6 +3470,52 @@ mod drop_into_lists {
         view.run("undo", &Value::Null).unwrap();
         assert_eq!(shape(&view), "(satu,dua,)|tengah|(tiga,)|");
     }
+    #[test]
+    fn far_right_below_an_item_makes_a_sublist() {
+        let (mut view, clock) = setup(vec![
+            json!({"type": "bulletList", "content": [item("listItem", "satu"), item("listItem", "dua")]}),
+            p("baru"),
+        ]);
+        let below = view_y_of(&mut view, 11) + 14.0;
+        drag(&mut view, &clock, 19, Some(400.0), below);
+        assert_eq!(shape(&view), "[satu,dua[baru,],]|");
+        view.run("undo", &Value::Null).unwrap();
+        assert_eq!(shape(&view), "[satu,dua,]|baru|");
+    }
+
+    #[test]
+    fn a_paragraph_goes_into_a_quote() {
+        let (mut view, clock) = setup(vec![
+            json!({"type": "blockquote", "content": [p("kutip")]}),
+            p("baru"),
+            p("akhir"),
+        ]);
+        let below = view_y_of(&mut view, 3) + 14.0;
+        drag(&mut view, &clock, 11, Some(400.0), below);
+        let json = view.editor().get_json();
+        assert_eq!(json["content"][0]["type"], "blockquote");
+        assert_eq!(
+            json["content"][0]["content"].as_array().unwrap().len(),
+            2,
+            "{json}"
+        );
+        assert_eq!(view.editor().get_text("|"), "kutip|baru|akhir");
+        // Near the left edge it stays out of the quote.
+        let (mut view, clock) = setup(vec![
+            json!({"type": "blockquote", "content": [p("kutip")]}),
+            p("tengah"),
+            p("baru"),
+        ]);
+        let below = view_y_of(&mut view, 3) + 14.0;
+        drag(&mut view, &clock, 20, None, below);
+        let json = view.editor().get_json();
+        assert_eq!(
+            json["content"][0]["content"].as_array().unwrap().len(),
+            1,
+            "{json}"
+        );
+        assert_eq!(view.editor().get_text("|"), "kutip|baru|tengah");
+    }
 }
 
 mod audit_batch6 {

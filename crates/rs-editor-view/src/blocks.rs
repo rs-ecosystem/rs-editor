@@ -58,6 +58,9 @@ struct Drop {
     left: f32,
     /// Between top-level blocks: a list item lands in a list of its own.
     top_level: bool,
+    /// At the end of a list item without a sublist: the block becomes the
+    /// first item of a new one.
+    nest: bool,
 }
 
 /// A block being dragged by its grip.
@@ -435,6 +438,7 @@ impl EditorView {
                 y,
                 left: 0.0,
                 top_level: true,
+                nest: false,
             });
         }
         if let Some(last) = tops.last() {
@@ -443,6 +447,7 @@ impl EditorView {
                 y: last.bottom() + spacing.block_gap / 2.0,
                 left: 0.0,
                 top_level: true,
+                nest: false,
             });
         }
         // Between the items of lists: an item of any list (it takes the
@@ -463,6 +468,7 @@ impl EditorView {
                     y: item.rect.y - gap,
                     left: item.rect.x,
                     top_level: false,
+                    nest: false,
                 });
                 let end = item.pos + item.node.node_size();
                 let last = doc.resolve(end).is_ok_and(|at| at.end(at.depth()) == end);
@@ -472,6 +478,47 @@ impl EditorView {
                         y: item.rect.bottom() + gap,
                         left: item.rect.x,
                         top_level: false,
+                        nest: false,
+                    });
+                }
+                // Further right below an item without a sublist: one is
+                // made for it.
+                if item.node.child_count() == 1 {
+                    candidates.push(Drop {
+                        pos: end - 1,
+                        y: item.rect.bottom() + gap,
+                        left: item.rect.x + spacing.list_indent,
+                        top_level: false,
+                        nest: true,
+                    });
+                }
+            }
+        }
+        // Between the blocks of a quote, for blocks (items stay in lists).
+        if !unit.item {
+            let gap = spacing.block_gap / 2.0;
+            for block in &layout.blocks {
+                let Ok(at) = doc.resolve(block.pos) else {
+                    continue;
+                };
+                if at.depth() == 0 || at.parent().type_name() != "blockquote" {
+                    continue;
+                }
+                candidates.push(Drop {
+                    pos: block.pos,
+                    y: block.rect.y - gap,
+                    left: block.rect.x,
+                    top_level: false,
+                    nest: false,
+                });
+                let end = block.pos + block.node.node_size();
+                if at.end(at.depth()) == end {
+                    candidates.push(Drop {
+                        pos: end,
+                        y: block.rect.bottom() + gap,
+                        left: block.rect.x,
+                        top_level: false,
+                        nest: false,
                     });
                 }
             }
@@ -640,11 +687,34 @@ impl EditorView {
                 Ok(list) => list,
                 Err(_) => return false,
             }
-        } else if !drop.top_level {
-            // Into a list: as an item of its kind.
-            match self.as_item_of(&doc, drop.pos, &node) {
-                Some(item) => item,
+        } else if drop.nest {
+            // A new sublist at the end of the item, of its list's kind.
+            let Ok(at) = doc.resolve(drop.pos) else {
+                return false;
+            };
+            let list = at.node(at.depth().saturating_sub(1)).clone();
+            let made = self.as_item_of(&list, &node).and_then(|item| {
+                list.node_type()
+                    .create(None, Fragment::from_node(item), Default::default())
+                    .ok()
+            });
+            match made {
+                Some(sublist) => sublist,
                 None => return false,
+            }
+        } else if !drop.top_level {
+            // Into a list as an item of its kind; into a quote as it is.
+            let Ok(at) = doc.resolve(drop.pos) else {
+                return false;
+            };
+            let parent = at.parent().clone();
+            if parent.type_name() == "blockquote" {
+                node
+            } else {
+                match self.as_item_of(&parent, &node) {
+                    Some(item) => item,
+                    None => return false,
+                }
             }
         } else {
             node
@@ -660,7 +730,11 @@ impl EditorView {
             return false;
         }
         // The moved block, inside a list made for it.
-        let mut target = if wrapped { target + 1 } else { target };
+        let mut target = if wrapped || drop.nest {
+            target + 1
+        } else {
+            target
+        };
         // An item taken out beside a list of its kind joins it (a numbered
         // list goes on counting): the later join first, so the earlier
         // position holds.
@@ -706,16 +780,13 @@ impl EditorView {
         true
     }
 
-    /// `node` as an item of the list at `pos` (a boundary between its
-    /// items): an item of the other kind converts (a task item becomes a
-    /// list item and back), a paragraph is wrapped.
+    /// `node` as an item of `list`: an item of the other kind converts (a
+    /// task item becomes a list item and back), a paragraph is wrapped.
     fn as_item_of(
         &self,
-        doc: &rs_editor_model::Node,
-        pos: usize,
+        list: &rs_editor_model::Node,
         node: &rs_editor_model::Node,
     ) -> Option<rs_editor_model::Node> {
-        let list = doc.resolve(pos).ok()?.parent().clone();
         let kind = match list.type_name() {
             "taskList" => "taskItem",
             _ => "listItem",
@@ -812,6 +883,7 @@ impl EditorView {
             y: 0.0,
             left: 0.0,
             top_level: !unit.item,
+            nest: false,
         };
         self.finish_composition();
         if !self.move_block(&unit, &drop) {

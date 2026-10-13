@@ -402,7 +402,28 @@ impl LayoutEngine {
     /// out again, since images without those attributes take its size.
     pub fn add_image(&mut self, src: &str, image: skia_safe::Image, scale: f32) {
         self.shaper.images.borrow_mut().add(src, image, scale);
-        self.reset();
+        self.forget_image_blocks(src);
+    }
+
+    /// Lays out again only the top-level blocks showing `src` (the rest
+    /// of a long document keeps its measurements).
+    fn forget_image_blocks(&mut self, src: &str) {
+        let shows = |node: &Node| {
+            node.type_name() == "image" && node.attr("src").and_then(|v| v.as_str()) == Some(src)
+        };
+        for index in 0..self.entries.len() {
+            let node = &self.entries[index].node;
+            let mut found = shows(node);
+            if !found {
+                node.descendants(&mut |child, _, _, _| {
+                    found |= shows(child);
+                    !found
+                });
+            }
+            if found && self.entries[index].fragment.take().is_some() {
+                self.dirty.push(index / CHUNK);
+            }
+        }
     }
 
     /// Releases the pictures of image sources not in `live`.
@@ -413,7 +434,7 @@ impl LayoutEngine {
     /// The host could not load `src`: it stays a placeholder.
     pub fn image_failed(&mut self, src: &str) {
         self.shaper.images.borrow_mut().fail(src);
-        self.reset();
+        self.forget_image_blocks(src);
     }
 
     /// Image sources laid out since the last call that are neither loaded
