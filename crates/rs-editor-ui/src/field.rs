@@ -261,9 +261,11 @@ impl TextField {
         self.scroll_x = scroll;
     }
 
-    /// Paints the field filling `rect`: its frame, `layout` (the text) or
-    /// `placeholder` when empty, the selection, the composition underline
-    /// and, when `caret` is true, the caret.
+    /// Paints the field filling `rect`: its frame (with the focus ring when
+    /// `focused`), `layout` (the text) or `placeholder` when empty, the
+    /// selection, the composition underline and, when `caret` is true, the
+    /// caret.
+    #[allow(clippy::too_many_arguments)]
     pub fn paint(
         &self,
         canvas: &Canvas,
@@ -271,6 +273,7 @@ impl TextField {
         rect: Rect,
         layout: &TextLayout,
         placeholder: Option<&TextLayout>,
+        focused: bool,
         caret: bool,
     ) {
         let palette = &theme.palette;
@@ -278,16 +281,21 @@ impl TextField {
         let shape = RRect::new_rect_xy(rect, radius, radius);
         let accent = if self.invalid {
             palette.destructive
-        } else {
+        } else if focused {
             palette.ring
+        } else {
+            palette.input
         };
-        // The focus ring: 3 px of the ring color at half strength.
-        let mut ring = Paint::default();
-        ring.set_anti_alias(true);
-        ring.set_style(PaintStyle::Stroke);
-        ring.set_stroke_width(3.0);
-        ring.set_color(sk(accent.with_alpha(if self.invalid { 0.2 } else { 0.5 })));
-        canvas.draw_rrect(shape.with_outset((1.5, 1.5)), &ring);
+        // The focus ring: 3 px of the ring color at half strength (or the
+        // destructive one, refused).
+        if focused || self.invalid {
+            let mut ring = Paint::default();
+            ring.set_anti_alias(true);
+            ring.set_style(PaintStyle::Stroke);
+            ring.set_stroke_width(3.0);
+            ring.set_color(sk(accent.with_alpha(if self.invalid { 0.2 } else { 0.5 })));
+            canvas.draw_rrect(shape.with_outset((1.5, 1.5)), &ring);
+        }
         let mut border = Paint::default();
         border.set_anti_alias(true);
         border.set_style(PaintStyle::Stroke);

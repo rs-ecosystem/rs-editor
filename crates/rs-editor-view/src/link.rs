@@ -91,6 +91,8 @@ pub(crate) struct LinkPopover {
     pressed: Option<Part>,
     /// A finger down on the popover.
     touch: Option<(f32, f32)>,
+    /// A finger down elsewhere while the field is open.
+    outside: Option<(f32, f32)>,
 }
 
 /// One edit to the address field (see [`EditorView::field_input`]).
@@ -147,12 +149,14 @@ impl EditorView {
             }
             Selection::Text(_) => {
                 let (from, to) = (selection.from(), selection.to());
-                let href = self
-                    .link_around(from + 1)
+                // Inside one link: the whole link is edited, not a piece.
+                self.link_around(from + 1)
                     .filter(|link| link.from <= from && to <= link.to)
-                    .map(|link| link.href)
-                    .unwrap_or_default();
-                LinkRange { from, to, href }
+                    .unwrap_or(LinkRange {
+                        from,
+                        to,
+                        href: String::new(),
+                    })
             }
             _ => return false,
         };
@@ -220,8 +224,38 @@ impl EditorView {
             .filter(|link| self.link.dismissed != Some((link.from, link.to)))
     }
 
+    /// Keeps the popover's link in step with a change to the document
+    /// (an undo, a command from the host) made while it shows; the field
+    /// closes when its text went away.
+    pub(crate) fn map_link(&mut self, mapping: &rs_editor_transform::Mapping) {
+        use rs_editor_transform::{Assoc, Mappable};
+        let map = |from: usize, to: usize| {
+            let (a, b) = (
+                mapping.map(from, Assoc::After),
+                mapping.map(to, Assoc::Before),
+            );
+            (a, b.max(a))
+        };
+        if let Some(editing) = &mut self.link.editing {
+            let range = &mut editing.range;
+            let had_text = range.from < range.to;
+            let (from, to) = map(range.from, range.to);
+            (range.from, range.to) = (from, to);
+            if had_text && from == to {
+                self.close_link_editor();
+            }
+        }
+        if let Some((from, to)) = self.link.dismissed {
+            self.link.dismissed = Some(map(from, to));
+        }
+    }
+
     /// Brings the popover in line with the caret.
     pub(crate) fn update_link(&mut self) {
+        if self.link.editing.is_some() && !self.editor.is_editable() {
+            // Read-only now: nothing to edit.
+            self.close_link_editor();
+        }
         let shown = if self.link.editing.is_some() {
             None
         } else {
@@ -292,16 +326,21 @@ impl EditorView {
         }
         if let Some(link) = shown {
             let color = self.theme().palette.muted_foreground;
+            // Narrow screens cut the address shorter; the buttons stay.
+            let buttons = self.link.toolbar.size().0 - PANEL_PADDING * 2.0;
+            let room = self.width - MARGIN * 2.0 - PANEL_PADDING * 2.0 - SPACING - buttons;
+            let max = URL_WIDTH.min(room - URL_INSET * 2.0).max(24.0);
+            let key = format!("{}\u{0}{}", link.href, max);
             let fresh = self
                 .link
                 .url
                 .as_ref()
-                .is_none_or(|(href, argb, _)| *href != link.href || *argb != color.argb());
+                .is_none_or(|(old, argb, _)| *old != key || *argb != color.argb());
             if fresh {
-                let layout =
-                    self.engine
-                        .ui_label(&link.href, &UiText::small(color), Some(URL_WIDTH));
-                self.link.url = Some((link.href.clone(), color.argb(), layout));
+                let layout = self
+                    .engine
+                    .ui_label(&link.href, &UiText::small(color), Some(max));
+                self.link.url = Some((key, color.argb(), layout));
             }
         }
     }
@@ -337,20 +376,35 @@ impl EditorView {
         let leading = if self.link.editing.is_some() {
             FIELD_WIDTH.min(self.width - MARGIN * 2.0 - PANEL_PADDING * 2.0 - SPACING - buttons)
         } else {
+            // The address gives way on narrow screens; the buttons stay.
+            let room = self.width - MARGIN * 2.0 - PANEL_PADDING * 2.0 - SPACING - buttons;
             self.link
                 .url
                 .as_ref()
                 .map_or(0.0, |(_, _, url)| url.width() + URL_INSET * 2.0)
+                .min(room)
         }
         .max(40.0);
         let width = PANEL_PADDING * 2.0 + leading + SPACING + buttons;
         let height = PANEL_PADDING * 2.0 + BUTTON_SIZE;
         let x = left.clamp(MARGIN, (self.width - width - MARGIN).max(MARGIN));
-        let below = bottom + GAP;
+        // Below a finger's caret handle, which hangs under the line.
+        let gap = if self.touch.finger_used {
+            GAP + 28.0
+        } else {
+            GAP
+        };
+        let below = bottom + gap;
         let y = if below + height <= visible - MARGIN || top - GAP - height < MARGIN {
             below.min((visible - height - MARGIN).max(MARGIN))
         } else {
             top - GAP - height
+        };
+        // The field stays on screen while the document scrolls under it.
+        let y = if self.link.editing.is_some() {
+            y.clamp(MARGIN, (visible - height - MARGIN).max(MARGIN))
+        } else {
+            y
         };
         let rect = skia_safe::Rect::from_xywh(x, y, width, height);
         let inner_left = x + PANEL_PADDING;
@@ -408,6 +462,7 @@ impl EditorView {
                 self.link.field_rect,
                 &layout,
                 Some(&placeholder),
+                self.focused,
                 self.caret_visible(),
             );
             canvas.restore();
@@ -516,7 +571,11 @@ impl EditorView {
             return;
         };
         match action {
-            Action::Open => self.push_effect(Effect::OpenUrl(link.href)),
+            Action::Open => {
+                if let Some(href) = safe_url(&link.href) {
+                    self.push_effect(Effect::OpenUrl(href));
+                }
+            }
             Action::Copy => {
                 let html = format!(
                     "<a href=\"{}\">{}</a>",
@@ -696,6 +755,9 @@ impl EditorView {
                     "Home" | "ArrowUp" => field.move_to_edge(false, m.shift),
                     "End" | "ArrowDown" => field.move_to_edge(true, m.shift),
                     "a" | "A" if command => field.select_all(),
+                    // Copy, cut and paste: the platform's clipboard events
+                    // (which reach the field) do them.
+                    "c" | "C" | "x" | "X" | "v" | "V" if command => return Some(false),
                     // Undo, formatting and the like would act on the
                     // document behind the field.
                     _ if command => return Some(true),
@@ -949,12 +1011,19 @@ impl EditorView {
                     self.link.touch = Some((x, y));
                     return true;
                 }
-                self.close_link_editor();
+                // A finger elsewhere may only be scrolling to look: the
+                // field closes on a tap, not on the touch.
+                self.link.outside = self.link.editing.is_some().then_some((x, y));
                 false
             }
             TouchPhase::Move => self.link.touch.is_some(),
             TouchPhase::Up => {
                 let Some(start) = self.link.touch.take() else {
+                    if let Some(down) = self.link.outside.take()
+                        && (x - down.0).hypot(y - down.1) <= self.profile.touch_slop
+                    {
+                        self.close_link_editor();
+                    }
                     return false;
                 };
                 let slop = self.profile.touch_slop;
@@ -1002,6 +1071,26 @@ pub(crate) fn normalize_href(text: &str) -> String {
         return format!("mailto:{text}");
     }
     format!("https://{text}")
+}
+
+/// `href` if it is safe to open: web, mail and phone addresses, and
+/// relative ones. A `javascript:` or `data:` link stored in a document (JSON
+/// is not checked as typed links are) never runs.
+pub(crate) fn safe_url(href: &str) -> Option<String> {
+    let href = href.trim();
+    let scheme = href
+        .split_once(':')
+        .map(|(scheme, _)| scheme.to_ascii_lowercase())
+        .filter(|scheme| {
+            scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+        });
+    match scheme.as_deref() {
+        None => (!href.is_empty()).then(|| href.to_owned()),
+        Some("http" | "https" | "mailto" | "tel") => Some(href.to_owned()),
+        Some(_) => None,
+    }
 }
 
 fn escape_html(text: &str) -> String {

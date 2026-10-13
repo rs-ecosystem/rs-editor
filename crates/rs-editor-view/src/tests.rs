@@ -3080,3 +3080,98 @@ mod audit_blocks {
         assert_eq!(view.editor().get_text("|"), "satu|dua!");
     }
 }
+
+mod audit_link {
+    use super::*;
+
+    fn linked() -> Value {
+        json!({"type": "paragraph", "content": [
+            {"type": "text", "text": "lihat "},
+            {"type": "text", "text": "situs kami", "marks": [{"type": "link", "attrs": {"href": "https://rs-editor.dev"}}]},
+            {"type": "text", "text": " ini"},
+        ]})
+    }
+
+    fn ctrl() -> Modifiers {
+        Modifiers {
+            ctrl: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn clipboard_keys_reach_the_platform_from_the_field() {
+        let (mut view, _) = view_with(doc(vec![p("halo")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.select_text(1, 5, Affinity::Downstream);
+        assert!(view.edit_link());
+        // Not handled: the browser then fires its paste/copy/cut events.
+        assert!(!key(&mut view, "v", ctrl()));
+        assert!(!key(&mut view, "c", ctrl()));
+        assert!(
+            key(&mut view, "z", ctrl()),
+            "undo stays out of the document"
+        );
+        assert!(view.paste_text("rs-editor.dev"));
+        assert_eq!(view.link_field().unwrap().0, "rs-editor.dev");
+    }
+
+    #[test]
+    fn a_selection_inside_a_link_edits_the_whole_link() {
+        let (mut view, _) = view_with(doc(vec![linked()]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.select_text(13, 17, Affinity::Downstream); // "kami"
+        assert!(view.edit_link());
+        assert_eq!(view.link_field().unwrap().0, "https://rs-editor.dev");
+        view.ime_replace(0, 21, "https://example.com", false);
+        assert!(key(&mut view, "Enter", plain()));
+        let json = view.editor().get_json().to_string();
+        assert_eq!(json.matches("https://example.com").count(), 1, "{json}");
+        assert!(!json.contains("rs-editor.dev"), "no piece left behind");
+    }
+
+    #[test]
+    fn the_field_follows_the_document_and_editability() {
+        let (mut view, _) = view_with(doc(vec![p("halo dunia")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.select_text(6, 11, Affinity::Downstream);
+        assert!(view.edit_link());
+        // The host inserts text before the range while the field is open.
+        view.run_chain(&[
+            ("setTextSelection".into(), json!({"from": 1, "to": 1})),
+            ("insertContent".into(), json!("Hai, ")),
+        ])
+        .unwrap();
+        view.insert_text("rs-editor.dev");
+        assert!(key(&mut view, "Enter", plain()));
+        let text = view.editor().get_text("");
+        assert_eq!(text, "Hai, halo dunia");
+        let json = view.editor().get_json();
+        let linked: Vec<_> = json["content"][0]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n.get("marks").is_some())
+            .map(|n| n["text"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(linked, ["dunia"], "the link landed on the same word");
+
+        view.select_text(1, 4, Affinity::Downstream);
+        assert!(view.edit_link());
+        view.editor_mut().set_editable(false);
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+        assert!(!view.link_editing(), "read-only closes the field");
+    }
+
+    #[test]
+    fn only_safe_addresses_open() {
+        use crate::link::safe_url;
+        assert_eq!(safe_url("https://a.b").as_deref(), Some("https://a.b"));
+        assert_eq!(safe_url("mailto:me@a.b").as_deref(), Some("mailto:me@a.b"));
+        assert_eq!(safe_url("/docs").as_deref(), Some("/docs"));
+        assert_eq!(safe_url("javascript:alert(1)"), None);
+        assert_eq!(safe_url(" JavaScript:alert(1)"), None);
+        assert_eq!(safe_url("data:text/html,x"), None);
+    }
+}

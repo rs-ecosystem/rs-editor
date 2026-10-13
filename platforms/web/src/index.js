@@ -296,7 +296,24 @@ class Editor {
           const text = e.data ?? e.dataTransfer?.getData("text/plain") ?? "";
           if (text) this._withString(text, (ptr, len) => M._rse_insert_text(app, ptr, len));
           this._afterInput();
+          return;
         }
+        // Soft keyboards (Gboard on Firefox) send deletions and Enter as
+        // input events, with no usable keydown (key code 229).
+        const word = platformCode() === 1 ? MOD_ALT : MOD_CTRL;
+        const keys = {
+          deleteContentBackward: ["Backspace", 0],
+          deleteContentForward: ["Delete", 0],
+          deleteWordBackward: ["Backspace", word],
+          deleteWordForward: ["Delete", word],
+          insertParagraph: ["Enter", 0],
+          insertLineBreak: ["Enter", MOD_SHIFT],
+        };
+        const key = keys[e.inputType];
+        if (!key) return;
+        e.preventDefault();
+        this._withStrings(key[0], "", (pk, lk, pc, lc) => M._rse_key(app, pk, lk, pc, lc, key[1]));
+        this._afterInput();
       });
       textarea.addEventListener("compositionstart", () => { this._composing = true; });
       textarea.addEventListener("compositionupdate", (e) => {
@@ -401,7 +418,11 @@ class Editor {
       const target = this._textarea ?? this.canvas;
       target.setAttribute("inputmode", field ? "url" : "text");
       target.setAttribute("enterkeyhint", field ? "go" : "enter");
-      if (this._textarea) this._textarea.setAttribute("autocapitalize", field ? "off" : "sentences");
+      if (this._textarea) {
+        this._textarea.setAttribute("autocapitalize", field ? "off" : "sentences");
+        this._textarea.setAttribute("autocorrect", field ? "off" : "on");
+        this._textarea.spellcheck = !field;
+      }
     }
     const editContext = this._editContext;
     if (editContext) {
@@ -771,14 +792,16 @@ class Editor {
       this._afterInput();
     });
     // Image files dropped on the editor go in at the caret.
+    // Files dropped on the editor never make the browser open them (and
+    // leave the page); image files go in at the caret with uploadImage.
     canvas.addEventListener("dragover", (e) => {
-      if (this._options.uploadImage && e.dataTransfer?.types.includes("Files")) e.preventDefault();
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
     });
     canvas.addEventListener("drop", (e) => {
-      const images = imageFiles(e.dataTransfer);
-      if (!images.length || !this._options.uploadImage) return;
+      if (!e.dataTransfer?.types.includes("Files")) return;
       e.preventDefault();
-      for (const file of images) this._insertImageFile(file);
+      if (!this._options.uploadImage) return;
+      for (const file of imageFiles(e.dataTransfer)) this._insertImageFile(file);
     });
     canvas.addEventListener("pointercancel", (e) => end(e, 3));
     canvas.addEventListener("contextmenu", (e) => {

@@ -2,10 +2,13 @@ package com.rseditor.android
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.ByteArrayInputStream
 import java.net.URLDecoder
 import java.nio.ByteBuffer
 import java.util.concurrent.ExecutorService
@@ -51,7 +54,9 @@ internal class ImageLoader(private val view: RsEditorView) {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+        // Photos keep their orientation in EXIF; BitmapFactory ignores it.
+        val bitmap = oriented(decoded, bytes)
         try {
             // An ARGB_8888 bitmap's memory is premultiplied RGBA.
             val buffer = ByteBuffer.allocate(bitmap.byteCount)
@@ -60,11 +65,42 @@ internal class ImageLoader(private val view: RsEditorView) {
                 buffer.array(),
                 bitmap.width,
                 bitmap.height,
-                bitmap.width.toFloat() / bounds.outWidth,
+                // The longer sides: a quarter turn swaps width and height.
+                maxOf(bitmap.width, bitmap.height).toFloat() / maxOf(bounds.outWidth, bounds.outHeight),
             )
         } finally {
             bitmap.recycle()
         }
+    }
+
+    /** `bitmap` turned and mirrored as the image's EXIF orientation says (a new bitmap if so). */
+    private fun oriented(bitmap: Bitmap, bytes: ByteArray): Bitmap {
+        val orientation = try {
+            ExifInterface(ByteArrayInputStream(bytes))
+                .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } catch (_: Exception) {
+            ExifInterface.ORIENTATION_NORMAL
+        }
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            else -> return bitmap
+        }
+        val turned = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        if (turned !== bitmap) bitmap.recycle()
+        return turned
     }
 
     private fun read(src: String): ByteArray? {

@@ -203,9 +203,9 @@ impl EditorView {
         let mut field = TextField::new("https://");
         let layout = label(field.text(), UiText::small(palette.foreground));
         let rect = skia_safe::Rect::from_xywh(8.0, 96.0, 160.0, 28.0);
-        field.paint(canvas, theme, rect, &layout, None, true);
+        field.paint(canvas, theme, rect, &layout, None, true, true);
         field.move_to(2, false);
         field.invalid = true;
-        field.paint(canvas, theme, rect, &layout, None, true);
+        field.paint(canvas, theme, rect, &layout, None, true, true);
     }
 }

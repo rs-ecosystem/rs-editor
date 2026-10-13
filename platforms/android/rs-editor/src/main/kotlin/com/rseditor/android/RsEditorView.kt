@@ -439,6 +439,28 @@ class RsEditorView private constructor(
 
     // --- keys ------------------------------------------------------------------
 
+    /** Back went to the editor (an open menu or field closed): its release does too. */
+    private var backTaken = false
+
+    /**
+     * Back closes the editor's own menus, popovers and link field first, like Escape, before
+     * it hides the keyboard or leaves the screen.
+     */
+    override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && !released) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                backTaken = native.keyDown("Escape", false, false, false)
+                if (backTaken) afterInput()
+                return backTaken
+            }
+            if (event.action == KeyEvent.ACTION_UP && backTaken) {
+                backTaken = false
+                return true
+            }
+        }
+        return super.onKeyPreIme(keyCode, event)
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (!released && handleKey(event)) {
             afterInput()
@@ -451,6 +473,19 @@ class RsEditorView private constructor(
     internal fun handleKey(event: KeyEvent): Boolean {
         val name = keyName(event) ?: return false
         val ctrl = event.isCtrlPressed
+        // A hardware keyboard's clipboard shortcuts go through the clipboard.
+        if (ctrl && !event.isAltPressed) {
+            when (name.lowercase()) {
+                "c", "x" -> {
+                    selection.setClipboardJson(native.copy(name.lowercase() == "x"))
+                    return true
+                }
+                "v" -> {
+                    selection.paste()
+                    return true
+                }
+            }
+        }
         if (native.keyDown(name, event.isShiftPressed, ctrl, event.isAltPressed)) return true
         if (!ctrl && name.isNotEmpty() && !Character.isISOControl(name.codePointAt(0)) &&
             name.codePointCount(0, name.length) == 1

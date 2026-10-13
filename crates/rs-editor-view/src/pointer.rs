@@ -143,7 +143,9 @@ impl EditorView {
                     event.modifiers.ctrl
                 };
                 if mod_click && let Some(href) = self.link_at(pos) {
-                    self.push_effect(Effect::OpenUrl(href));
+                    if let Some(href) = crate::link::safe_url(&href) {
+                        self.push_effect(Effect::OpenUrl(href));
+                    }
                     return true;
                 }
                 match event.click_count {

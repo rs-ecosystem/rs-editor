@@ -632,7 +632,7 @@ impl EditorApi {
             if index > 0 {
                 view.key_down(&KeyEvent::new("Enter", Modifiers::default()));
             }
-            if view.composition_range().is_some() {
+            if view.composition_range().is_some() || view.link_editing() {
                 view.commit_composition(line);
             } else if !line.is_empty() {
                 view.insert_text(line);

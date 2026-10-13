@@ -732,6 +732,7 @@ impl EditorView {
                 .and_then(|current| self.anchor_in(&current.layout))
         });
         let mapped = anchor.map(|(pos, offset)| (tr.mapping.map(pos, Assoc::After), offset));
+        let mapping = tr.mapping.clone();
         // A plugin may refuse it (a character limit): nothing changed.
         if !matches!(self.editor.dispatch(tr), Ok(applied) if !applied.is_empty()) {
             self.pending_anchor = anchor;
@@ -745,6 +746,7 @@ impl EditorView {
         self.revision += 1;
         if !self.editor.doc().ptr_eq(&before) {
             self.doc_revision += 1;
+            self.map_link(&mapping);
         }
         self.after_change();
         true
