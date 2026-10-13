@@ -70,7 +70,7 @@ const LINK: &str = "setLink";
 pub(crate) struct Bubble {
     pub enabled: bool,
     appear: Appear,
-    toolbar: Toolbar,
+    pub(crate) toolbar: Toolbar,
     /// The editor revision the buttons' states were computed at.
     revision: Option<u64>,
     /// Closed with Escape: stays closed while the selection stays.
@@ -135,34 +135,50 @@ impl EditorView {
         if wanted {
             let selection = self.editor.selection();
             let (from, to) = (selection.from(), selection.to());
-            let rects = self.layout().selection_rects(from, to);
-            let mut bounds = rects.iter().map(|r| self.to_view(*r));
-            match bounds.next() {
-                Some(first) => {
-                    let (mut left, mut top, mut right, mut bottom) =
-                        (first.x, first.y, first.right(), first.bottom());
-                    for r in bounds {
-                        left = left.min(r.x);
-                        top = top.min(r.y);
-                        right = right.max(r.right());
-                        bottom = bottom.max(r.bottom());
-                    }
-                    let visible = self.visible_height();
-                    if bottom < 0.0 || top > visible {
-                        wanted = false;
-                    } else {
-                        self.refresh_bubble_buttons();
-                        let (width, height) = self.bubble.toolbar.size();
-                        let x = ((left + right) / 2.0 - width / 2.0)
-                            .clamp(MARGIN, (self.width - width - MARGIN).max(MARGIN));
-                        let mut y = top - GAP - height;
-                        if y < MARGIN {
-                            y = (bottom + GAP).min(visible - height - MARGIN);
-                        }
-                        self.bubble.toolbar.origin = (x, y);
-                    }
+            let rects: Vec<_> = self
+                .layout()
+                .selection_rects(from, to)
+                .into_iter()
+                .map(|r| self.to_view(r))
+                .collect();
+            let top = rects.iter().map(|r| r.y).fold(f32::INFINITY, f32::min);
+            let bottom = rects
+                .iter()
+                .map(|r| r.bottom())
+                .fold(f32::NEG_INFINITY, f32::max);
+            let visible = self.visible_height();
+            if rects.is_empty() || bottom < 0.0 || top > visible {
+                wanted = false;
+            } else {
+                self.refresh_bubble_buttons();
+                let (width, height) = self.bubble.toolbar.size();
+                // Over the selection's first line; under its last when
+                // there is no room above (the first line scrolled away).
+                let mut y = top - GAP - height;
+                let above = y >= MARGIN;
+                if !above {
+                    y = (bottom + GAP).min(visible - height - MARGIN);
                 }
-                None => wanted = false,
+                let line = |r: &&rs_editor_layout::Rect| {
+                    if above {
+                        r.y < top + 1.0
+                    } else {
+                        r.bottom() > bottom - 1.0
+                    }
+                };
+                let left = rects
+                    .iter()
+                    .filter(line)
+                    .map(|r| r.x)
+                    .fold(f32::INFINITY, f32::min);
+                let right = rects
+                    .iter()
+                    .filter(line)
+                    .map(|r| r.right())
+                    .fold(f32::NEG_INFINITY, f32::max);
+                let x = ((left + right) / 2.0 - width / 2.0)
+                    .clamp(MARGIN, (self.width - width - MARGIN).max(MARGIN));
+                self.bubble.toolbar.origin = (x, y);
             }
         }
         if wanted != self.bubble.appear.target() {

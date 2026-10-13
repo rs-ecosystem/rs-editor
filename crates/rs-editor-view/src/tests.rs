@@ -3813,3 +3813,204 @@ mod image_long_press {
         assert_eq!(json["content"][3]["type"], "image", "{json}");
     }
 }
+
+mod link_polish {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn linked() -> Value {
+        json!({"type": "paragraph", "content": [
+            {"type": "text", "text": "lihat "},
+            {"type": "text", "text": "situs", "marks": [{"type": "link", "attrs": {"href": "https://rs-editor.dev"}}]},
+        ]})
+    }
+
+    fn shift() -> Modifiers {
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_copy_button_shows_a_check_for_a_moment() {
+        let (mut view, clock) = view_with(doc(vec![linked()]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.select_text(9, 9, Affinity::Downstream);
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let (x, y) = view.link.button_center(1);
+        view.pointer_down(PointerEvent::at(x, y));
+        view.pointer_up(PointerEvent::at(x, y));
+        assert!(
+            view.take_effects()
+                .iter()
+                .any(|e| matches!(e, Effect::Clipboard(c) if c.text == "https://rs-editor.dev"))
+        );
+        paint(&mut view);
+        assert!(view.link.copied_shown());
+        assert!(view.next_frame_in().is_some_and(|ms| ms <= 1_500));
+        clock.advance(1_600);
+        paint(&mut view);
+        assert!(!view.link.copied_shown(), "back to the copy icon");
+    }
+
+    #[test]
+    fn tab_moves_between_the_field_and_its_buttons() {
+        let (mut view, _) = view_with(doc(vec![p("halo")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.select_text(1, 5, Affinity::Downstream);
+        assert!(view.edit_link());
+        view.insert_text("rs-editor.dev");
+        assert!(key(&mut view, "Tab", plain()));
+        assert_eq!(view.link.focused_button(), Some(0), "Apply");
+        assert!(key(&mut view, "Tab", plain()));
+        assert_eq!(view.link.focused_button(), None, "back in the field");
+        assert!(key(&mut view, "Tab", shift()));
+        assert_eq!(view.link.focused_button(), Some(0));
+        // Typing goes back to the field.
+        view.insert_text("x");
+        assert_eq!(view.link.focused_button(), None);
+        assert_eq!(view.link_field().unwrap().0, "rs-editor.devx");
+        // Enter on a focused button presses it.
+        assert!(key(&mut view, "Tab", plain()));
+        assert!(key(&mut view, "Enter", plain()));
+        assert!(!view.link_editing());
+        assert_eq!(view.editor().get_text(""), "halo");
+        assert!(
+            view.editor()
+                .get_json()
+                .to_string()
+                .contains("https://rs-editor.devx")
+        );
+    }
+
+    #[test]
+    fn a_refused_address_says_why() {
+        let (mut view, _) = view_with(doc(vec![p("halo")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.set_locale("id");
+        view.accessibility_tree();
+        view.select_text(1, 5, Affinity::Downstream);
+        view.edit_link();
+        view.insert_text("javascript:alert(1)");
+        assert!(key(&mut view, "Enter", plain()));
+        paint(&mut view);
+        let update = view.accessibility_update().unwrap();
+        let field = update
+            .nodes
+            .iter()
+            .find(|(id, _)| id.0 == crate::a11y::overlay_ids::LINK_FIELD)
+            .map(|(_, node)| node.clone())
+            .unwrap();
+        assert_eq!(field.invalid(), Some(accesskit::Invalid::True));
+        assert_eq!(
+            field.description(),
+            Some("Pakai alamat web, email, atau telepon")
+        );
+    }
+}
+
+mod bubble_lines {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    #[test]
+    fn a_selection_over_lines_gets_the_menu_over_its_first_line() {
+        let (mut view, _) = view_with(
+            doc(vec![
+                p("satu dua tiga empat lima"),
+                p("enam tujuh delapan sembilan sepuluh"),
+            ]),
+            KeyPlatform::Other,
+        );
+        view.set_focused(true);
+        // From "lima" (the end of the first line) into the second paragraph.
+        view.select_text(21, 40, Affinity::Downstream);
+        paint(&mut view);
+        let first = view
+            .layout()
+            .caret_rect(21, Affinity::Downstream, 0.0)
+            .map(|r| view.to_view(r))
+            .unwrap();
+        let end = view
+            .layout()
+            .caret_rect(25, Affinity::Upstream, 0.0)
+            .map(|r| view.to_view(r))
+            .unwrap();
+        let (x, _) = view.bubble.toolbar.origin;
+        let (width, _) = view.bubble.toolbar.size();
+        let center = x + width / 2.0;
+        let wanted = (first.x + end.x) / 2.0;
+        assert!(
+            (center - wanted).abs() < 2.0 || x <= 8.5,
+            "centered over 'lima' ({wanted}), not the whole box: {center}"
+        );
+    }
+}
+
+mod image_retry {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    #[test]
+    fn a_broken_image_tapped_is_asked_for_again() {
+        let content = doc(vec![
+            p("a"),
+            json!({"type": "image", "attrs": {"src": "x.png", "width": 200, "height": 100}}),
+            p("b"),
+        ]);
+        let (mut view, _) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        assert!(
+            view.take_effects()
+                .contains(&Effect::MissingImages(vec!["x.png".into()]))
+        );
+        view.image_failed("x.png");
+        paint(&mut view);
+        view.take_effects();
+        let rect = view
+            .layout()
+            .blocks
+            .iter()
+            .find(|b| b.node.type_name() == "image")
+            .unwrap()
+            .rect;
+        let at = view.to_view(rect);
+        view.touch(TouchPhase::Down, at.x + 50.0, at.y + 50.0);
+        view.touch(TouchPhase::Up, at.x + 50.0, at.y + 50.0);
+        paint(&mut view);
+        assert!(
+            view.take_effects()
+                .contains(&Effect::MissingImages(vec!["x.png".into()]))
+        );
+        // A loaded image is not asked for again.
+        let rgba = vec![255u8; 4 * 4 * 4];
+        view.add_image("x.png", &rgba, 4, 4, 1.0, false);
+        paint(&mut view);
+        view.take_effects();
+        view.pointer_down(PointerEvent::at(at.x + 50.0, at.y + 50.0));
+        view.pointer_up(PointerEvent::at(at.x + 50.0, at.y + 50.0));
+        paint(&mut view);
+        assert!(
+            !view
+                .take_effects()
+                .iter()
+                .any(|e| matches!(e, Effect::MissingImages(_)))
+        );
+    }
+}

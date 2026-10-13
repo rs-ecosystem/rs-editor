@@ -74,7 +74,8 @@ impl Default for ApiOptions {
                 top: 24.0,
                 right: 20.0,
                 bottom: 24.0,
-                left: 20.0,
+                // Room for the drag handle's grip (a finger's is 24 px wide).
+                left: 28.0,
             },
             profile: InteractionProfile::default(),
             character_limit: None,

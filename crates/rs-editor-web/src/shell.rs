@@ -141,7 +141,8 @@ pub unsafe extern "C" fn rse_init(
             top: 40.0,
             right: 24.0,
             bottom: 40.0,
-            left: 24.0,
+            // Room for the drag handle's grip (a finger's is 24 px wide).
+            left: 28.0,
         },
         profile,
         character_limit: usize::try_from(character_limit).ok().filter(|&n| n > 0),

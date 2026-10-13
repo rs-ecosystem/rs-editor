@@ -32,6 +32,10 @@ pub(crate) struct Strings {
     pub link_address: &'static str,
     pub open_link: &'static str,
     pub copy_link: &'static str,
+    /// The copy button for a moment after it copied.
+    pub copied: &'static str,
+    /// Under the address field when the address was refused.
+    pub link_refused: &'static str,
     pub edit_link: &'static str,
     pub remove_link: &'static str,
     pub apply: &'static str,
@@ -73,6 +77,8 @@ const ENGLISH: Strings = Strings {
     link_address: "Link address",
     open_link: "Open link",
     copy_link: "Copy link",
+    copied: "Copied",
+    link_refused: "Use a web, email or phone address",
     edit_link: "Edit link",
     remove_link: "Remove link",
     apply: "Apply",
@@ -114,6 +120,8 @@ const INDONESIAN: Strings = Strings {
     link_address: "Alamat tautan",
     open_link: "Buka tautan",
     copy_link: "Salin tautan",
+    copied: "Tersalin",
+    link_refused: "Pakai alamat web, email, atau telepon",
     edit_link: "Ubah tautan",
     remove_link: "Hapus tautan",
     apply: "Terapkan",

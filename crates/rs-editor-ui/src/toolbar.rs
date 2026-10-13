@@ -36,6 +36,8 @@ pub struct Toolbar {
     pub hovered: Option<usize>,
     /// Entry held down.
     pub pressed: Option<usize>,
+    /// Entry with the keyboard focus (Tab), drawn with a ring.
+    pub focused: Option<usize>,
 }
 
 impl Toolbar {
@@ -135,7 +137,9 @@ impl Toolbar {
                     let background = if button.active {
                         Some(palette.accent)
                     } else if button.enabled
-                        && (self.hovered == Some(index) || self.pressed == Some(index))
+                        && (self.hovered == Some(index)
+                            || self.pressed == Some(index)
+                            || self.focused == Some(index))
                     {
                         Some(palette.muted)
                     } else {
@@ -148,6 +152,17 @@ impl Toolbar {
                         canvas.draw_rrect(
                             RRect::new_rect_xy(entry_rect, theme.radius.sm, theme.radius.sm),
                             &fill,
+                        );
+                    }
+                    if self.focused == Some(index) {
+                        let mut ring = Paint::default();
+                        ring.set_anti_alias(true);
+                        ring.set_style(skia_safe::paint::Style::Stroke);
+                        ring.set_stroke_width(2.0);
+                        ring.set_color(with_alpha(sk(palette.ring), progress));
+                        canvas.draw_rrect(
+                            RRect::new_rect_xy(entry_rect, theme.radius.sm, theme.radius.sm),
+                            &ring,
                         );
                     }
                     let color = if button.active {

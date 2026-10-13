@@ -108,6 +108,20 @@
   - Sebelumnya, grip dari gambar yang diketuk muncul untuk blok sesudahnya.
   - Tekan lama di gambar langsung mengangkatnya untuk di-drag, tanpa harus mencari grip.
 
+### Batch 7
+
+- **Tujuan drop lengkap:**
+  - Digeser lebih ke kanan di bawah item yang belum punya sublist, blok menjadi item pertama sublist baru.
+  - Blok bisa di-drop di antara blok di dalam kutipan.
+- **Gambar yang selesai dimuat** hanya me-layout ulang blok yang memuatnya, bukan seluruh dokumen.
+- **Gambar yang gagal dimuat** dicoba lagi saat diketuk atau diklik.
+- **Popover tautan:**
+  - Tombol Salin berubah menjadi centang ("Tersalin") selama 1,5 detik.
+  - Tab dan Shift+Tab berpindah antara kolom dan tombol. Enter atau Spasi menekan tombol yang terfokus, dan mengetik kembali ke kolom.
+  - Alamat yang ditolak disertai pesan "Pakai alamat web, email, atau telepon", juga untuk screen reader.
+- **Bubble menu untuk seleksi beberapa baris** berada di atas baris pertama seleksi. Kalau baris pertama sudah ter-scroll keluar, menu pindah ke bawah baris terakhir.
+- **Padding kiri bawaan web dan API menjadi 28 px**, sama dengan Android, supaya grip tidak menimpa teks.
+
 ### Laporan pengguna sebelumnya
 
 - **Menu `/`:** bisa di-scroll, sorotan menempel pada opsi yang ditekan, dan tidak kembali ke opsi pertama (`42452a9`, `1e80343`).
@@ -123,19 +137,10 @@
 
 ### Sedang
 
-1. **Setiap gambar yang selesai dimuat memicu layout ulang seluruh dokumen.**
-2. **Tujuan drop yang belum ada:**
-   - Masuk sebagai anak item yang belum punya sublist.
-   - Paragraf ke dalam kutipan.
-3. **Magnifier di kolom tautan** belum ada.
-4. **Gambar dari situs lain tanpa header CORS** tampil gagal di web, karena browser tidak mengizinkan pikselnya dibaca.
+1. **Magnifier di kolom tautan** belum ada.
+2. **Gambar dari situs lain tanpa header CORS** tampil gagal di web, karena browser tidak mengizinkan pikselnya dibaca.
 
 ### Rendah
 
-- **Tombol Salin di popover** belum memberi umpan balik "Disalin".
-- **Kolom tautan:**
-  - Belum bisa dinavigasi dengan Tab.
-  - Alamat yang ditolak belum disertai pesan.
-- **Grip mouse bisa menimpa teks** kalau padding kiri lebih kecil dari lebarnya.
-- **Bubble menu** tidak ikut ke awal seleksi multi-baris.
-- **Gagal muat gambar** belum bisa dicoba ulang. Android belum mendukung SVG dan stiker/GIF Gboard (`commitContent`).
+- **Grip bisa menimpa teks** kalau host memakai padding kiri di bawah 26 px.
+- **Android belum mendukung SVG** dan stiker/GIF Gboard (`commitContent`).

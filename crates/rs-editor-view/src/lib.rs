@@ -574,6 +574,22 @@ impl EditorView {
         true
     }
 
+    /// A broken image clicked or tapped: the host is asked to load it
+    /// again (the network may be back).
+    pub(crate) fn retry_image_at(&mut self, pos: usize) {
+        let src = self
+            .editor
+            .doc()
+            .node_at(pos)
+            .filter(|node| node.type_name() == "image")
+            .and_then(|node| node.attr("src").and_then(|v| v.as_str()).map(str::to_owned));
+        if let Some(src) = src
+            && self.engine.retry_image(&src)
+        {
+            self.relayout_keeping_place();
+        }
+    }
+
     /// `src` could not be loaded; its image shows as broken.
     pub fn image_failed(&mut self, src: &str) {
         self.engine.image_failed(src);
@@ -772,12 +788,14 @@ impl EditorView {
         {
             return Some(FRAME_MS);
         }
-        let touch = self.touch_deadline();
-        let blink = self.blink_deadline();
-        match (touch, blink) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        [
+            self.touch_deadline(),
+            self.blink_deadline(),
+            self.link_deadline(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     fn blink_deadline(&self) -> Option<u64> {

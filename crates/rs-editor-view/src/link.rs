@@ -97,7 +97,14 @@ pub(crate) struct LinkPopover {
     touch_at: u64,
     /// The last tap on the field (a second one soon after selects all).
     last_tap: u64,
+    /// Until when the copy button shows a check (it just copied).
+    copied_until: u64,
+    /// The buttons were built showing that check.
+    copied_shown: bool,
 }
+
+/// How long the copy button shows that it copied.
+const COPIED_MS: u64 = 1_500;
 
 /// One edit to the address field (see [`EditorView::field_input`]).
 pub(crate) enum FieldInput<'a> {
@@ -115,6 +122,17 @@ pub(crate) enum FieldInput<'a> {
 }
 
 impl EditorView {
+    /// The copy button still shows that it copied.
+    fn link_copied(&self) -> bool {
+        self.clock.now_ms() < self.link.copied_until
+    }
+
+    /// Milliseconds until the copy button turns back from its check.
+    pub(crate) fn link_deadline(&self) -> Option<u64> {
+        self.link_copied()
+            .then(|| self.link.copied_until - self.clock.now_ms())
+    }
+
     /// Whether the address field is open (it then takes text input).
     pub fn link_editing(&self) -> bool {
         self.link.editing.is_some()
@@ -273,6 +291,12 @@ impl EditorView {
         {
             self.link.dismissed = None;
         }
+        if shown.as_ref().map(|l| (l.from, l.to))
+            != self.link.shown.as_ref().map(|l| (l.from, l.to))
+        {
+            // Another link: its address was not copied.
+            self.link.copied_until = 0;
+        }
         let range = match (&self.link.editing, &shown) {
             (Some(editing), _) => Some(editing.range.clone()),
             (None, Some(link)) => Some(link.clone()),
@@ -308,13 +332,16 @@ impl EditorView {
             }
             (None, _) => vec![Action::Open, Action::Copy],
         };
-        if actions != self.link.actions {
+        let copied = self.link_copied();
+        if actions != self.link.actions || copied != self.link.copied_shown {
+            self.link.copied_shown = copied;
             self.link.toolbar.entries = actions
                 .iter()
                 .map(|action| {
                     ToolbarEntry::Button(ToolbarButton {
                         icon: match action {
                             Action::Open => Icon::ExternalLink,
+                            Action::Copy if copied => Icon::Check,
                             Action::Copy => Icon::Copy,
                             Action::Edit => Icon::Pencil,
                             Action::Remove => Icon::Unlink,
@@ -327,6 +354,7 @@ impl EditorView {
                 .collect();
             self.link.actions = actions;
             self.link.toolbar.hovered = None;
+            self.link.toolbar.focused = None;
         }
         if let Some(link) = shown {
             let color = self.theme().palette.muted_foreground;
@@ -466,10 +494,13 @@ impl EditorView {
                 self.link.field_rect,
                 &layout,
                 Some(&placeholder),
-                self.focused,
-                self.caret_visible(),
+                self.focused && self.link.toolbar.focused.is_none(),
+                self.caret_visible() && self.link.toolbar.focused.is_none(),
             );
             canvas.restore();
+            if editing.field.invalid {
+                self.paint_link_refused(canvas, progress);
+            }
         } else if let Some((_, _, url)) = &self.link.url {
             let area = self.link.url_rect;
             paint_text(
@@ -482,6 +513,30 @@ impl EditorView {
         }
         self.link.toolbar.paint_buttons(canvas, theme, progress);
         canvas.restore();
+    }
+
+    /// Why the address was refused, in a small panel under the popover.
+    fn paint_link_refused(&self, canvas: &Canvas, progress: f32) {
+        let theme = self.theme();
+        let rect = self.link.rect;
+        let room = (self.width - MARGIN * 2.0 - PANEL_PADDING * 4.0).max(40.0);
+        let label = self.engine.ui_label(
+            self.strings.link_refused,
+            &UiText::extra_small(theme.palette.destructive),
+            Some(room),
+        );
+        let width = label.width() + PANEL_PADDING * 4.0;
+        let height = label.height() + PANEL_PADDING * 3.0;
+        let left = rect.left.min(self.width - MARGIN - width).max(MARGIN);
+        let note = skia_safe::Rect::from_xywh(left, rect.bottom + 4.0, width, height);
+        paint_panel(canvas, note, theme, progress);
+        paint_text(
+            canvas,
+            &label,
+            note.left + PANEL_PADDING * 2.0,
+            note.center_y() - label.height() / 2.0,
+            progress,
+        );
     }
 
     /// The popover as a group for screen readers: the address (a link),
@@ -503,6 +558,10 @@ impl EditorView {
             let mut field = overlay_node(Role::TextInput, self.link.field_rect, label);
             field.set_value(editing.field.text());
             field.add_action(AxAction::Focus);
+            if editing.field.invalid {
+                field.set_invalid(accesskit::Invalid::True);
+                field.set_description(strings.link_refused);
+            }
             out.nodes.push((id, field));
             out.focus = Some(id);
             children.push(id);
@@ -519,6 +578,7 @@ impl EditorView {
             let id = NodeId(overlay_ids::LINK_BUTTON + index as u64);
             let label = match action {
                 Action::Open => strings.open_link,
+                Action::Copy if self.link.copied_shown => strings.copied,
                 Action::Copy => strings.copy_link,
                 Action::Edit => strings.edit_link,
                 Action::Remove => strings.remove_link,
@@ -526,6 +586,9 @@ impl EditorView {
             };
             let mut button = overlay_node(Role::Button, rect, label);
             button.add_action(AxAction::Click);
+            if self.link.toolbar.focused == Some(index) {
+                out.focus = Some(id);
+            }
             out.nodes.push((id, button));
             children.push(id);
         }
@@ -591,6 +654,9 @@ impl EditorView {
                     html,
                     json: Value::Null,
                 }));
+                // The button shows a check for a moment: it copied.
+                self.link.copied_until = self.clock.now_ms() + COPIED_MS;
+                self.request_redraw();
             }
             Action::Edit => {
                 self.edit_link();
@@ -733,6 +799,16 @@ impl EditorView {
     /// input is the document's).
     pub(crate) fn field_input(&mut self, input: FieldInput<'_>) -> Option<bool> {
         let apple = self.platform() == rs_editor_commands::KeyPlatform::Apple;
+        self.link.editing.as_ref()?;
+        if let FieldInput::Key(event) = &input
+            && let Some(handled) = self.link_tab_key(event)
+        {
+            return Some(handled);
+        }
+        if !matches!(input, FieldInput::Key(_)) {
+            // Typing goes back to the field.
+            self.link.toolbar.focused = None;
+        }
         let editing = self.link.editing.as_mut()?;
         let field = &mut editing.field;
         match input {
@@ -765,7 +841,6 @@ impl EditorView {
                     // Undo, formatting and the like would act on the
                     // document behind the field.
                     _ if command => return Some(true),
-                    "Tab" => return Some(true),
                     _ => return Some(false),
                 }
             }
@@ -795,6 +870,45 @@ impl EditorView {
             },
         }
         self.after_field_change();
+        Some(true)
+    }
+
+    /// Tab moves between the field and the popover's buttons (Shift+Tab
+    /// back), and a focused button takes Enter and Space; `None` when the
+    /// key is the field's.
+    fn link_tab_key(&mut self, event: &KeyEvent) -> Option<bool> {
+        let count = self.link.actions.len();
+        let focused = self.link.toolbar.focused;
+        let m = event.modifiers;
+        if m.ctrl || m.meta || m.alt {
+            return None;
+        }
+        let next = match (event.key.as_str(), focused) {
+            ("Tab", None) if m.shift => count.checked_sub(1),
+            ("Tab", None) => (count > 0).then_some(0),
+            ("Tab", Some(i)) if m.shift => i.checked_sub(1),
+            ("Tab", Some(i)) => (i + 1 < count).then_some(i + 1),
+            ("Enter" | " ", Some(i)) => {
+                self.link.toolbar.focused = None;
+                self.press_link_part(Part::Button(i));
+                self.request_redraw();
+                return Some(true);
+            }
+            ("Escape", Some(_)) => {
+                self.link.toolbar.focused = None;
+                self.request_redraw();
+                return Some(true);
+            }
+            (_, Some(_)) => {
+                // Other keys edit the address again.
+                self.link.toolbar.focused = None;
+                self.request_redraw();
+                return None;
+            }
+            _ => return None,
+        };
+        self.link.toolbar.focused = next;
+        self.request_redraw();
         Some(true)
     }
 
@@ -1182,6 +1296,14 @@ fn escape_html(text: &str) -> String {
 
 #[cfg(test)]
 impl LinkPopover {
+    pub(crate) fn copied_shown(&self) -> bool {
+        self.copied_shown
+    }
+
+    pub(crate) fn focused_button(&self) -> Option<usize> {
+        self.toolbar.focused
+    }
+
     pub(crate) fn button_center(&self, index: usize) -> (f32, f32) {
         let rect = self.toolbar.entry_rects()[index];
         (rect.center_x(), rect.center_y())

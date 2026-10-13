@@ -134,6 +134,7 @@ impl EditorView {
         match hit {
             Hit::Node { pos } => {
                 self.drag = None;
+                self.retry_image_at(pos);
                 self.select_node(pos)
             }
             Hit::Text { pos, affinity } => {

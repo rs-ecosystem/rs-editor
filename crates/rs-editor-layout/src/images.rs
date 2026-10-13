@@ -34,6 +34,12 @@ impl Images {
         self.missing.retain(|src| live.contains(src));
     }
 
+    /// Forgets that `src` failed, so layout asks for it again; false when
+    /// it had not failed.
+    pub fn retry(&mut self, src: &str) -> bool {
+        self.failed.remove(src)
+    }
+
     pub fn fail(&mut self, src: &str) {
         self.requested.remove(src);
         self.missing.remove(src);

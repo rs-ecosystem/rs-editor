@@ -437,6 +437,16 @@ impl LayoutEngine {
         self.forget_image_blocks(src);
     }
 
+    /// Asks for a broken image again (the next layout reports it missing);
+    /// false when `src` had not failed.
+    pub fn retry_image(&mut self, src: &str) -> bool {
+        let failed = self.shaper.images.borrow_mut().retry(src);
+        if failed {
+            self.forget_image_blocks(src);
+        }
+        failed
+    }
+
     /// Image sources laid out since the last call that are neither loaded
     /// nor failed, for the host to load.
     pub fn take_missing_images(&mut self) -> Vec<String> {
