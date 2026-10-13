@@ -1173,6 +1173,54 @@ mod touch {
     }
 
     #[test]
+    fn tapping_a_checkbox_only_toggles_the_task() {
+        let (mut view, clock) = setup(doc(vec![
+            p("halo dunia"),
+            json!({"type": "taskList", "content": [
+                {"type": "taskItem", "attrs": {"checked": false}, "content": [p("tugas")]}
+            ]}),
+        ]));
+        // The caret sits in the paragraph, with its handle showing.
+        let at = point_of(&mut view, 3);
+        tap(&mut view, at);
+        clock.advance(500);
+        view.take_effects();
+        let checkbox = view
+            .layout()
+            .decorations
+            .iter()
+            .find_map(|d| match d {
+                rs_editor_layout::Decoration::Checkbox { rect, .. } => Some(*rect),
+                _ => None,
+            })
+            .unwrap();
+        let checkbox = view.to_view(checkbox);
+        let checked = |view: &EditorView| {
+            view.editor().get_json()["content"][1]["content"][0]["attrs"]["checked"].clone()
+        };
+        tap(
+            &mut view,
+            (checkbox.x + checkbox.width / 2.0, checkbox.center_y()),
+        );
+        assert_eq!(checked(&view), true);
+        assert_eq!(selection(&view), (3, 3), "the caret stays");
+        let effects = view.take_effects();
+        assert!(
+            menus(&effects).iter().all(Option::is_none),
+            "no menu: {effects:?}"
+        );
+        assert!(!effects.contains(&Effect::ShowKeyboard));
+        // A quick second tap toggles again rather than selecting a word.
+        clock.advance(100);
+        tap(
+            &mut view,
+            (checkbox.x + checkbox.width / 2.0, checkbox.center_y()),
+        );
+        assert_eq!(checked(&view), false);
+        assert_eq!(selection(&view), (3, 3));
+    }
+
+    #[test]
     fn tapping_the_caret_handle_toggles_the_paste_menu() {
         let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
         let at = point_of(&mut view, 8);

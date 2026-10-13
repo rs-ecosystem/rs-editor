@@ -51,19 +51,24 @@ impl EditorView {
         self.layout().hit(dx, dy)
     }
 
+    /// The task item whose checkbox is at `x, y`, counting `slack` around
+    /// the box (a finger needs more than a mouse).
     pub(crate) fn checkbox_at(&mut self, x: f32, y: f32) -> Option<usize> {
+        self.checkbox_near(x, y, 4.0)
+    }
+
+    pub(crate) fn checkbox_near(&mut self, x: f32, y: f32, slack: f32) -> Option<usize> {
         let (dx, dy) = self.to_document(x, y);
         self.layout()
             .decorations
             .iter()
             .find_map(|decoration| match decoration {
                 Decoration::Checkbox { rect, pos, .. } => {
-                    // A slightly larger target is easier to hit.
                     let target = rs_editor_layout::Rect::new(
-                        rect.x - 4.0,
-                        rect.y - 4.0,
-                        rect.width + 8.0,
-                        rect.height + 8.0,
+                        rect.x - slack,
+                        rect.y - slack,
+                        rect.width + slack * 2.0,
+                        rect.height + slack * 2.0,
                     );
                     target.contains(dx, dy).then_some(*pos)
                 }

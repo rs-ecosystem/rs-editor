@@ -7,12 +7,16 @@
 //! adapter shows its native menu, magnifier and haptics in response to
 //! [`Effect`]s, so each platform keeps its own look where users expect it.
 
+use rs_editor_extensions::starter_kit::toggle_task_item;
 use rs_editor_layout::{Affinity, Hit, Rect};
 use rs_editor_state::{AllSelection, Selection, TextSelection};
 use skia_safe::{Canvas, Paint, PathBuilder};
 
 use crate::scroll::FRAME_MS;
 use crate::{ClipboardContent, EditorView, Effect, PointerButton, PointerEvent, VelocityTracker};
+
+/// Extra room around a checkbox for a fingertip, in logical pixels.
+const CHECKBOX_SLACK: f32 = 10.0;
 
 /// How handles look on the platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,7 +219,12 @@ impl EditorView {
         self.stop_scrolling();
         self.touch.tracker.reset();
         self.touch.tracker.add(now, y);
-        if let Some(handle) = self.handle_at(x, y) {
+        // A checkbox under the finger wins over a handle's touch area
+        // reaching over it.
+        if let Some(handle) = self
+            .handle_at(x, y)
+            .filter(|_| self.checkbox_under_finger(x, y).is_none())
+        {
             let tip = (handle.line.x, handle.line.bottom());
             self.touch.gesture = Some(Gesture::Handle {
                 kind: handle.kind,
@@ -303,7 +312,23 @@ impl EditorView {
         }
     }
 
+    /// The task item whose checkbox a finger at `x, y` touches.
+    fn checkbox_under_finger(&mut self, x: f32, y: f32) -> Option<usize> {
+        if !self.editor.is_editable() {
+            return None;
+        }
+        self.checkbox_near(x, y, CHECKBOX_SLACK)
+    }
+
     fn tap(&mut self, x: f32, y: f32, now: u64) {
+        // Tapping a checkbox only toggles it: the caret, its handle and the
+        // keyboard stay as they are, and quick taps do not select words.
+        if let Some(pos) = self.checkbox_under_finger(x, y) {
+            self.touch.last_tap = None;
+            self.hide_menu();
+            self.run_command(&toggle_task_item(pos));
+            return;
+        }
         let count = match self.touch.last_tap {
             Some((at, tx, ty, count))
                 if now.saturating_sub(at) <= self.profile.multi_tap_ms
