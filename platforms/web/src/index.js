@@ -126,6 +126,7 @@ class Editor {
     this._setUpPointer();
     this._setUpViewport();
     this._afterInput();
+    this._prepareFonts();
   }
 
   // --- strings across the wasm boundary ------------------------------------
@@ -345,6 +346,7 @@ class Editor {
     const pasted = html && this._withString(html, (ptr, len) => M._rse_paste_html(this._app, ptr, len));
     if (!pasted && text) this._withString(text, (ptr, len) => M._rse_paste(this._app, ptr, len));
     this._afterInput();
+    this._scanForFonts();
   }
 
   _focusInput() {
@@ -463,6 +465,41 @@ class Editor {
     this._requestFrame();
   }
 
+  /**
+   * Gets fonts ready before text needs them: connects to their hosts and
+   * reads subset maps while idle, then loads what the document already uses
+   * (not only what is on screen), so text further down does not wait.
+   */
+  _prepareFonts() {
+    if (!this._fonts.length) return;
+    const origins = new Set();
+    for (const font of this._fonts) {
+      try {
+        origins.add(new URL(font.subsets?.base ?? font.url, location.href).origin);
+      } catch {
+        // A bad URL fails later, where it is reported.
+      }
+    }
+    for (const origin of origins) {
+      if (origin === location.origin || document.querySelector(`link[rel=preconnect][href="${origin}"]`)) continue;
+      document.head.append(Object.assign(document.createElement("link"), { rel: "preconnect", href: origin, crossOrigin: "anonymous" }));
+    }
+    for (const font of this._fonts) if (font.subsets) this._subsetMap(font).catch(() => {});
+    this._scanForFonts();
+  }
+
+  /** Loads fonts for the characters of the whole document that need one. */
+  _scanForFonts() {
+    if (!this._fonts.length) return;
+    const wanted = new Set();
+    for (const char of this.getText()) {
+      const c = char.codePointAt(0);
+      // The bundled fonts cover Latin, Greek, Cyrillic, Arabic, Devanagari.
+      if (c >= 0x1100) wanted.add(c);
+    }
+    if (wanted.size) this._loadFontsFor([...wanted]);
+  }
+
   /** Loads the configured fonts (or font subsets) that cover `characters`. */
   _loadFontsFor(characters) {
     const inRanges = (ranges, c) => !ranges || ranges.some(([a, b]) => c >= a && c <= b);
@@ -474,9 +511,19 @@ class Editor {
         this._loadSubsets(font, wanted);
       } else if (font.state === "idle") {
         font.state = "loading";
-        this._fetchFont(font.url, font.family).then((ok) => { font.state = ok ? "loaded" : "failed"; });
+        this._fetchFonts([[font.url, font.family]]).then((ok) => { font.state = ok ? "loaded" : "failed"; });
       }
     }
+  }
+
+  _subsetMap(font) {
+    font.map ??= fetch(`${font.subsets.base}unicode.json`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((json) => Object.entries(json).map(([key, value]) => [key, parseUnicodeRange(value)]));
+    return font.map;
   }
 
   /**
@@ -486,35 +533,45 @@ class Editor {
   async _loadSubsets(font, characters) {
     font.loaded ??= new Set();
     try {
-      font.map ??= fetch(`${font.subsets.base}unicode.json`)
-        .then((response) => response.json())
-        .then((json) => Object.entries(json).map(([key, value]) => [key, parseUnicodeRange(value)]));
-      const map = await font.map;
+      const map = await this._subsetMap(font);
       const weight = font.subsets.weight ?? 400;
+      const batch = [];
       for (const [key, ranges] of map) {
         if (font.loaded.has(key) || !characters.some((c) => ranges.some(([a, b]) => c >= a && c <= b))) continue;
         font.loaded.add(key);
         const name = /^\[(\d+)\]$/.exec(key)?.[1] ?? key;
-        const url = `${font.subsets.base}files/${font.subsets.id}-${name}-${weight}-normal.woff`;
         // Skia picks one face per family and style, so each subset is a
         // family of its own.
-        this._fetchFont(url, `${font.family} ${name}`);
+        batch.push([`${font.subsets.base}files/${font.subsets.id}-${name}-${weight}-normal.woff`, `${font.family} ${name}`]);
       }
+      if (batch.length) await this._fetchFonts(batch);
     } catch (error) {
       font.state = "failed";
       console.warn(`Rs Editor: font subsets of ${font.family} could not be loaded`, error);
     }
   }
 
-  async _fetchFont(url, family) {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return this.addFont(await response.arrayBuffer(), family) !== "";
-    } catch (error) {
-      console.warn(`Rs Editor: font ${url} could not be loaded`, error);
-      return false;
+  /**
+   * Downloads `[url, family]` fonts in parallel and adds them together, so
+   * the text is laid out again once. Returns whether all were added.
+   */
+  async _fetchFonts(fonts) {
+    const files = await Promise.all(fonts.map(async ([url, family]) => {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return [await response.arrayBuffer(), family];
+      } catch (error) {
+        console.warn(`Rs Editor: font ${url} could not be loaded`, error);
+        return null;
+      }
+    }));
+    let all = true;
+    for (const file of files) {
+      all = (file !== null && this._addFont(file[0], file[1]) !== "") && all;
     }
+    this._afterInput();
+    return all;
   }
 
   /**
@@ -523,6 +580,12 @@ class Editor {
    * are not a font.
    */
   addFont(bytes, family = "") {
+    const added = this._addFont(bytes, family);
+    this._afterInput();
+    return added;
+  }
+
+  _addFont(bytes, family) {
     if (this._destroyed) return "";
     const M = this._M;
     const data = new Uint8Array(bytes);
@@ -535,7 +598,6 @@ class Editor {
     } finally {
       M._rse_free(ptr, data.length);
     }
-    this._afterInput();
     return added;
   }
 
@@ -685,6 +747,7 @@ class Editor {
     const ok = this._withString(text, (ptr, len) =>
       this._M._rse_set_content(this._app, ptr, len, format)) === 1;
     this._afterInput();
+    this._scanForFonts();
     return ok;
   }
 
