@@ -104,6 +104,9 @@
   - Tekan lama memunculkan menu Tempel dan Pilih semua.
   - Ketuk ganda memilih seluruh alamat, lalu muncul juga Potong dan Salin.
 - **Gambar yang sudah dihapus dilepas dari memori** saat gambar berikutnya selesai dimuat.
+- **Gambar bisa di-drag di layar sentuh** (laporan pengguna):
+  - Sebelumnya, grip dari gambar yang diketuk muncul untuk blok sesudahnya.
+  - Tekan lama di gambar langsung mengangkatnya untuk di-drag, tanpa harus mencari grip.
 
 ### Laporan pengguna sebelumnya
 

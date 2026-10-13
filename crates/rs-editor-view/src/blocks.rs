@@ -75,6 +75,9 @@ struct BlockDrag {
     drop_scroll: f32,
     pointer: (f32, f32),
     moved: bool,
+    /// The finger already felt the block come loose (a long press lifted
+    /// it).
+    felt: bool,
     drop: Option<Drop>,
 }
 
@@ -203,9 +206,21 @@ impl EditorView {
             if !self.focused || self.touch_gesture_active() {
                 return None;
             }
-            // A selected block (one just moved) is the block itself: its
-            // head is after it, in the next block.
+            // A selected block (one just moved, a tapped image) is the
+            // block itself, not the one after it where its head is.
             let selection = self.editor.selection();
+            if let Selection::Node(_) = selection {
+                let from = selection.from();
+                let unit = innermost_item(&layout, |b| b.pos == from).or_else(|| {
+                    let index = layout.top_at_pos(from)?;
+                    (index.saturating_sub(1)..=index + 1)
+                        .filter_map(|i| top_unit(&layout, i))
+                        .find(|u| u.pos == from)
+                });
+                if unit.is_some() {
+                    return unit;
+                }
+            }
             let head = match selection {
                 Selection::Node(_) => selection.from() + 1,
                 _ => selection.head(),
@@ -338,9 +353,41 @@ impl EditorView {
             drop_scroll: self.scroll_y,
             pointer: (x, y),
             moved: false,
+            felt: false,
             drop: None,
         });
         self.request_redraw();
+        true
+    }
+
+    /// A long press on a leaf block (an image, a rule) lifts it for a
+    /// drag, as the grip would: the finger is already on it. True when it
+    /// was lifted.
+    pub(crate) fn lift_leaf_block(&mut self, pos: usize, x: f32, y: f32) -> bool {
+        if !self.blocks.enabled || !self.editor.is_editable() || self.blocks.drag.is_some() {
+            return false;
+        }
+        let layout = self.layout();
+        // Top-level ones (list items start with a paragraph).
+        let unit = layout.top_at_pos(pos).and_then(|index| {
+            (index.saturating_sub(1)..=index + 1)
+                .filter_map(|i| top_unit(&layout, i))
+                .find(|u| u.pos == pos)
+        });
+        let Some(unit) = unit else {
+            return false;
+        };
+        self.blocks.block = Some(unit);
+        if !self.start_block_drag(x, y) {
+            return false;
+        }
+        // Lifted at once: the ghost shows under the finger.
+        if let Some(drag) = &mut self.blocks.drag {
+            drag.felt = true;
+            drag.moved = true;
+        }
+        self.hide_menu();
+        self.push_effect(Effect::Haptic(HapticKind::LongPress));
         true
     }
 
@@ -352,7 +399,7 @@ impl EditorView {
         drag.pointer = (x, y);
         let started = !drag.moved && (x - drag.start.0).hypot(y - drag.start.1) > DRAG_SLOP;
         drag.moved |= started;
-        if started && self.touch.finger_used {
+        if started && self.touch.finger_used && !drag.felt {
             // The block comes loose under the finger.
             self.push_effect(Effect::Haptic(HapticKind::LongPress));
         }

@@ -477,9 +477,21 @@ impl EditorView {
     }
 
     fn long_press(&mut self, x: f32, y: f32) {
-        let Some(Hit::Text { pos, .. }) = self.hit_at(x, y) else {
-            self.touch.gesture = None;
-            return;
+        let pos = match self.hit_at(x, y) {
+            Some(Hit::Text { pos, .. }) => pos,
+            Some(Hit::Node { pos }) => {
+                // An image held down comes loose to be dragged.
+                self.touch.gesture = None;
+                if self.lift_leaf_block(pos, x, y) {
+                    self.set_magnifier(None);
+                    self.request_redraw();
+                }
+                return;
+            }
+            None => {
+                self.touch.gesture = None;
+                return;
+            }
         };
         self.finish_composition();
         if self.profile.long_press == LongPressAction::MoveCaret {

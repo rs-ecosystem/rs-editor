@@ -3616,3 +3616,154 @@ mod audit_batch6 {
         );
     }
 }
+
+mod image_drag {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    #[test]
+    fn a_tapped_image_shows_its_grip_and_moves_with_a_finger() {
+        let content = doc(vec![
+            p("satu"),
+            json!({"type": "image", "attrs": {"src": "x.png", "width": 200, "height": 100}}),
+            p("dua"),
+            p("tiga"),
+        ]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        let rect = view
+            .layout()
+            .blocks
+            .iter()
+            .find(|b| b.node.type_name() == "image")
+            .unwrap()
+            .rect;
+        let at = view.to_view(rect);
+        view.touch(TouchPhase::Down, at.x + 50.0, at.y + 50.0);
+        view.touch(TouchPhase::Up, at.x + 50.0, at.y + 50.0);
+        assert!(view.has_node_selection());
+        for _ in 0..20 {
+            clock.advance(16);
+            paint(&mut view);
+        }
+        assert!(view.drag_handle_shown());
+        assert_eq!(view.blocks.block(), Some(6), "the image's grip");
+        let (gx, gy) = view.blocks.grip_center();
+        view.touch(TouchPhase::Down, gx, gy);
+        clock.advance(300);
+        paint(&mut view);
+        let below = view_y_of(&mut view, 13) + 30.0;
+        for step in 1..=10 {
+            let y = gy + (below - gy) * step as f32 / 10.0;
+            view.touch(TouchPhase::Move, gx, y);
+            clock.advance(16);
+            paint(&mut view);
+        }
+        view.touch(TouchPhase::Up, gx, below);
+        let json = view.editor().get_json();
+        let kinds: Vec<_> = json["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b["type"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            kinds,
+            ["paragraph", "paragraph", "paragraph", "image"],
+            "{json}"
+        );
+    }
+}
+
+mod image_long_press {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    #[test]
+    fn a_long_press_on_an_image_lifts_it_for_a_drag() {
+        let content = doc(vec![
+            p("satu"),
+            json!({"type": "image", "attrs": {"src": "x.png", "width": 200, "height": 100}}),
+            p("dua"),
+            p("tiga"),
+        ]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        let rect = view
+            .layout()
+            .blocks
+            .iter()
+            .find(|b| b.node.type_name() == "image")
+            .unwrap()
+            .rect;
+        let at = view.to_view(rect);
+        let (x, y) = (at.x + 50.0, at.y + 50.0);
+        view.take_effects();
+        view.touch(TouchPhase::Down, x, y);
+        clock.advance(600);
+        paint(&mut view);
+        assert!(view.is_dragging_block(), "held down, it came loose");
+        assert!(
+            view.take_effects()
+                .contains(&Effect::Haptic(HapticKind::LongPress))
+        );
+        let below = view_y_of(&mut view, 13) + 30.0;
+        for step in 1..=10 {
+            view.touch(TouchPhase::Move, x, y + (below - y) * step as f32 / 10.0);
+            clock.advance(16);
+            paint(&mut view);
+        }
+        assert!(
+            !view
+                .take_effects()
+                .contains(&Effect::Haptic(HapticKind::LongPress)),
+            "felt once"
+        );
+        view.touch(TouchPhase::Up, x, below);
+        let json = view.editor().get_json();
+        assert_eq!(json["content"][3]["type"], "image", "{json}");
+    }
+
+    #[test]
+    fn the_mouse_drags_an_image_by_its_grip() {
+        let content = doc(vec![
+            p("satu"),
+            json!({"type": "image", "attrs": {"src": "x.png", "width": 200, "height": 100}}),
+            p("dua"),
+            p("tiga"),
+        ]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        let rect = view
+            .layout()
+            .blocks
+            .iter()
+            .find(|b| b.node.type_name() == "image")
+            .unwrap()
+            .rect;
+        let at = view.to_view(rect);
+        view.pointer_move(PointerEvent::at(at.x + 50.0, at.y + 50.0));
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        assert_eq!(view.blocks.block(), Some(6), "the image's grip");
+        let (gx, gy) = view.blocks.grip_center();
+        assert!(view.pointer_down(PointerEvent::at(gx, gy)));
+        let below = view_y_of(&mut view, 13) + 30.0;
+        view.pointer_move(PointerEvent::at(gx, below));
+        view.pointer_up(PointerEvent::at(gx, below));
+        let json = view.editor().get_json();
+        assert_eq!(json["content"][3]["type"], "image", "{json}");
+    }
+}
