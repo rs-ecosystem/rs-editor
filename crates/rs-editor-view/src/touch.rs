@@ -363,8 +363,8 @@ impl EditorView {
                 let zone = self.profile.edge_scroll_zone;
                 let step = if y < zone {
                     -(zone - y).min(zone) * 0.3
-                } else if y > self.height - zone {
-                    (y - (self.height - zone)).min(zone) * 0.3
+                } else if y > self.visible_height() - zone {
+                    (y - (self.visible_height() - zone)).min(zone) * 0.3
                 } else {
                     0.0
                 };
@@ -405,7 +405,7 @@ impl EditorView {
             | Some(Gesture::Handle { .. }) => {
                 let y = self.touch.finger.1;
                 let zone = self.profile.edge_scroll_zone;
-                if y < zone || y > self.height - zone {
+                if y < zone || y > self.visible_height() - zone {
                     return Some(FRAME_MS);
                 }
             }

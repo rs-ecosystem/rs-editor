@@ -9,6 +9,8 @@ import android.view.View
  * [NativeEditor.boltffiHandle]; calls happen on the UI thread.
  */
 internal object NativeSurface {
+    const val RESIZING = -2L
+
     init {
         System.loadLibrary("rs_editor_android")
     }
@@ -22,7 +24,10 @@ internal object NativeSurface {
     /** The surface is going away; the GL context survives. */
     @JvmStatic external fun detachSurface(handle: Long)
 
-    /** Draws a frame; ms until the next one is needed (0 while animating), or -1 when idle. */
+    /**
+     * Draws a frame; ms until the next one is needed (0 while animating), -1 when idle,
+     * or [RESIZING] when EGL still drew into a buffer of the old size.
+     */
     @JvmStatic external fun render(handle: Long): Long
 
     /**

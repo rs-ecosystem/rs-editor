@@ -161,6 +161,8 @@ pub struct EditorView {
     pub(crate) scale: f32,
     pub(crate) padding: Insets,
     pub(crate) scroll_y: f32,
+    /// Height at the bottom covered by something else (a soft keyboard).
+    pub(crate) obscured_bottom: f32,
     pub(crate) scroll: scroll::Scroll,
     pub(crate) focused: bool,
     pub(crate) clock: Arc<dyn Clock>,
@@ -176,6 +178,8 @@ pub struct EditorView {
     /// Bumped by every transaction, so hosts can tell when to refresh
     /// toolbar state.
     revision: u64,
+    /// Bumped by transactions that change the document.
+    doc_revision: u64,
     effects: Vec<Effect>,
     pub(crate) a11y: a11y::A11y,
     pub(crate) touch: touch::TouchState,
@@ -224,6 +228,7 @@ impl EditorView {
             scale: options.scale,
             padding: options.padding,
             scroll_y: 0.0,
+            obscured_bottom: 0.0,
             scroll: scroll::Scroll::Idle,
             focused: false,
             blink_start: clock.now_ms(),
@@ -235,6 +240,7 @@ impl EditorView {
             next_composition: 1,
             scroll_seen,
             revision: 0,
+            doc_revision: 0,
             effects: Vec::new(),
             a11y: a11y::A11y::default(),
             touch: touch::TouchState::default(),
@@ -250,12 +256,19 @@ impl EditorView {
     pub fn editor_mut(&mut self) -> &mut Editor {
         self.request_redraw();
         self.revision += 1;
+        self.doc_revision += 1;
         &mut self.editor
     }
 
     /// Changes whenever the document or selection may have changed.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Changes whenever the document may have changed (not for selection
+    /// moves).
+    pub fn doc_revision(&self) -> u64 {
+        self.doc_revision
     }
 
     pub fn state(&self) -> &EditorState {
@@ -273,16 +286,48 @@ impl EditorView {
     }
 
     pub fn resize(&mut self, width: f32, height: f32, scale: f32) {
-        // When the view shrinks under a visible caret (a soft keyboard
-        // opening), keep the caret on screen like platform text fields do.
-        let follow_caret = self.focused
-            && height < self.height
-            && self
-                .caret_rect()
-                .is_some_and(|r| r.y >= 0.0 && r.bottom() <= self.height);
+        let follow_caret = self.follows_caret_to(height - self.obscured_bottom);
         self.width = width;
         self.height = height;
         self.scale = scale;
+        self.after_viewport_change(follow_caret);
+    }
+
+    /// How much of the bottom of the view something covers, such as a soft
+    /// keyboard sliding over it. Cheaper than resizing while the keyboard
+    /// animates: only scrolling follows, so the caret stays visible.
+    pub fn set_obscured_bottom(&mut self, height: f32) {
+        let height = height.clamp(0.0, self.height);
+        if height == self.obscured_bottom {
+            return;
+        }
+        let follow_caret = self.follows_caret_to(self.height - height);
+        self.obscured_bottom = height;
+        self.after_viewport_change(follow_caret);
+    }
+
+    pub fn obscured_bottom(&self) -> f32 {
+        self.obscured_bottom
+    }
+
+    /// The height of the part of the view that can be seen.
+    pub fn visible_height(&self) -> f32 {
+        (self.height - self.obscured_bottom).max(0.0)
+    }
+
+    /// When the visible part shrinks under a visible caret (a soft keyboard
+    /// opening), the caret should stay on screen like in platform text
+    /// fields.
+    fn follows_caret_to(&mut self, visible: f32) -> bool {
+        let before = self.visible_height();
+        self.focused
+            && visible < before
+            && self
+                .caret_rect()
+                .is_some_and(|r| r.y >= 0.0 && r.bottom() <= before)
+    }
+
+    fn after_viewport_change(&mut self, follow_caret: bool) {
         self.clamp_scroll();
         if follow_caret {
             self.scroll_into_view();
@@ -361,8 +406,9 @@ impl EditorView {
                     .top_at_pos(pos)
                     .and_then(|index| layout.tops.get(index))
             {
-                let max =
-                    (layout.height + self.padding.top + self.padding.bottom - self.height).max(0.0);
+                let max = (layout.height + self.padding.top + self.padding.bottom
+                    - self.visible_height())
+                .max(0.0);
                 self.scroll_y = (top.y + offset + self.padding.top).clamp(0.0, max);
             }
             self.layout = Some(LaidOut { doc, width, layout });
@@ -412,7 +458,7 @@ impl EditorView {
     }
 
     fn clamp_scroll(&mut self) {
-        let max = (self.content_height() - self.height).max(0.0);
+        let max = (self.content_height() - self.visible_height()).max(0.0);
         self.scroll_y = self.scroll_y.clamp(0.0, max);
     }
 
@@ -503,6 +549,9 @@ impl EditorView {
             mapped
         };
         self.revision += 1;
+        if !self.editor.doc().ptr_eq(&before) {
+            self.doc_revision += 1;
+        }
         self.after_change();
         true
     }
@@ -583,8 +632,8 @@ impl EditorView {
         let margin = 24.0;
         if rect.y < margin {
             self.scroll_by(rect.y - margin);
-        } else if rect.bottom() > self.height - margin {
-            self.scroll_by(rect.bottom() - (self.height - margin));
+        } else if rect.bottom() > self.visible_height() - margin {
+            self.scroll_by(rect.bottom() - (self.visible_height() - margin));
         }
     }
 

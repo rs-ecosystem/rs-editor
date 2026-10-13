@@ -211,6 +211,13 @@ impl NativeEditor {
         self.view.set_focused(focused);
     }
 
+    /// Pixels at the bottom covered by the keyboard and the app's own UI
+    /// over the editor; the caret scrolls out from under them.
+    pub fn set_obscured_bottom(&mut self, pixels: f32) {
+        let scale = self.view.size().2;
+        self.view.set_obscured_bottom(pixels / scale);
+    }
+
     // --- touch and the selection menu ---------------------------------------
 
     /// A touch event in pixels; `action` is 0 down, 1 move, 2 up, 3 cancel.

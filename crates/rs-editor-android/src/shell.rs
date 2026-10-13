@@ -286,6 +286,10 @@ pub extern "system" fn Java_com_rseditor_android_NativeSurface_detachSurface(
     }
 }
 
+/// [`Java_com_rseditor_android_NativeSurface_render`] while EGL still draws
+/// into buffers of the old size: draw again right away.
+const RESIZING: jlong = -2;
+
 /// Draws a frame. Returns milliseconds until the next one is needed
 /// (0 while animating) or -1 when idle.
 #[unsafe(no_mangle)]
@@ -313,7 +317,7 @@ pub extern "system" fn Java_com_rseditor_android_NativeSurface_render(
         });
     }
     if resizing {
-        return 0;
+        return RESIZING;
     }
     app.view.next_frame_in().map_or(-1, |ms| ms as jlong)
 }

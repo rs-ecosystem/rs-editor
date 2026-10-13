@@ -24,7 +24,7 @@ cd platforms/android && ./gradlew :sample:installDebug
 - `kotlin/` berisi kelas `NativeEditor` dan glue JNI-nya;
 - `jniLibs/` berisi `librs_editor_android.so` untuk setiap ABI.
 
-Gunakan `--release` untuk build yang dioptimalkan. Tanpa `--arch`, kedua ABI di `boltffi.toml` akan dibuild.
+Build-nya dioptimalkan (release) secara default; gunakan `--debug` untuk build debug. Tanpa `--arch`, kedua ABI di `boltffi.toml` akan dibuild.
 
 ## API
 

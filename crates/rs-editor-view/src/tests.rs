@@ -167,10 +167,17 @@ fn a_chain_runs_as_one_undo_step_and_bumps_the_revision() {
         ("toggleHeading".to_string(), json!({"level": 2})),
     ];
     let before = view.revision();
+    let doc_before = view.doc_revision();
+    view.select_text(1, 3, Affinity::Downstream);
+    assert!(view.revision() > before);
+    assert_eq!(view.doc_revision(), doc_before, "a selection move");
+    view.select_text(1, 5, Affinity::Downstream);
+    let before = view.revision();
     assert!(view.can_chain(&steps).unwrap());
     assert_eq!(view.revision(), before, "a dry run changes nothing");
     assert!(view.run_chain(&steps).unwrap());
     assert!(view.revision() > before);
+    assert!(view.doc_revision() > doc_before);
     let editor = view.editor();
     assert!(editor.is_active("bold", &Default::default()));
     assert!(editor.is_active("heading", json!({"level": 2}).as_object().unwrap()));
@@ -182,6 +189,38 @@ fn a_chain_runs_as_one_undo_step_and_bumps_the_revision() {
         view.run_chain(&[("noSuchCommand".to_string(), Value::Null)])
             .is_err()
     );
+}
+
+#[test]
+fn a_keyboard_covering_the_caret_scrolls_it_into_view() {
+    let blocks = (0..40).map(|i| p(&format!("baris {i}"))).collect();
+    let (mut view, _) = view_with(doc(blocks), KeyPlatform::Other);
+    view.set_focused(true);
+    // A caret near the bottom of the 400px view.
+    let mut pos = 1;
+    loop {
+        view.select_text(pos, pos, Affinity::Downstream);
+        if view.caret_rect().unwrap().bottom() > 340.0 {
+            break;
+        }
+        pos += 9;
+    }
+    assert_eq!(view.scroll_y, 0.0);
+    // The keyboard slides in over the bottom half, in steps.
+    for covered in [50.0, 120.0, 200.0] {
+        view.set_obscured_bottom(covered);
+        assert!(
+            view.caret_rect().unwrap().bottom() <= 400.0 - covered,
+            "{covered}"
+        );
+    }
+    assert!(view.scroll_y > 0.0);
+    assert_eq!(view.visible_height(), 200.0);
+    // Scrolling reaches the end of the document above the keyboard.
+    view.scroll_by(1e6);
+    let max = view.scroll_y;
+    view.set_obscured_bottom(0.0);
+    assert!(view.scroll_y < max, "the end moves back down");
 }
 
 #[test]

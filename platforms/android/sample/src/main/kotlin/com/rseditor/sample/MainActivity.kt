@@ -4,9 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,9 +28,15 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -64,10 +72,22 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = colors) {
                 Surface(Modifier.fillMaxSize()) {
                     val editor = rememberRsEditorState(sample)
-                    Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
-                        RsEditor(editor, Modifier.weight(1f).fillMaxWidth())
-                        HorizontalDivider()
-                        Toolbar(editor)
+                    var toolbarHeight by remember { mutableStateOf(0.dp) }
+                    val density = LocalDensity.current
+                    // The editor keeps its size; the keyboard and the toolbar riding on
+                    // it slide over its bottom.
+                    Box(Modifier.fillMaxSize().systemBarsPadding()) {
+                        RsEditor(editor, Modifier.fillMaxSize(), overlayBottom = toolbarHeight)
+                        Column(
+                            Modifier.align(Alignment.BottomCenter)
+                                .imePadding()
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surface)
+                                .onSizeChanged { toolbarHeight = with(density) { it.height.toDp() } },
+                        ) {
+                            HorizontalDivider()
+                            Toolbar(editor)
+                        }
                     }
                 }
             }

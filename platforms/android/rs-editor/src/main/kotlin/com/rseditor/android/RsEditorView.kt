@@ -14,6 +14,8 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.WindowInsets
+import android.view.WindowInsetsAnimation
 import android.view.inputmethod.CursorAnchorInfo
 import android.view.inputmethod.EditorBoundsInfo
 import android.view.inputmethod.EditorInfo
@@ -74,10 +76,53 @@ class RsEditorView private constructor(
             scheduleFrame()
         }
 
+    /** Pixels at the bottom of the view the keyboard covers right now. */
+    private var keyboardOverlap = 0
+    /** The keyboard is sliding; window insets already hold where it will end. */
+    private var keyboardAnimating = false
+
+    /**
+     * Pixels at the bottom covered by the app's own UI drawn over the editor, such as a
+     * formatting toolbar above the keyboard. The keyboard itself is tracked: the editor keeps
+     * its size while the keyboard slides over it, and the caret scrolls out from under both.
+     */
+    var overlayBottom: Int = 0
+        set(value) {
+            if (field == value) return
+            field = value
+            updateObscured()
+        }
+
     init {
         isFocusable = true
         isFocusableInTouchMode = true
         holder.addCallback(this)
+        if (Build.VERSION.SDK_INT >= 30) {
+            // Follow the keyboard frame by frame while it slides.
+            setWindowInsetsAnimationCallback(object :
+                WindowInsetsAnimation.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                override fun onPrepare(animation: WindowInsetsAnimation) {
+                    if (animation.isKeyboard()) keyboardAnimating = true
+                }
+
+                override fun onProgress(
+                    insets: WindowInsets,
+                    running: MutableList<WindowInsetsAnimation>,
+                ): WindowInsets {
+                    if (running.any { it.isKeyboard() }) trackKeyboard(insets, animated = true)
+                    return insets
+                }
+
+                override fun onEnd(animation: WindowInsetsAnimation) {
+                    if (!animation.isKeyboard()) return
+                    keyboardAnimating = false
+                    rootWindowInsets?.let(::trackKeyboard)
+                }
+
+                private fun WindowInsetsAnimation.isKeyboard() =
+                    typeMask and WindowInsets.Type.ime() != 0
+            })
+        }
         NativeSurface.attachAccessibility(handle(), this) { afterInput() }
     }
 
@@ -208,12 +253,12 @@ class RsEditorView private constructor(
         var next = NativeSurface.render(handle())
         // Right after a resize EGL can still hand out a buffer of the old
         // size; the next frame gets the new one.
-        if (next == 0L) next = NativeSurface.render(handle())
+        if (next == NativeSurface.RESIZING) next = NativeSurface.render(handle())
         // A frame can start a long press or bring the menu back after a fling.
         applyEffects()
         notifyIfChanged()
         when {
-            next in 0..16 -> scheduleFrame()
+            next == NativeSurface.RESIZING || next in 0..16 -> scheduleFrame()
             next > 16 -> postDelayed(::scheduleFrame, next - 8)
         }
     }
@@ -244,6 +289,39 @@ class RsEditorView private constructor(
         native.touch(action, event.x, event.y)
         afterInput()
         return true
+    }
+
+    override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
+        trackKeyboard(insets)
+        return super.onApplyWindowInsets(insets)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        rootWindowInsets?.let(::trackKeyboard)
+    }
+
+    /** How much of this view the keyboard covers, from the window's insets. */
+    private fun trackKeyboard(insets: WindowInsets, animated: Boolean = false) {
+        if (Build.VERSION.SDK_INT < 30) return // The window resizes instead.
+        if (keyboardAnimating && !animated) return
+        val keyboard = insets.getInsets(WindowInsets.Type.ime()).bottom
+        val location = IntArray(2)
+        getLocationInWindow(location)
+        val keyboardTop = rootView.height - keyboard
+        val overlap = (location[1] + height - keyboardTop).coerceIn(0, height)
+        if (overlap == keyboardOverlap) return
+        keyboardOverlap = overlap
+        updateObscured()
+    }
+
+    private fun updateObscured() {
+        if (released) return
+        native.setObscuredBottom((keyboardOverlap + overlayBottom).toFloat())
+        // Draw now so the text moves in step with the keyboard.
+        drawNow()
+        // The caret moved on screen.
+        if (monitorCursor && batchDepth == 0) sendCursorAnchorInfo(imeState())
     }
 
     override fun onFocusChanged(focused: Boolean, direction: Int, previous: Rect?) {

@@ -8,6 +8,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.rseditor.android.RsEditorChain
 import com.rseditor.android.RsEditorView
@@ -67,6 +70,11 @@ fun rememberRsEditorState(content: String = ""): RsEditorState =
 /**
  * The Rs Editor. [dark] null follows the system theme. The Rust editor
  * lives as long as this composable stays in the composition.
+ *
+ * Do not shrink the editor for the keyboard (no `imePadding`): it tracks the
+ * keyboard sliding over it and scrolls the caret clear, which is smoother
+ * than resizing its surface every frame. [overlayBottom] is the height of the
+ * app's own UI drawn over its bottom, such as a toolbar above the keyboard.
  */
 @Composable
 fun RsEditor(
@@ -74,7 +82,9 @@ fun RsEditor(
     modifier: Modifier = Modifier,
     editable: Boolean = true,
     dark: Boolean? = null,
+    overlayBottom: Dp = 0.dp,
 ) {
+    val overlayPixels = with(LocalDensity.current) { overlayBottom.roundToPx() }
     AndroidView(
         factory = { context ->
             RsEditorView(context, state.content).also { view ->
@@ -86,6 +96,7 @@ fun RsEditor(
         update = { view ->
             if (view.isEditable != editable) view.isEditable = editable
             if (view.dark != dark) view.dark = dark
+            view.overlayBottom = overlayPixels
         },
         onRelease = { view ->
             view.removeOnChangeListener(state.onChange)

@@ -275,7 +275,7 @@ impl EditorView {
         let Some(caret) = self.caret_rect() else {
             return false;
         };
-        let page = (self.height - 48.0).max(40.0);
+        let page = (self.visible_height() - 48.0).max(40.0);
         let (x, y) = self.to_document(caret.x, caret.center_y() + if up { -page } else { page });
         let hit = self.layout().hit(x, y);
         self.scroll_by(if up { -page } else { page });

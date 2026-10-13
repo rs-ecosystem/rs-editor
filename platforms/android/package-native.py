@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Builds the Rust editor for Android and its Kotlin bindings.
 
-    platforms/android/package-native.py [--release] [--arch arm64|x86_64]
+    platforms/android/package-native.py [--debug] [--arch arm64|x86_64]
 
 Writes into platforms/android/rs-editor/generated/:
   kotlin/   the BoltFFI Kotlin class (NativeEditor) and its JNI glue
@@ -61,7 +61,8 @@ def ndk_bin():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--release", action="store_true")
+    # Release by default: an unoptimized editor is too slow to judge on a device.
+    parser.add_argument("--debug", action="store_true")
     parser.add_argument("--arch", choices=list(TARGETS), help="one ABI only (default: all in boltffi.toml)")
     args = parser.parse_args()
 
@@ -74,8 +75,8 @@ def main():
     api = android["min_sdk"]
     ndk, bin_dir = ndk_bin()
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", root / "target"))
-    profile = "release" if args.release else "debug"
-    build_args = ["--release"] if args.release else []
+    profile = "debug" if args.debug else "release"
+    build_args = [] if args.debug else ["--release"]
 
     # Bindings come from metadata that BoltFFI's macros embed when the
     # crate is compiled for the host with special environment variables.
@@ -118,7 +119,7 @@ def main():
         glue = work / "jni_glue.o"
         exports = work / "exports.map"
         exports.write_text("{ global: Java_*; JNI_OnLoad*; JNI_OnUnload*; boltffi_*; local: *; };\n")
-        run(clang, "-c", "-fPIC", "-ffunction-sections", "-fdata-sections", "-O2" if args.release else "-O0",
+        run(clang, "-c", "-fPIC", "-ffunction-sections", "-fdata-sections", "-O0" if args.debug else "-O2",
             "-I", kotlin / "jni", kotlin / "jni/jni_glue.c", "-o", glue)
         # Nothing references our own JNI functions at link time; keep them.
         symbols = subprocess.run([bin_dir / "llvm-nm", "--defined-only", "-j", archive],
