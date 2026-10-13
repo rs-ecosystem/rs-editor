@@ -1,19 +1,19 @@
-//! The C ABI used by `web/rs-editor.js`.
+//! The C ABI used by the web package (`platforms/web`).
 //!
 //! Every function takes the `App` pointer returned by [`rse_init`]. Skia
 //! objects are not thread-safe, so the module must stay on one thread (the
-//! page's main thread).
+//! page's main thread). Coordinates are CSS pixels. Strings go in as UTF-8
+//! written into buffers from [`rse_alloc`]; string results are left in the
+//! app and read through [`rse_result`] (functions return their length).
 
-use rs_editor_commands::{KeyEvent, KeyPlatform, Modifiers};
-use rs_editor_extensions::EditorOptions;
-use rs_editor_theme::Theme;
-use rs_editor_view::{CursorIcon, EditorView, Effect, PointerButton, PointerEvent, ViewOptions};
-use serde_json::{Value, json};
+use rs_editor_api::{ApiOptions, EditorApi, Units};
+use rs_editor_commands::KeyPlatform;
+use rs_editor_view::{Insets, InteractionProfile};
 use skia_safe::gpu::{self, DirectContext, SurfaceOrigin, gl::FramebufferInfo};
 use skia_safe::{ColorType, Surface};
 
 pub struct App {
-    view: EditorView,
+    api: EditorApi,
     context: DirectContext,
     surface: Option<Surface>,
     /// Canvas size in device pixels.
@@ -40,19 +40,18 @@ unsafe fn read(ptr: *const u8, len: usize) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// Like [`read`], with a null pointer meaning "none".
+///
+/// # Safety
+/// As for [`read`].
+unsafe fn read_optional(ptr: *const u8, len: usize) -> Option<String> {
+    (!ptr.is_null()).then(|| unsafe { read(ptr, len) })
+}
+
 /// # Safety
 /// `app` must come from [`rse_init`] and not be destroyed.
 unsafe fn app<'a>(app: *mut App) -> &'a mut App {
     unsafe { &mut *app }
-}
-
-fn modifiers(bits: u32) -> Modifiers {
-    Modifiers {
-        shift: bits & 1 != 0,
-        ctrl: bits & 2 != 0,
-        alt: bits & 4 != 0,
-        meta: bits & 8 != 0,
-    }
 }
 
 impl App {
@@ -96,10 +95,11 @@ pub unsafe extern "C" fn rse_result(app_ptr: *mut App) -> *const u8 {
 }
 
 /// Creates the editor in the current WebGL context. `platform` is 1 on
-/// Apple systems, 2 on Windows, 0 elsewhere. Returns null on failure.
+/// Apple systems, 2 on Windows, 0 elsewhere; `content` is a Tiptap JSON
+/// document, HTML, or empty. Returns null on failure.
 ///
 /// # Safety
-/// `content` must point to `content_len` bytes of UTF-8 JSON.
+/// `content` must point to `content_len` bytes of UTF-8.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_init(
     width: f32,
@@ -110,47 +110,38 @@ pub unsafe extern "C" fn rse_init(
     content: *const u8,
     content_len: usize,
 ) -> *mut App {
-    let content: Option<Value> = serde_json::from_str(&unsafe { read(content, content_len) }).ok();
     let Some(interface) = gpu::gl::Interface::new_native() else {
         return std::ptr::null_mut();
     };
     let Some(context) = gpu::direct_contexts::make_gl(interface, None) else {
         return std::ptr::null_mut();
     };
-    let platform = match platform {
-        1 => KeyPlatform::Apple,
-        2 => KeyPlatform::Windows,
-        _ => KeyPlatform::Other,
+    let (platform, profile) = match platform {
+        1 => (KeyPlatform::Apple, InteractionProfile::ios()),
+        2 => (KeyPlatform::Windows, InteractionProfile::android()),
+        _ => (KeyPlatform::Other, InteractionProfile::android()),
     };
-    let Ok(mut view) = EditorView::new(ViewOptions {
-        editor: EditorOptions {
-            content,
-            platform,
-            ..Default::default()
-        },
-        theme: if dark != 0 {
-            Theme::dark()
-        } else {
-            Theme::light()
-        },
+    let api = EditorApi::new(ApiOptions {
         width,
         height,
         scale: dpr,
+        units: Units::Logical,
+        dark: dark != 0,
+        content: unsafe { read(content, content_len) },
+        platform,
         // The web has no system font manager; the bundle covers Latin,
-        // Arabic and Devanagari (other scripts load lazily in P3).
+        // Arabic and Devanagari (other scripts load lazily).
         system_fonts: false,
-        ..Default::default()
-    }) else {
-        return std::ptr::null_mut();
-    };
-    view.set_padding(rs_editor_view::Insets {
-        top: 40.0,
-        right: 24.0,
-        bottom: 40.0,
-        left: 24.0,
+        padding: Insets {
+            top: 40.0,
+            right: 24.0,
+            bottom: 40.0,
+            left: 24.0,
+        },
+        profile,
     });
     Box::into_raw(Box::new(App {
-        view,
+        api,
         context,
         surface: None,
         pixels: App::pixels_for(width, height, dpr),
@@ -158,12 +149,23 @@ pub unsafe extern "C" fn rse_init(
     }))
 }
 
+/// Frees the editor; `app` is dead afterwards.
+///
+/// # Safety
+/// `app` must be live and its WebGL context current.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_destroy(app_ptr: *mut App) {
+    if !app_ptr.is_null() {
+        drop(unsafe { Box::from_raw(app_ptr) });
+    }
+}
+
 /// # Safety
 /// `app` must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_resize(app_ptr: *mut App, width: f32, height: f32, dpr: f32) {
     let app = unsafe { app(app_ptr) };
-    app.view.resize(width, height, dpr);
+    app.api.resize(width, height, dpr);
     let pixels = App::pixels_for(width, height, dpr);
     if pixels != app.pixels {
         app.pixels = pixels;
@@ -202,14 +204,15 @@ pub unsafe extern "C" fn rse_frame(app_ptr: *mut App) -> i32 {
     let Some(surface) = app.surface.as_mut() else {
         return -1;
     };
-    app.view.paint(surface.canvas());
+    app.api.view_mut().paint(surface.canvas());
     app.context.flush_and_submit();
-    app.view
-        .next_frame_in()
-        .map_or(-1, |ms| i32::try_from(ms).unwrap_or(i32::MAX))
+    i32::try_from(app.api.next_frame_in()).unwrap_or(i32::MAX)
 }
 
-/// `kind`: 0 down, 1 move, 2 up. Coordinates in CSS pixels.
+// --- pointer, touch and scrolling ---------------------------------------------
+
+/// A mouse event: `kind` 0 down, 1 move, 2 up; `mods` bits 1 shift, 2 ctrl,
+/// 4 alt, 8 meta. Returns 1 when the editor used it.
 ///
 /// # Safety
 /// `app` must be live.
@@ -223,18 +226,18 @@ pub unsafe extern "C" fn rse_pointer(
     mods: u32,
 ) -> u32 {
     let app = unsafe { app(app_ptr) };
-    let event = PointerEvent {
-        x,
-        y,
-        button: PointerButton::Primary,
-        modifiers: modifiers(mods),
-        click_count: clicks.max(1),
-    };
-    u32::from(match kind {
-        0 => app.view.pointer_down(event),
-        1 => app.view.pointer_move(event),
-        _ => app.view.pointer_up(event),
-    })
+    u32::from(app.api.pointer(kind as i32, x, y, clicks, mods))
+}
+
+/// A touch (one finger): `action` 0 down, 1 move, 2 up, 3 cancel. Taps,
+/// long presses, handles, scrolling and flings are recognized in Rust;
+/// results come through [`rse_take_effects`].
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_touch(app_ptr: *mut App, action: u32, x: f32, y: f32) {
+    unsafe { app(app_ptr) }.api.touch(action as i32, x, y);
 }
 
 /// `smooth` animates (mouse wheels); otherwise the offset moves at once
@@ -244,32 +247,64 @@ pub unsafe extern "C" fn rse_pointer(
 /// `app` must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_wheel(app_ptr: *mut App, dy: f32, smooth: u32) {
+    unsafe { app(app_ptr) }.api.wheel(dy, smooth != 0);
+}
+
+/// CSS pixels at the bottom covered by the on-screen keyboard (or the
+/// app's UI over the editor).
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_obscured_bottom(app_ptr: *mut App, height: f32) {
+    unsafe { app(app_ptr) }.api.set_obscured_bottom(height);
+}
+
+/// Effects since the last call, as a JSON array; returns its length.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_take_effects(app_ptr: *mut App) -> usize {
     let app = unsafe { app(app_ptr) };
-    if smooth != 0 {
-        app.view.scroll_smooth_by(dy);
-    } else {
-        app.view.scroll_by(dy);
-    }
+    let effects = app.api.take_effects();
+    app.set_result(&effects)
 }
 
-/// Starts momentum scrolling after a touch drag, in CSS px/s (positive
-/// scrolls toward the end).
+/// A selection menu command (`cut`, `copy`, `paste`, `selectAll`); for
+/// paste, the clipboard's text and HTML (null pointers when missing).
+/// Leaves `{text, html}` JSON to put on the clipboard (or nothing).
+///
+/// # Safety
+/// `app` must be live; the strings must be readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_menu_action(
+    app_ptr: *mut App,
+    item: *const u8,
+    item_len: usize,
+    text: *const u8,
+    text_len: usize,
+    html: *const u8,
+    html_len: usize,
+) -> usize {
+    let app = unsafe { app(app_ptr) };
+    let item = unsafe { read(item, item_len) };
+    let text = unsafe { read_optional(text, text_len) };
+    let html = unsafe { read_optional(html, html_len) };
+    let result = app.api.menu_action(&item, text.as_deref(), html.as_deref());
+    app.set_result(&result)
+}
+
+/// The menu was closed by something else (a tap outside, Escape).
 ///
 /// # Safety
 /// `app` must be live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rse_fling(app_ptr: *mut App, velocity: f32) {
-    unsafe { app(app_ptr) }.view.fling(velocity);
+pub unsafe extern "C" fn rse_menu_dismissed(app_ptr: *mut App) {
+    unsafe { app(app_ptr) }.api.menu_dismissed();
 }
 
-/// Stops scroll animations (a finger touching down).
-///
-/// # Safety
-/// `app` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rse_stop_scrolling(app_ptr: *mut App) {
-    unsafe { app(app_ptr) }.view.stop_scrolling();
-}
+// --- keys and the input method ------------------------------------------------
 
 /// A `keydown`; returns 1 when the editor used it (call `preventDefault`).
 ///
@@ -285,13 +320,9 @@ pub unsafe extern "C" fn rse_key(
     mods: u32,
 ) -> u32 {
     let app = unsafe { app(app_ptr) };
+    let key = unsafe { read(key, key_len) };
     let code = unsafe { read(code, code_len) };
-    let event = KeyEvent {
-        key: unsafe { read(key, key_len) },
-        code: (!code.is_empty()).then_some(code),
-        modifiers: modifiers(mods),
-    };
-    u32::from(app.view.key_down(&event))
+    u32::from(app.api.key_down(&key, &code, mods))
 }
 
 /// Typed text outside a composition.
@@ -301,7 +332,7 @@ pub unsafe extern "C" fn rse_key(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_insert_text(app_ptr: *mut App, text: *const u8, len: usize) -> u32 {
     let app = unsafe { app(app_ptr) };
-    u32::from(app.view.insert_text(&unsafe { read(text, len) }))
+    u32::from(app.api.insert_text(&unsafe { read(text, len) }))
 }
 
 /// Replaces `from..to` (UTF-16, relative to the IME block) with `text`;
@@ -321,8 +352,8 @@ pub unsafe extern "C" fn rse_ime_replace(
     let app = unsafe { app(app_ptr) };
     let text = unsafe { read(text, len) };
     u32::from(
-        app.view
-            .ime_replace(from as usize, to as usize, &text, composing != 0),
+        app.api
+            .replace_text(from as i32, to as i32, &text, composing != 0),
     )
 }
 
@@ -333,7 +364,7 @@ pub unsafe extern "C" fn rse_ime_replace(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_set_composition(app_ptr: *mut App, text: *const u8, len: usize) {
     let app = unsafe { app(app_ptr) };
-    app.view.set_composition(&unsafe { read(text, len) });
+    app.api.set_composing_text(&unsafe { read(text, len) });
 }
 
 /// Commits the composition with `text` (`compositionend`).
@@ -343,7 +374,7 @@ pub unsafe extern "C" fn rse_set_composition(app_ptr: *mut App, text: *const u8,
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_commit_composition(app_ptr: *mut App, text: *const u8, len: usize) {
     let app = unsafe { app(app_ptr) };
-    app.view.commit_composition(&unsafe { read(text, len) });
+    app.api.commit_composition(&unsafe { read(text, len) });
 }
 
 /// Ends the composition keeping its text (EditContext `compositionend`).
@@ -352,120 +383,70 @@ pub unsafe extern "C" fn rse_commit_composition(app_ptr: *mut App, text: *const 
 /// `app` must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_finish_composition(app_ptr: *mut App) {
-    unsafe { app(app_ptr) }.view.ime_finish_composition();
+    unsafe { app(app_ptr) }.api.finish_composing();
 }
 
-/// Sets the selection inside the IME block (EditContext `selectionchange`
-/// is driven by the editor, but IMEs may move it).
+/// Sets the selection inside the IME block (IMEs may move it).
 ///
 /// # Safety
 /// `app` must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_ime_select(app_ptr: *mut App, anchor: u32, head: u32) {
     unsafe { app(app_ptr) }
-        .view
-        .ime_set_selection(anchor as usize, head as usize);
+        .api
+        .set_selection(anchor as i32, head as i32);
 }
 
-/// # Safety
-/// `app` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rse_focus(app_ptr: *mut App, focused: u32) {
-    unsafe { app(app_ptr) }.view.set_focused(focused != 0);
-}
-
-/// # Safety
-/// `app` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rse_set_dark(app_ptr: *mut App, dark: u32) {
-    let app = unsafe { app(app_ptr) };
-    app.view.set_theme(if dark != 0 {
-        Theme::dark()
-    } else {
-        Theme::light()
-    });
-}
-
-/// The IME block as JSON: `{start, text, selection, composition, caret}`
-/// with UTF-16 offsets and the caret rectangle in CSS pixels. Returns the
-/// result length.
+/// The IME block as JSON `{start, text, selection, composition, caret}`
+/// (caret `[x, y, width, height]`); returns its length.
 ///
 /// # Safety
 /// `app` must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_ime_state(app_ptr: *mut App) -> usize {
     let app = unsafe { app(app_ptr) };
-    let caret = app.view.caret_rect().map(|r| [r.x, r.y, r.width, r.height]);
-    let state = match app.view.ime_context() {
-        Some(context) => json!({
-            "start": context.start,
-            "text": context.text,
-            "selection": [context.selection.0, context.selection.1],
-            "composition": context.composition.map(|(a, b)| [a, b]),
-            "caret": caret,
-        }),
-        None => {
-            json!({"start": -1, "text": "", "selection": [0, 0], "composition": null, "caret": caret})
-        }
-    };
-    app.set_result(&state.to_string())
+    let state = app.api.ime_state();
+    app.set_result(&state)
 }
 
-/// Effects since the last call, as a JSON array. Returns the result length.
+/// Caret line and character bounds of `from..to` in the IME block, as JSON
+/// (for EditContext `characterboundsupdate`); returns its length.
 ///
 /// # Safety
 /// `app` must be live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rse_take_effects(app_ptr: *mut App) -> usize {
+pub unsafe extern "C" fn rse_ime_cursor_info(app_ptr: *mut App, from: u32, to: u32) -> usize {
     let app = unsafe { app(app_ptr) };
-    let effects: Vec<Value> = app
-        .view
-        .take_effects()
-        .into_iter()
-        .map(|effect| match effect {
-            Effect::Redraw => json!({"type": "redraw"}),
-            Effect::ImeCursorArea(r) => {
-                json!({"type": "imeArea", "rect": [r.x, r.y, r.width, r.height]})
-            }
-            Effect::OpenUrl(url) => json!({"type": "openUrl", "url": url}),
-            Effect::Cursor(icon) => json!({"type": "cursor", "cursor": match icon {
-                CursorIcon::Text => "text",
-                CursorIcon::Pointer => "pointer",
-                CursorIcon::Default => "default",
-            }}),
-            Effect::Clipboard(content) => {
-                json!({"type": "clipboard", "text": content.text, "html": content.html})
-            }
-            Effect::Haptic(_) => json!({"type": "haptic"}),
-            Effect::SelectionMenu(menu) => json!({"type": "selectionMenu", "menu": menu.map(|m| json!({
-                "rect": [m.rect.x, m.rect.y, m.rect.width, m.rect.height],
-                "items": m.items.iter().map(|i| format!("{i:?}").to_lowercase()).collect::<Vec<_>>(),
-            }))}),
-            Effect::Magnifier(at) => json!({"type": "magnifier", "at": at.map(|(x, y)| [x, y])}),
-            Effect::ShowKeyboard => json!({"type": "showKeyboard"}),
-        })
-        .collect();
-    app.set_result(&Value::Array(effects).to_string())
+    let info = app.api.ime_cursor_info(from as i32, to as i32);
+    app.set_result(&info)
 }
 
-/// Copies (or cuts) the selection. The result is JSON `{text, html}`
-/// (empty strings when nothing is selected); returns its length.
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_focus(app_ptr: *mut App, focused: u32) {
+    unsafe { app(app_ptr) }.api.set_focused(focused != 0);
+}
+
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_dark(app_ptr: *mut App, dark: u32) {
+    unsafe { app(app_ptr) }.api.set_dark(dark != 0);
+}
+
+// --- clipboard ----------------------------------------------------------------
+
+/// Copies (or cuts) the selection; leaves `{text, html}` JSON (empty
+/// strings when nothing is selected) and returns its length.
 ///
 /// # Safety
 /// `app` must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_copy(app_ptr: *mut App, cut: u32) -> usize {
     let app = unsafe { app(app_ptr) };
-    let copied = if cut != 0 {
-        app.view.cut()
-    } else {
-        app.view.copy()
-    };
-    let result = match copied {
-        Some(content) => json!({"text": content.text, "html": content.html}),
-        None => json!({"text": "", "html": ""}),
-    };
-    app.set_result(&result.to_string())
+    let copied = app.api.copy(cut != 0);
+    app.set_result(&copied)
 }
 
 /// Pastes plain text; each line becomes a paragraph.
@@ -475,7 +456,7 @@ pub unsafe extern "C" fn rse_copy(app_ptr: *mut App, cut: u32) -> usize {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_paste(app_ptr: *mut App, text: *const u8, len: usize) -> u32 {
     let app = unsafe { app(app_ptr) };
-    u32::from(app.view.paste_text(&unsafe { read(text, len) }))
+    u32::from(app.api.paste(&unsafe { read(text, len) }))
 }
 
 /// Pastes clipboard HTML (formatting kept; exact for Rs Editor's own copies).
@@ -485,5 +466,136 @@ pub unsafe extern "C" fn rse_paste(app_ptr: *mut App, text: *const u8, len: usiz
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rse_paste_html(app_ptr: *mut App, html: *const u8, len: usize) -> u32 {
     let app = unsafe { app(app_ptr) };
-    u32::from(app.view.paste_html(&unsafe { read(html, len) }))
+    u32::from(app.api.paste_html(&unsafe { read(html, len) }))
+}
+
+// --- content and commands (the Tiptap API) ---------------------------------------
+
+/// `what`: 0 Tiptap JSON, 1 HTML, 2 plain text. Returns the length.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_get_content(app_ptr: *mut App, what: u32) -> usize {
+    let app = unsafe { app(app_ptr) };
+    let content = match what {
+        0 => app.api.get_json(),
+        1 => app.api.get_html(),
+        _ => app.api.get_text(),
+    };
+    app.set_result(&content)
+}
+
+/// Replaces the document with Tiptap JSON (`html` 0) or HTML (`html` 1);
+/// returns 1 when it fit the schema.
+///
+/// # Safety
+/// `app` must be live; the string must be readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_content(
+    app_ptr: *mut App,
+    content: *const u8,
+    len: usize,
+    html: u32,
+) -> u32 {
+    let app = unsafe { app(app_ptr) };
+    let content = unsafe { read(content, len) };
+    u32::from(if html != 0 {
+        app.api.set_html(&content)
+    } else {
+        app.api.set_json(&content)
+    })
+}
+
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_is_empty(app_ptr: *mut App) -> u32 {
+    u32::from(unsafe { app(app_ptr) }.api.is_empty())
+}
+
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_set_editable(app_ptr: *mut App, editable: u32) {
+    unsafe { app(app_ptr) }.api.set_editable(editable != 0);
+}
+
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_is_editable(app_ptr: *mut App) -> u32 {
+    u32::from(unsafe { app(app_ptr) }.api.is_editable())
+}
+
+/// Runs (`dry_run` 0) or checks (`dry_run` 1) a chain of commands given as
+/// `[{"name", "args"}, …]`; returns 1 when every command applies.
+///
+/// # Safety
+/// `app` must be live; the string must be readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_chain(
+    app_ptr: *mut App,
+    steps: *const u8,
+    len: usize,
+    dry_run: u32,
+) -> u32 {
+    let app = unsafe { app(app_ptr) };
+    let steps = unsafe { read(steps, len) };
+    u32::from(if dry_run != 0 {
+        app.api.can_chain(&steps)
+    } else {
+        app.api.run_chain(&steps)
+    })
+}
+
+/// Whether the mark or node `name` with attributes `attrs` (JSON, `{}`
+/// for any) is active at the selection.
+///
+/// # Safety
+/// `app` must be live; the strings must be readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_is_active(
+    app_ptr: *mut App,
+    name: *const u8,
+    name_len: usize,
+    attrs: *const u8,
+    attrs_len: usize,
+) -> u32 {
+    let app = unsafe { app(app_ptr) };
+    let name = unsafe { read(name, name_len) };
+    let attrs = unsafe { read(attrs, attrs_len) };
+    u32::from(app.api.is_active(&name, &attrs))
+}
+
+/// Attributes of the mark or node `name` at the selection, as JSON;
+/// returns the length.
+///
+/// # Safety
+/// `app` must be live; the string must be readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_get_attributes(
+    app_ptr: *mut App,
+    name: *const u8,
+    len: usize,
+) -> usize {
+    let app = unsafe { app(app_ptr) };
+    let attributes = app.api.get_attributes(&unsafe { read(name, len) });
+    app.set_result(&attributes)
+}
+
+/// Revisions (wrapping): `doc` 0 changes with any transaction, 1 only with
+/// document changes.
+///
+/// # Safety
+/// `app` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rse_revision(app_ptr: *mut App, doc: u32) -> u32 {
+    let app = unsafe { app(app_ptr) };
+    let revision = if doc != 0 {
+        app.api.doc_revision()
+    } else {
+        app.api.revision()
+    };
+    revision as u32
 }

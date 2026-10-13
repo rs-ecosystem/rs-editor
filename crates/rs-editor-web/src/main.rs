@@ -1,7 +1,7 @@
 //! The web shell: Rs Editor compiled to WebAssembly with Emscripten,
 //! painting with Skia into a WebGL2 canvas.
 //!
-//! JavaScript (`web/rs-editor.js`) owns the canvas, the input element
+//! JavaScript (`platforms/web`, the `@rs-editor/web` package) owns the canvas, the input element
 //! (EditContext, or a hidden textarea where it is missing) and the event
 //! loop; it calls the `rse_*` functions below. Strings cross the boundary
 //! as UTF-8 bytes in wasm memory: JavaScript writes them into a buffer from

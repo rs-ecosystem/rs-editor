@@ -2266,6 +2266,15 @@ dependencies = [
  "jni 0.21.1",
  "khronos-egl",
  "ndk",
+ "rs-editor-api",
+ "rs-editor-view",
+ "skia-safe",
+]
+
+[[package]]
+name = "rs-editor-api"
+version = "0.1.0"
+dependencies = [
  "rs-editor-commands",
  "rs-editor-extensions",
  "rs-editor-markup",
@@ -2273,7 +2282,6 @@ dependencies = [
  "rs-editor-theme",
  "rs-editor-view",
  "serde_json",
- "skia-safe",
 ]
 
 [[package]]
@@ -2422,11 +2430,9 @@ dependencies = [
 name = "rs-editor-web"
 version = "0.1.0"
 dependencies = [
+ "rs-editor-api",
  "rs-editor-commands",
- "rs-editor-extensions",
- "rs-editor-theme",
  "rs-editor-view",
- "serde_json",
  "skia-safe",
 ]
 

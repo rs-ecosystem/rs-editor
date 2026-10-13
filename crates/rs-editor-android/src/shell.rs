@@ -45,14 +45,14 @@ struct Accessibility(jlong);
 
 impl ActivationHandler for Accessibility {
     fn request_initial_tree(&mut self) -> Option<TreeUpdate> {
-        Some(app(self.0).view.accessibility_tree())
+        Some(app(self.0).api.view_mut().accessibility_tree())
     }
 }
 
 impl ActionHandler for Accessibility {
     fn do_action(&mut self, request: ActionRequest) {
         let app = app(self.0);
-        let handled = app.view.accessibility_action(&request);
+        let handled = app.api.view_mut().accessibility_action(&request);
         if !handled {
             return;
         }
@@ -266,8 +266,7 @@ pub extern "system" fn Java_com_rseditor_android_NativeSurface_resize(
     density: jfloat,
 ) {
     let app = app(handle);
-    app.view
-        .resize(width as f32 / density, height as f32 / density, density);
+    app.api.resize(width as f32, height as f32, density);
     if let Some(gl) = app.shell.gl.as_mut() {
         gl.pixels = (width, height);
         gl.target = None;
@@ -303,10 +302,10 @@ pub extern "system" fn Java_com_rseditor_android_NativeSurface_render(
         .shell
         .gl
         .as_mut()
-        .is_some_and(|gl| gl.frame(&mut app.view));
+        .is_some_and(|gl| gl.frame(app.api.view_mut()));
     // Changes since the last frame, while an accessibility service listens.
     if let Some(adapter) = app.shell.accessibility.as_mut() {
-        let view = &mut app.view;
+        let view = app.api.view_mut();
         adapter.update_if_active(|| {
             view.accessibility_update().unwrap_or(TreeUpdate {
                 nodes: Vec::new(),
@@ -319,7 +318,7 @@ pub extern "system" fn Java_com_rseditor_android_NativeSurface_render(
     if resizing {
         return RESIZING;
     }
-    app.view.next_frame_in().map_or(-1, |ms| ms as jlong)
+    app.api.next_frame_in()
 }
 
 /// Makes the editor visible to TalkBack: AccessKit installs itself as the

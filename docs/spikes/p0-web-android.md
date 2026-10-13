@@ -13,7 +13,7 @@
 
 ## S1 — Web (`crates/rs-editor-web`)
 
-- **Build:** `crates/rs-editor-web/build.sh` (emsdk 6.0.12, Rust 1.98, `wasm32-unknown-emscripten`). Skia memakai binary prebuilt `ganesh-gl-jpegd-jpege-pdf-textlayout`.
+- **Build:** `crates/rs-editor-web/build.sh` (sejak P3 hasilnya masuk ke `platforms/web/dist`) (emsdk 6.0.12, Rust 1.98, `wasm32-unknown-emscripten`). Skia memakai binary prebuilt `ganesh-gl-jpegd-jpege-pdf-textlayout`.
 - **Masalah model exception.** rustc selalu men-link dengan `-fwasm-exceptions`. Sementara itu, pustaka C di dalam Skia prebuilt (libpng, libjpeg, FreeType) memakai setjmp/longjmp gaya JavaScript (`invoke_*`), dan emsdk 6 menolak kombinasi keduanya.
   - **Solusi:** build web memakai `panic = "abort"`, dan `emcc-link.sh` membuang `-fwasm-exceptions`, memakai `-sSUPPORT_LONGJMP=emscripten`, serta mendefinisikan tag `__cpp_exception` yang masih dirujuk std.
   - **Alternatif jangka panjang:** build Skia sendiri dengan wasm SjLj. Ini baru perlu kalau web membutuhkan unwinding.
@@ -24,7 +24,7 @@
 - **Belum:**
   - Emoji dan CJK belum tampil di web karena tidak ada font sistem di wasm. Rencananya font dimuat bertahap di P3.
   - Safari, Firefox, dan Chrome Android belum diuji.
-  - `characterboundsupdate` masih memakai kotak caret untuk semua karakter.
+  - `characterboundsupdate` masih memakai kotak caret untuk semua karakter. Sudah diperbaiki di P3 milestone 1.
 
 ## S2 — Android (`crates/rs-editor-android`, `platforms/android`)
 

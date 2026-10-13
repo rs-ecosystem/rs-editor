@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the web shell into crates/rs-editor-web/web/pkg.
+# Builds the web shell into platforms/web/dist (the @rs-editor/web package).
 #   crates/rs-editor-web/build.sh [--debug]
 # Needs Emscripten (EMSDK, default ~/emsdk) and the wasm32-unknown-emscripten target.
 set -euo pipefail
@@ -20,7 +20,7 @@ export EMCC_CFLAGS="-s ERROR_ON_UNDEFINED_SYMBOLS=0 -s MAX_WEBGL_VERSION=2 -s MI
 export CARGO_PROFILE_RELEASE_PANIC=abort CARGO_PROFILE_DEV_PANIC=abort
 export CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_LINKER="$PWD/crates/rs-editor-web/emcc-link.sh"
 cargo build -p rs-editor-web --target wasm32-unknown-emscripten $flag
-out=crates/rs-editor-web/web/pkg
+out=platforms/web/dist
 mkdir -p "$out"
 cp "target/wasm32-unknown-emscripten/$profile/rs-editor-web.js" "$out/"
 cp "target/wasm32-unknown-emscripten/$profile/rs_editor_web.wasm" "$out/"

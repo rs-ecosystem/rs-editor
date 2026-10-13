@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+  <title>Rs Editor Web</title>
+  <style>
+    :root { --background: #ffffff; --foreground: #0a0a0a; --muted: #737373; --border: #e5e5e5; --accent: #f5f5f5; color-scheme: light; }
+    :root[data-theme="dark"] { --background: #0a0a0a; --foreground: #fafafa; --muted: #a3a3a3; --border: #262626; --accent: #262626; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--background); color: var(--foreground);
+      font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    body { display: flex; flex-direction: column; }
+    header { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+    header h1 { font-size: 15px; font-weight: 600; margin: 0; }
+    #status { color: var(--muted); font-size: 12px; margin-left: auto; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button { font: inherit; color: var(--foreground); background: none; border: 1px solid transparent; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+    header button { border-color: var(--border); }
+    #editor { flex: 1; min-height: 0; }
+    #toolbar { display: flex; gap: 2px; padding: 4px; border-top: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; -webkit-user-select: none; user-select: none; }
+    #toolbar button { min-width: 40px; height: 36px; padding: 0 8px; }
+    #toolbar button[aria-pressed="true"] { background: var(--accent); }
+    #toolbar button:disabled { opacity: 0.35; cursor: default; }
+    #error { color: #dc2626; padding: 16px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Rs Editor</h1>
+    <button id="theme" type="button">Tema gelap</button>
+    <span id="status">memuat…</span>
+  </header>
+  <div id="editor"></div>
+  <div id="toolbar" role="toolbar" aria-label="Format"></div>
+  <script type="module">
+    import { createEditor } from "../src/index.js";
+
+    const t = (text, marks = []) => marks.length
+      ? { type: "text", text, marks: marks.map((type) => ({ type })) }
+      : { type: "text", text };
+    const p = (...content) => ({ type: "paragraph", content });
+    const h = (level, text) => ({ type: "heading", attrs: { level }, content: [t(text)] });
+    const item = (...content) => ({ type: "listItem", content: [p(...content)] });
+    const task = (checked, text) => ({ type: "taskItem", attrs: { checked }, content: [p(t(text))] });
+
+    const content = { type: "doc", content: [
+      h(1, "Rs Editor di web"),
+      p(t("Editor ini digambar oleh "), t("Skia", ["bold"]), t(" di WebGL2 dari WebAssembly — kode yang sama dengan desktop dan Android. Coba "),
+        t("tebal", ["bold"]), t(", "), t("miring", ["italic"]), t(", "), t("kode", ["code"]), t(" dan "), t("sorotan", ["highlight"]), t(".")),
+      h(2, "Coba"),
+      { type: "bulletList", content: [
+        item(t("Ketik "), t("# ", ["code"]), t(", "), t("- ", ["code"]), t(" atau "), t("[ ] ", ["code"]), t(" di awal baris.")),
+        item(t("Klik ganda memilih kata; Cmd/Ctrl-Z untuk undo.")),
+        item(t("Di HP: ketuk, tekan lama, tarik handle, geser untuk scroll.")),
+      ]},
+      { type: "taskList", content: [task(true, "Skia di WebAssembly"), task(false, "EditContext dan fallback textarea")] },
+      { type: "blockquote", content: [p(t("Satu jalur render untuk semua platform."))] },
+      h(3, "Aksara"),
+      p(t("العربية من اليمين إلى اليسار، हिन्दी देवनागरी.")),
+      { type: "codeBlock", content: [t("fn main() {\n    println!(\"halo, web\");\n}")] },
+      ...Array.from({ length: 20 }, (_, i) => p(t(`Paragraf ${i + 1}: teks pengisi untuk mencoba scroll dan fling.`))),
+      { type: "paragraph" },
+    ]};
+
+    // [label, chain method and arguments, active name and attributes, style]
+    const tools = [
+      ["B", ["toggleBold"], ["bold"], "font-weight:700"],
+      ["I", ["toggleItalic"], ["italic"], "font-style:italic"],
+      ["U", ["toggleUnderline"], ["underline"], "text-decoration:underline"],
+      ["S", ["toggleStrike"], ["strike"], "text-decoration:line-through"],
+      ["</>", ["toggleCode"], ["code"]],
+      ["H1", ["toggleHeading", { level: 1 }], ["heading", { level: 1 }]],
+      ["H2", ["toggleHeading", { level: 2 }], ["heading", { level: 2 }]],
+      ["•", ["toggleBulletList"], ["bulletList"]],
+      ["1.", ["toggleOrderedList"], ["orderedList"]],
+      ["☑", ["toggleTaskList"], ["taskList"]],
+      ["❝", ["toggleBlockquote"], ["blockquote"]],
+      ["{ }", ["toggleCodeBlock"], ["codeBlock"]],
+      ["↶", ["undo"]],
+      ["↷", ["redo"]],
+    ];
+
+    const status = document.getElementById("status");
+    const themeButton = document.getElementById("theme");
+    const toolbar = document.getElementById("toolbar");
+    try {
+      const started = performance.now();
+      const input = new URLSearchParams(location.search).get("input") ?? undefined;
+      const editor = await createEditor({ element: document.getElementById("editor"), content, input });
+      const loadMs = Math.round(performance.now() - started);
+
+      const buttons = tools.map(([label, [command, args], active, style]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        if (style) button.style.cssText = style;
+        // Keep the editor focused (and the keyboard up) while formatting.
+        button.addEventListener("pointerdown", (e) => e.preventDefault());
+        button.addEventListener("click", () => editor.chain()[command](args).run());
+        toolbar.append(button);
+        return { button, command, args, active };
+      });
+      const refresh = () => {
+        for (const { button, command, args, active } of buttons) {
+          if (active) button.setAttribute("aria-pressed", String(editor.isActive(...active)));
+          button.disabled = !editor.can()[command](args).run();
+        }
+      };
+      editor.on("transaction", refresh);
+      refresh();
+
+      let dark = matchMedia("(prefers-color-scheme: dark)").matches;
+      const applyTheme = () => {
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        themeButton.textContent = dark ? "Tema terang" : "Tema gelap";
+        editor.setDark(dark);
+      };
+      applyTheme();
+      themeButton.onclick = () => { dark = !dark; applyTheme(); editor.focus(); };
+      setInterval(() => {
+        status.textContent = `${editor.inputMode} · muat ${loadMs} ms · frame ${editor.stats.lastFrameMs.toFixed(1)} ms`;
+      }, 500);
+      window.rsEditor = editor;
+    } catch (error) {
+      status.textContent = "gagal";
+      const box = document.createElement("div");
+      box.id = "error";
+      box.textContent = String(error?.stack ?? error);
+      document.body.append(box);
+    }
+  </script>
+</body>
+</html>

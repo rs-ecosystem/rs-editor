@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use rs_editor_commands::KeyPlatform;
 use rs_editor_extensions::{Editor, EditorOptions, ExtensionError};
-use rs_editor_layout::{DocumentLayout, LayoutEngine, Rect};
+use rs_editor_layout::{DocumentLayout, LayoutEngine};
 use rs_editor_model::Node;
 use rs_editor_state::{Clock, EditorState, SystemClock, TextDirection, Transaction, ViewContext};
 use rs_editor_theme::Theme;
@@ -32,7 +32,7 @@ pub use ime::{ImeCaret, ImeContext};
 pub use input::Granularity;
 pub use pointer::{PointerButton, PointerEvent};
 pub use rs_editor_commands::{KeyEvent, Modifiers};
-pub use rs_editor_layout::Affinity;
+pub use rs_editor_layout::{Affinity, Rect};
 pub use scroll::{FRAME_MS, VelocityTracker};
 pub use touch::{
     Handle, HandleKind, HandleStyle, HapticKind, InteractionProfile, LongPressAction, MenuItem,

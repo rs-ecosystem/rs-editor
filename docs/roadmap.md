@@ -9,7 +9,7 @@
 | P0 | Kerangka workspace, CI, ADR, spike Skia (WASM, Android) | **Selesai.** Lihat [laporan spike](spikes/p0-web-android.md). |
 | P1 | Core headless: model, transform, state, history, command, extension, StarterKit | **Selesai** |
 | P2 | Layout inkremental, render Skia, view, tema shadcn, dev harness desktop | **Selesai** |
-| P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Berikutnya.** Pondasi dari spike |
+| P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Berjalan.** Milestone 1 selesai |
 | P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit, library Kotlin dan Compose | **Selesai.** Navigasi TalkBack dan Samsung Keyboard jadi tugas lanjutan |
 | P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | Belum dimulai |
 | P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | Belum dimulai |
@@ -66,6 +66,47 @@ Catatan yang dibawa ke fase berikutnya:
 - Paragraf RTL (Arab) masih rata kiri. Arah paragraf perlu dideteksi dari teks (atau atribut `dir`) dan dipakai untuk perataan.
 - Pohon aksesibilitas dibangun ulang dalam O(jumlah blok) per update saat teknologi bantu aktif. Ini cukup untuk 10.000 blok, belum untuk 100.000.
 - Mengetik lewat `AXSelectedText` di macOS belum didukung adapter AccessKit. Screen reader tetap bisa membaca, memindahkan seleksi, dan mengetik lewat keyboard biasa.
+
+## P3 — Web · Berjalan
+
+Target: editor di web HP terasa seperti di Android native, dengan API yang sama dengan Tiptap.
+
+### Milestone 1: paket web dan sentuhan · Selesai
+
+- **Crate `rs-editor-api`:** API host yang dipakai bersama semua shell. Isinya konten (JSON, HTML, teks), perintah (`run`, `can`, chain, `isActive`, `getAttributes`, revisi dokumen dan seleksi), sentuhan, mouse, keyboard, protokol IME, dan clipboard. Satuan koordinatnya dipilih per shell: piksel perangkat untuk Android, piksel CSS untuk web. Kelas Kotlin `NativeEditor` sekarang hanya pembungkus tipis, dan ekspor `rse_*` di web memakai API yang sama.
+- **Paket `@rs-editor/web` (`platforms/web`):**
+  - `createEditor` dengan API ala Tiptap:
+    - perintah: `chain().focus()…run()` (nama perintah apa pun lewat Proxy), `can()`, `commands`, `isActive`, `getAttributes`;
+    - konten: `getJSON`/`getHTML`/`getText`, `setContent`;
+    - event: `transaction`, `update`, `selectionUpdate`, `focus`, `blur`.
+  - Tipe tersedia di `index.d.ts`. Tidak ada langkah build JS.
+- **Sentuhan di web HP memakai pengenal gesture Rust yang sama dengan Android:**
+  - menu seleksi DOM bergaya shadcn;
+  - magnifier dari salinan frame canvas;
+  - `navigator.vibrate`;
+  - keyboard muncul saat teks diketuk;
+  - `visualViewport` untuk keyboard yang menutupi halaman.
+- **Batas karakter IME:** `characterboundsupdate` di EditContext sekarang memakai batas tiap karakter yang sebenarnya, bukan kotak caret.
+- **Ditemukan dan diperbaiki saat uji di Chrome Android (Xiaomi, Android 15):**
+  - **Seleksi tertutup blok biru tua.** Blend multiply butuh salinan framebuffer, dan WebGL tidak bisa menyalin framebuffer RGB ke tekstur RGBA. Perbaikannya: canvas WebGL dengan alpha.
+  - **Menu hilang setelah tekan lama.** Gestur tekan lama bawaan Chrome pada elemen yang bisa diedit mengirim `pointercancel`. Perbaikannya: `preventDefault` pada `touchstart`.
+- **Uji di perangkat:**
+  - ketuk ganda dan tekan lama memilih kata, lalu menu muncul;
+  - tarik handle memperluas per kata dan menyusut per karakter, dengan magnifier;
+  - toolbar demo menyala sesuai seleksi;
+  - ketikan Gboard lewat EditContext;
+  - scroll dengan momentum fling.
+
+### Milestone 2: clipboard dan font
+
+- Markdown (pulldown-cmark) untuk impor, ekspor, dan tempel teks yang berisi Markdown.
+- Font emoji dan CJK dimuat bertahap (Noto Color Emoji, Noto Sans CJK), sama seperti di platform lain.
+- Menu seleksi di desktop (klik kanan) memakai sinyal `SelectionMenu`.
+
+### Milestone 3: aksesibilitas dan browser lain
+
+- DOM ARIA offscreen dari pohon aksesibilitas yang sama dengan AccessKit.
+- Uji di Safari (macOS dan iOS) dan Firefox, termasuk fallback textarea.
 
 ## P4 — Android · Selesai
 
@@ -165,7 +206,7 @@ Rencana awal milestone:
 
 ## Berikutnya
 
-1. **P3 (web):** paket `@rs-editor/web`, clipboard HTML/Markdown, DOM ARIA dari pohon aksesibilitas, font emoji/CJK yang dimuat bertahap, uji di Safari, Firefox dan Chrome Android. Seleksi sentuh untuk web di HP memakai inti dari P4.
+1. **P3 (web):** milestone 2 (Markdown, font emoji/CJK) lalu milestone 3 (ARIA, Safari, Firefox).
 2. **Tugas lanjutan Android:** navigasi TalkBack (lihat milestone 2), Samsung Keyboard, `addVisibleLineBounds`, paket AAR/Maven.
 3. **Desktop (P7):** menu klik kanan Potong/Salin/Tempel memakai sinyal `SelectionMenu` yang sama.
 

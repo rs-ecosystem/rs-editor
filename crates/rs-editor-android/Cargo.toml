@@ -13,13 +13,8 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 # Must match the installed boltffi_cli exactly (same as rs-organizer).
 boltffi = "=0.29.3"
-rs-editor-commands.workspace = true
-rs-editor-extensions.workspace = true
-rs-editor-markup.workspace = true
-rs-editor-model.workspace = true
-rs-editor-theme.workspace = true
+rs-editor-api.workspace = true
 rs-editor-view.workspace = true
-serde_json.workspace = true
 
 # The surface and accessibility halves only exist on Android; the API
 # builds everywhere, so bindings are generated and tested on the host.
