@@ -89,13 +89,15 @@
       const started = performance.now();
       const params = new URLSearchParams(location.search);
       const input = params.get("input") ?? undefined;
-      // ?fonts=cdn loads Noto emoji/CJK from public CDNs; ?fonts=local uses a
-      // font copied into demo/local-fonts for offline testing.
-      const fonts = params.get("fonts") === "cdn"
-        ? [notoFonts.emoji, notoFonts.japanese, notoFonts.korean]
-        : params.get("fonts") === "local"
-          ? [{ family: "Arial Unicode MS", url: "local-fonts/ArialUnicode.ttf", ranges: [[0x1100, 0x11ff], [0x3000, 0x9fff], [0xac00, 0xd7af], [0xff00, 0xffef]] }]
-          : [];
+      // CJK loads by default in subsets from a public CDN (only those the
+      // text needs); ?fonts=cdn also loads a Noto emoji font, ?fonts=local
+      // uses a font copied into demo/local-fonts, ?fonts=none loads none.
+      const choice = params.get("fonts") ?? "cjk";
+      const fonts = {
+        cjk: [notoFonts.japanese, notoFonts.korean],
+        cdn: [notoFonts.emoji, notoFonts.japanese, notoFonts.korean],
+        local: [{ family: "Arial Unicode MS", url: "local-fonts/ArialUnicode.ttf", ranges: [[0x1100, 0x11ff], [0x3000, 0x9fff], [0xac00, 0xd7af], [0xff00, 0xffef]] }],
+      }[choice] ?? [];
       const editor = await createEditor({ element: document.getElementById("editor"), content, input, fonts, pasteMarkdown: true });
       const loadMs = Math.round(performance.now() - started);
 

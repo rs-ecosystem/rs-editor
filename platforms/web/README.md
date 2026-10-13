@@ -10,7 +10,7 @@ Prasyarat: emsdk 6 (`~/emsdk`) dan target Rust `wasm32-unknown-emscripten`.
 crates/rs-editor-web/build.sh
 ```
 
-Hasilnya `dist/rs-editor-web.js` dan `dist/rs_editor_web.wasm`, yang di-ignore oleh git. Demo ada di `demo/index.html`. Sajikan folder ini lewat HTTP, misalnya dengan `python3 -m http.server 4174 --directory platforms/web`, lalu buka `/demo/`.
+Hasilnya `dist/rs-editor-web.js` dan `dist/rs_editor_web.wasm`, yang di-ignore oleh git. Demo ada di `demo/index.html`. Demo ini memuat subset CJK dari CDN secara default; gunakan `?fonts=none` untuk tanpa font tambahan, atau `?fonts=cdn` untuk ikut memuat font emoji. Sajikan folder ini lewat HTTP, misalnya dengan `python3 -m http.server 4174 --directory platforms/web`, lalu buka `/demo/`.
 
 ## API
 
@@ -40,17 +40,17 @@ Semua perintah dari extension Rust bisa dipakai sebagai metode chain, dengan arg
 
 Emoji tampil tanpa mengunduh apa pun. Browser menggambar setiap emoji dengan font emoji sistem (Apple di Safari, Segoe di Windows, Noto di Android) ke canvas 2D, lalu editor menempelkannya sebagai gambar di tempat emoji itu, dengan ukuran sekitar 1,2 em. Tampilannya sama dengan emoji di aplikasi lain pada perangkat yang sama, sehingga bisa berbeda antar platform. Caret, seleksi, dan hapus tetap memperlakukan satu emoji (termasuk ZWJ, bendera, dan warna kulit) sebagai satu karakter.
 
-Font bawaan mencakup aksara Latin, Arab, dan Devanagari. Untuk CJK, dan untuk emoji yang identik di semua platform, aplikasi bisa memberi daftar `fonts`. Sebuah font hanya dimuat ketika teks berisi karakter dalam rentang Unicode-nya. Kalau daftar ini memuat font emoji, emoji digambar dengan font itu:
+Font bawaan mencakup aksara Latin, Arab, dan Devanagari. Untuk CJK, aplikasi memberi daftar `fonts`. Sebuah font hanya dimuat ketika teks berisi karakter dalam rentang Unicode-nya. Preset `notoFonts.japanese`, `korean`, dan `simplifiedChinese` mengambil Noto dari paket fontsource di jsDelivr dalam **subset per rentang Unicode** (8–60 KB per file). Hanya subset yang memuat karakter di dokumen yang diunduh, dan biasanya totalnya ratusan KB, bukan 5–8 MB untuk font utuh. Ini cara yang sama dengan Flutter Web, yang juga merender teks dengan Skia di wasm. Untuk Han, pilih salah satu font Jepang atau Cina saja, karena keduanya menggambar Han dengan gaya bahasanya masing-masing.
 
 ```js
 import { createEditor, notoFonts } from "@rs-editor/web";
 
 await createEditor({ element, fonts: [notoFonts.japanese, notoFonts.korean] });
 // atau muat sendiri:
-editor.addFont(await (await fetch("/fonts/MyFont.ttf")).arrayBuffer(), "My Font");
+editor.addFont(await (await fetch("/fonts/MyFont.woff")).arrayBuffer(), "My Font");
 ```
 
-Format yang didukung adalah TTF dan OTF (bukan WOFF/WOFF2). Preset `notoFonts` mengambil font dari CDN publik dan ukurannya besar (emoji 7 MB, JP/KR 5–6 MB), jadi untuk produksi sebaiknya di-host sendiri.
+Format yang didukung adalah TTF, OTF, dan WOFF (bukan WOFF2). Kalau daftar `fonts` memuat font emoji (misalnya `notoFonts.emoji`, 7 MB), emoji digambar dengan font itu, bukan oleh browser. Untuk produksi, font sebaiknya di-host sendiri.
 
 ## Markdown
 

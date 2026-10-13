@@ -1,14 +1,25 @@
 /** A font file to load when the text needs one of its characters. */
 export interface FontSource {
   family: string;
-  /** A TTF or OTF file (not WOFF/WOFF2). */
-  url: string;
+  /** A TTF, OTF or WOFF file (not WOFF2). */
+  url?: string;
+  /**
+   * A font split by Unicode range as fontsource packages are
+   * (`<base>unicode.json`, `<base>files/<id>-<subset>-<weight>-normal.woff`):
+   * only the subsets with characters the text uses are loaded.
+   */
+  subsets?: { base: string; id: string; weight?: number };
   /** Code point ranges `[first, last]` the font covers; any character when omitted. */
   ranges?: [number, number][];
 }
 
 /** Noto emoji and CJK fonts on public CDNs (large; self-host for production). */
-export const notoFonts: { emoji: FontSource; japanese: FontSource; korean: FontSource };
+export const notoFonts: {
+  emoji: FontSource;
+  japanese: FontSource;
+  korean: FontSource;
+  simplifiedChinese: FontSource;
+};
 
 /** Tiptap JSON: a document node such as `{ type: "doc", content: [...] }`. */
 export type JSONContent = {
@@ -133,7 +144,7 @@ export interface Editor {
    */
   setContent(content: JSONContent | string, options?: { contentType?: "html" | "markdown" }): boolean;
   setPasteMarkdown(markdown: boolean): void;
-  /** Adds a font (TTF/OTF bytes); returns its family, or "" when the bytes are not a font. */
+  /** Adds a font (TTF/OTF/WOFF bytes); returns its family, or "" when the bytes are not a font. */
   addFont(bytes: ArrayBuffer | Uint8Array, family?: string): string;
 
   readonly isEditable: boolean;

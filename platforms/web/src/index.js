@@ -463,26 +463,57 @@ class Editor {
     this._requestFrame();
   }
 
-  /** Loads the configured fonts that cover `characters` (code points). */
+  /** Loads the configured fonts (or font subsets) that cover `characters`. */
   _loadFontsFor(characters) {
+    const inRanges = (ranges, c) => !ranges || ranges.some(([a, b]) => c >= a && c <= b);
     for (const font of this._fonts) {
-      if (font.state !== "idle") continue;
-      const covers = !font.ranges || characters.some((c) =>
-        font.ranges.some((range) => Array.isArray(range) ? c >= range[0] && c <= range[1] : c === range));
-      if (!covers) continue;
-      font.state = "loading";
-      fetch(font.url)
-        .then((response) => {
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response.arrayBuffer();
-        })
-        .then((bytes) => {
-          font.state = this.addFont(bytes, font.family) ? "loaded" : "failed";
-        })
-        .catch((error) => {
-          font.state = "failed";
-          console.warn(`Rs Editor: font ${font.url} could not be loaded`, error);
-        });
+      if (font.state === "failed") continue;
+      const wanted = characters.filter((c) => inRanges(font.ranges, c));
+      if (!wanted.length) continue;
+      if (font.subsets) {
+        this._loadSubsets(font, wanted);
+      } else if (font.state === "idle") {
+        font.state = "loading";
+        this._fetchFont(font.url, font.family).then((ok) => { font.state = ok ? "loaded" : "failed"; });
+      }
+    }
+  }
+
+  /**
+   * Fonts split by Unicode range (fontsource packages): reads the package's
+   * `unicode.json` once, then loads only the subsets with `characters`.
+   */
+  async _loadSubsets(font, characters) {
+    font.loaded ??= new Set();
+    try {
+      font.map ??= fetch(`${font.subsets.base}unicode.json`)
+        .then((response) => response.json())
+        .then((json) => Object.entries(json).map(([key, value]) => [key, parseUnicodeRange(value)]));
+      const map = await font.map;
+      const weight = font.subsets.weight ?? 400;
+      for (const [key, ranges] of map) {
+        if (font.loaded.has(key) || !characters.some((c) => ranges.some(([a, b]) => c >= a && c <= b))) continue;
+        font.loaded.add(key);
+        const name = /^\[(\d+)\]$/.exec(key)?.[1] ?? key;
+        const url = `${font.subsets.base}files/${font.subsets.id}-${name}-${weight}-normal.woff`;
+        // Skia picks one face per family and style, so each subset is a
+        // family of its own.
+        this._fetchFont(url, `${font.family} ${name}`);
+      }
+    } catch (error) {
+      font.state = "failed";
+      console.warn(`Rs Editor: font subsets of ${font.family} could not be loaded`, error);
+    }
+  }
+
+  async _fetchFont(url, family) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return this.addFont(await response.arrayBuffer(), family) !== "";
+    } catch (error) {
+      console.warn(`Rs Editor: font ${url} could not be loaded`, error);
+      return false;
     }
   }
 
@@ -722,6 +753,9 @@ class Editor {
   }
 }
 
+/** Han, kana and CJK punctuation. */
+const CJK_RANGES = [[0x3000, 0x30ff], [0x31f0, 0x31ff], [0x3400, 0x4dbf], [0x4e00, 0x9fff], [0xf900, 0xfaff], [0xff00, 0xffef]];
+
 /**
  * Noto fonts for emoji and CJK on public CDNs, to pass as `fonts` when the
  * page may fetch them from there (they are large: self-host them for
@@ -735,17 +769,36 @@ export const notoFonts = {
       [0x231a, 0x23ff], [0x24c2, 0x24c2], [0x25aa, 0x27bf], [0x2934, 0x2935], [0x2b05, 0x2b55],
       [0x3030, 0x303d], [0x3297, 0x3299], [0x1f000, 0x1faff]],
   },
+  // CJK in Unicode-range subsets of 20–60 KB (fontsource): only the
+  // subsets with characters the document uses are downloaded.
   japanese: {
     family: "Noto Sans JP",
-    url: "https://fonts.gstatic.com/s/notosansjp/v57/-F6jfjtqLzI2JPCgQBnw7HFyzSD-AsregP8VFBEj75vY0rw_mMI.ttf",
-    ranges: [[0x3000, 0x30ff], [0x31f0, 0x31ff], [0x3400, 0x4dbf], [0x4e00, 0x9fff], [0xf900, 0xfaff], [0xff00, 0xffef]],
+    ranges: CJK_RANGES,
+    subsets: { base: "https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-jp@5.3.1/", id: "noto-sans-jp" },
   },
   korean: {
     family: "Noto Sans KR",
-    url: "https://fonts.gstatic.com/s/notosanskr/v40/PbyxFmXiEBPT4ITbgNA5Cgms3VYcOA-vvnIzzuoyeLTq8H4gReI.ttf",
-    ranges: [[0x1100, 0x11ff], [0x3130, 0x318f], [0xac00, 0xd7af]],
+    // Hangul only: Han and kana come from the Japanese or Chinese font
+    // (pick one of those; they draw Han the way their language does).
+    ranges: [[0x1100, 0x11ff], [0x3130, 0x318f], [0xa960, 0xa97f], [0xac00, 0xd7ff]],
+    subsets: { base: "https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-kr@5.3.1/", id: "noto-sans-kr" },
+  },
+  simplifiedChinese: {
+    family: "Noto Sans SC",
+    ranges: CJK_RANGES,
+    subsets: { base: "https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/", id: "noto-sans-sc" },
   },
 };
+
+/** "U+0041-005A, U+00E9" as [first, last] pairs. */
+function parseUnicodeRange(text) {
+  return text.split(",").map((part) => {
+    const [a, b] = part.trim().replace(/^U\+/i, "").split("-");
+    const first = parseInt(a.replace(/\?/g, "0"), 16);
+    const last = b ? parseInt(b, 16) : parseInt(a.replace(/\?/g, "f"), 16);
+    return [first, last];
+  });
+}
 
 /**
  * A chain of commands. Any command name works as a method
