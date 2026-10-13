@@ -113,16 +113,16 @@ Adapter Android:
 
 Tes: skenario gesture headless (posisi, granularitas, auto-scroll, urutan sinyal haptik dan menu) dan uji manual di perangkat.
 
-### Milestone 2: input dan platform · Berjalan
+### Milestone 2: input dan platform · Selesai, tinggal uji TalkBack oleh pengguna
 
 Sudah:
 
-- `CursorAnchorInfo` (posisi caret dengan baseline, batas tiap karakter komposisi, batas editor untuk tulisan tangan) dikirim saat IME memintanya lewat `requestCursorUpdates`. Keyboard Xiaomi tidak memintanya; belum diuji dengan keyboard yang memakainya.
+- `CursorAnchorInfo` (posisi caret dengan baseline, batas tiap karakter komposisi, batas editor untuk tulisan tangan) dikirim saat IME memintanya lewat `requestCursorUpdates`. Gboard memintanya dalam mode MONITOR, dan `dumpsys input_method` di perangkat menunjukkan posisi caret, baseline, batas editor dan matriks layar yang benar. Keyboard Xiaomi tidak memintanya.
 - Crate `openrich-markup`: HTML ↔ dokumen. Parser bergaya ProseMirror (selalu menghasilkan dokumen valid; Google Docs, Word, GitHub, tag soup), serializer bergaya Tiptap dengan JSON slice tersemat sehingga salin-tempel di OpenRich sendiri persis. 11 tes termasuk property test tag soup.
 - Salin menghasilkan teks + HTML dan tempel memakai HTML lebih dulu, di desktop (arboard), web (`text/html`) dan Android (`ClipData.newHtmlText`). Di perangkat: kata tebal yang disalin lalu ditempel tetap tebal.
 - TalkBack lewat AccessKit (`accesskit_android`, delegate tertanam sebagai dex). `uiautomator dump` di perangkat menunjukkan editor sebagai `EditText` berisi seluruh teks dokumen, blok sebagai `View`, list sebagai `ListView`, task sebagai `CheckBox` dengan status yang benar, semuanya dengan posisi di layar.
 
-Belum: uji TalkBack langsung (oleh pengguna), `CursorAnchorInfo` dengan keyboard yang memintanya, Samsung Keyboard.
+Belum: uji TalkBack langsung (oleh pengguna), Samsung Keyboard (tidak ada di perangkat uji), `addVisibleLineBounds` (API 34) untuk tulisan tangan stylus.
 
 Rencana awal milestone:
 
