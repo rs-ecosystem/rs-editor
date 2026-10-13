@@ -128,6 +128,12 @@ impl EditorView {
         self.blocks.drag.is_some_and(|d| d.moved)
     }
 
+    /// No mouse is over the view (a finger is in use).
+    pub(crate) fn forget_pointer(&mut self) {
+        self.blocks.pointer = None;
+        self.blocks.hovered = false;
+    }
+
     /// The mouse left the view.
     pub fn pointer_leave(&mut self) {
         if self.blocks.pointer.take().is_some() {

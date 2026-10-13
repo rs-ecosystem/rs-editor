@@ -1858,6 +1858,54 @@ mod slash {
         assert_eq!(view.editor().get_text("\n"), "/h ");
     }
 
+    /// A finger scrolls the rows, and the rows stay where it left them;
+    /// holding a row keeps it chosen (frames once scrolled back to it).
+    #[test]
+    fn a_finger_scrolls_the_rows_and_holds_a_row() {
+        let (mut view, clock) = setup(vec![p("")]);
+        type_text(&mut view, "/");
+        clock.advance(200);
+        paint(&mut view);
+        let (x, y) = view.slash.row_center(5);
+        view.touch(TouchPhase::Down, x, y);
+        paint(&mut view);
+        for step in 1..=10 {
+            view.touch(TouchPhase::Move, x, y - step as f32 * 6.0);
+            clock.advance(16);
+            paint(&mut view);
+        }
+        assert_eq!(view.slash.selected(), None, "a scroll highlights no row");
+        view.touch(TouchPhase::Up, x, y - 60.0);
+        paint(&mut view);
+        assert_eq!(
+            view.slash.selected(),
+            None,
+            "nor does it bring back an earlier one"
+        );
+        let scrolled = view.slash.scroll();
+        assert!(scrolled > 0.0, "the rows scrolled");
+        clock.advance(500);
+        paint(&mut view);
+        assert_eq!(view.slash.scroll(), scrolled, "and stay scrolled");
+
+        // Holding the last row keeps it chosen over many frames.
+        let (x, y) = view.slash.row_center(10);
+        view.touch(TouchPhase::Down, x, y);
+        for _ in 0..30 {
+            view.touch(TouchPhase::Move, x + 1.0, y + 1.0);
+            clock.advance(16);
+            paint(&mut view);
+        }
+        assert_eq!(view.slash.selected(), Some(10));
+        assert_eq!(view.slash.scroll(), scrolled);
+        view.touch(TouchPhase::Up, x + 1.0, y + 1.0);
+        assert_eq!(view.editor().get_json()["content"][0]["type"], "paragraph");
+        assert!(
+            view.link_editing(),
+            "the last row, Image, asks for an address"
+        );
+    }
+
     #[test]
     fn clicks_and_taps_pick_rows() {
         let (mut view, clock) = setup(vec![p(""), p("dua")]);
@@ -2635,5 +2683,52 @@ mod list_drag {
             "[sendiri,]|awal|",
             "no empty list is left behind"
         );
+    }
+}
+
+mod grip_after_slash {
+    use super::*;
+
+    #[test]
+    fn the_grip_follows_the_caret_into_a_block_made_by_the_slash_menu() {
+        let content = doc(vec![
+            json!({"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": "Coba"}]}),
+            p(""),
+            p("akhir"),
+        ]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        let paint = |view: &mut EditorView| {
+            let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+            view.paint(surface.canvas());
+        };
+        // As on the phone: a tap in the heading, then End and Enter.
+        let y = view_y_of(&mut view, 1) + 10.0;
+        view.touch(TouchPhase::Down, 100.0, y);
+        view.touch(TouchPhase::Up, 100.0, y);
+        clock.advance(400);
+        paint(&mut view);
+        key(&mut view, "End", plain());
+        key(&mut view, "Enter", plain());
+        paint(&mut view);
+        view.insert_text("/");
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let (x, y) = view.slash.row_center(7);
+        view.touch(TouchPhase::Down, x, y);
+        view.touch(TouchPhase::Up, x, y);
+        clock.advance(400);
+        paint(&mut view);
+        assert_eq!(view.editor().get_json()["content"][1]["type"], "blockquote");
+        // Keys ended touch mode: no grip follows a stale tap, and the next
+        // tap shows the quote's.
+        assert_ne!(view.blocks.block(), Some(0), "not the heading's grip");
+        let y = view_y_of(&mut view, 8) + 10.0;
+        view.touch(TouchPhase::Down, 100.0, y);
+        view.touch(TouchPhase::Up, 100.0, y);
+        clock.advance(400);
+        paint(&mut view);
+        assert_eq!(view.blocks.block(), Some(6), "the quote's grip");
     }
 }

@@ -225,6 +225,10 @@ impl EditorView {
                 self.set_magnifier(None);
             }
         }
+        // A tap places the caret through `pointer_down`, which notes where
+        // a mouse would be; with a finger the drag handle follows the caret
+        // instead, also once keys end touch mode.
+        self.forget_pointer();
         self.request_redraw();
     }
 

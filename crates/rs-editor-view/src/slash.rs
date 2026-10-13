@@ -190,8 +190,6 @@ struct MenuTouch {
     start: (f32, f32),
     last_y: f32,
     moved: bool,
-    /// The row selected before the finger came down, restored by a scroll.
-    selected: Option<usize>,
 }
 
 #[derive(Debug, Default)]
@@ -437,9 +435,9 @@ impl EditorView {
         };
         let moved = menu.origin != (x, y);
         menu.origin = (x, y);
-        if let Some(selected) = menu.selected {
-            menu.reveal(selected);
-        }
+        // Placing never scrolls to the chosen row: the rows a finger or a
+        // wheel scrolled to stay (arrow keys reveal what they choose).
+        menu.scroll = menu.scroll.clamp(0.0, menu.max_scroll());
         if moved {
             self.request_redraw();
         }
@@ -630,7 +628,6 @@ impl EditorView {
                     start: (x, y),
                     last_y: y,
                     moved: false,
-                    selected: self.slash.menu.selected,
                 });
                 if let Some(row) = self.slash.menu.item_at(x, y) {
                     self.slash.menu.selected = Some(row);
@@ -645,11 +642,13 @@ impl EditorView {
                 touch.moved |= started;
                 let dy = touch.last_y - y;
                 touch.last_y = y;
-                let (moved, selected) = (touch.moved, touch.selected);
+                let moved = touch.moved;
                 if started {
-                    // A scroll, not a choice: the row under the finger
-                    // was only highlighted while it might have been a tap.
-                    self.slash.menu.selected = selected;
+                    // A scroll, not a choice: the row under the finger was
+                    // only highlighted while it might have been a tap. No
+                    // row stays highlighted, as in platform lists (Enter
+                    // still takes the first).
+                    self.slash.menu.selected = None;
                 }
                 if moved {
                     self.slash.menu.scroll_by(dy);
@@ -691,5 +690,9 @@ impl Slash {
 
     pub(crate) fn selected(&self) -> Option<usize> {
         self.menu.selected
+    }
+
+    pub(crate) fn scroll(&self) -> f32 {
+        self.menu.scroll
     }
 }
