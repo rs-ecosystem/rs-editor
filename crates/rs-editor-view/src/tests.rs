@@ -2733,3 +2733,67 @@ mod grip_after_slash {
         assert_eq!(view.blocks.block(), Some(6), "the quote's grip");
     }
 }
+
+mod drag_feedback {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    #[test]
+    fn the_drop_line_slides_and_holds_near_a_boundary() {
+        let content = doc(vec![p("satu"), p("dua"), p("tiga"), p("empat")]);
+        let (mut view, clock) = view_with(content, KeyPlatform::Other);
+        view.set_focused(true);
+        paint(&mut view);
+        let y = view_y_of(&mut view, 1) + 10.0;
+        view.pointer_move(PointerEvent::at(300.0, y));
+        paint(&mut view);
+        clock.advance(200);
+        paint(&mut view);
+        let (gx, gy) = view.blocks.grip_center();
+        view.pointer_down(PointerEvent::at(gx, gy));
+
+        // Below "dua": the line appears there, the ghost is painted.
+        let below_dua = view_y_of(&mut view, 13) - 4.0;
+        view.pointer_move(PointerEvent::at(gx, below_dua));
+        paint(&mut view);
+        let (shown, target) = view.drop_line().unwrap();
+        assert_eq!(shown, target, "a first place shows at once");
+
+        // On to below "tiga": the line slides there over a few frames.
+        let below_tiga = view_y_of(&mut view, 18) - 4.0;
+        view.pointer_move(PointerEvent::at(gx, below_tiga));
+        clock.advance(16);
+        paint(&mut view);
+        let (shown, target) = view.drop_line().unwrap();
+        assert!(shown < target, "sliding: {shown} toward {target}");
+        assert!(view.next_frame_in().is_some_and(|ms| ms <= FRAME_MS));
+        clock.advance(400);
+        paint(&mut view);
+        let (shown, target) = view.drop_line().unwrap();
+        assert_eq!(shown, target);
+
+        // Back below "dua", then barely past the midpoint toward "tiga":
+        // the place holds.
+        let (_, previous) = {
+            view.pointer_move(PointerEvent::at(gx, below_dua));
+            paint(&mut view);
+            view.drop_line().unwrap()
+        };
+        let midway = (below_dua + below_tiga) / 2.0;
+        // Half the hysteresis past the midpoint between the two places.
+        view.pointer_move(PointerEvent::at(gx, midway + 1.0));
+        paint(&mut view);
+        assert_eq!(
+            view.drop_line().unwrap().1,
+            previous,
+            "no flicker at the midpoint"
+        );
+
+        view.pointer_up(PointerEvent::at(gx, below_dua));
+        assert_eq!(view.editor().get_text("|"), "dua|satu|tiga|empat");
+    }
+}

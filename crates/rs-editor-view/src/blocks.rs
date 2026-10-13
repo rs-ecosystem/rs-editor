@@ -64,10 +64,27 @@ struct Drop {
 struct BlockDrag {
     unit: Unit,
     start: (f32, f32),
+    /// The scroll offset when the drag started (the ghost follows the
+    /// pointer across scrolling).
+    start_scroll: f32,
     pointer: (f32, f32),
     moved: bool,
     drop: Option<Drop>,
 }
+
+/// The drop line as shown: it slides to each new place.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Line {
+    y: f32,
+    left: f32,
+    at_ms: u64,
+}
+
+/// How quickly the drop line catches up (milliseconds to cover ~63%).
+const LINE_EASE_MS: f32 = 60.0;
+/// A new drop place must be this much nearer than the current one to
+/// take over, so the line does not flicker between two near places.
+const HYSTERESIS: f32 = 6.0;
 
 #[derive(Debug, Default)]
 pub(crate) struct BlockHandle {
@@ -82,6 +99,7 @@ pub(crate) struct BlockHandle {
     /// The mouse is over the grip.
     hovered: bool,
     drag: Option<BlockDrag>,
+    line: Option<Line>,
 }
 
 impl BlockHandle {
@@ -224,6 +242,7 @@ impl EditorView {
                 .blocks
                 .drag
                 .is_some_and(|d| d.moved && self.edge_speed(d.pointer.1) != 0.0)
+            || self.drop_line_moving()
     }
 
     /// Whether `(x, y)` is on the grip, reaching `slack` further up, down
@@ -257,6 +276,7 @@ impl EditorView {
         self.blocks.drag = Some(BlockDrag {
             unit,
             start: (x, y),
+            start_scroll: self.scroll_y,
             pointer: (x, y),
             moved: false,
             drop: None,
@@ -273,7 +293,7 @@ impl EditorView {
         drag.pointer = (x, y);
         drag.moved |= (x - drag.start.0).hypot(y - drag.start.1) > DRAG_SLOP;
         if drag.moved {
-            drag.drop = self.drop_target(&drag.unit, x, y);
+            drag.drop = self.drop_target(&drag.unit, x, y, drag.drop);
         }
         self.blocks.drag = Some(drag);
         self.request_redraw();
@@ -281,7 +301,7 @@ impl EditorView {
 
     /// The place nearest to the pointer at view `(x, y)` where `unit` can
     /// land, unless that would leave it where it is.
-    fn drop_target(&mut self, unit: &Unit, x: f32, y: f32) -> Option<Drop> {
+    fn drop_target(&mut self, unit: &Unit, x: f32, y: f32, current: Option<Drop>) -> Option<Drop> {
         let (doc_x, doc_y) = self.to_document(x, y);
         let layout = self.layout();
         let doc = self.editor.doc().clone();
@@ -290,14 +310,14 @@ impl EditorView {
         // Between top-level blocks.
         let tops: Vec<_> = layout.tops.iter().collect();
         for (index, block) in tops.iter().enumerate() {
-            let gap = if index == 0 {
-                0.0
-            } else {
-                spacing.block_gap / 2.0
+            // Midway between the blocks (headings keep more space).
+            let y = match index.checked_sub(1).and_then(|i| tops.get(i)) {
+                Some(previous) => (previous.bottom() + block.y) / 2.0,
+                None => block.y,
             };
             candidates.push(Drop {
                 pos: block.pos,
-                y: block.y - gap,
+                y,
                 left: 0.0,
                 top_level: true,
             });
@@ -356,7 +376,7 @@ impl EditorView {
                     .total_cmp(&b.left)
                     .then(b.top_level.cmp(&a.top_level))
             });
-        reached
+        let best = reached
             .or_else(|| {
                 close.min_by(|a, b| {
                     a.left
@@ -364,7 +384,20 @@ impl EditorView {
                         .then(a.top_level.cmp(&b.top_level))
                 })
             })
-            .copied()
+            .copied()?;
+        // The place shown stays until another is clearly nearer (a place
+        // at the same height, a different depth, takes over at once).
+        let kept = current.and_then(|current| {
+            candidates
+                .iter()
+                .find(|c| c.pos == current.pos && c.top_level == current.top_level)
+                .filter(|c| {
+                    (c.y - best.y).abs() > 1.0
+                        && (c.y - doc_y).abs() <= (best.y - doc_y).abs() + HYSTERESIS
+                })
+                .copied()
+        });
+        Some(kept.unwrap_or(best))
     }
 
     /// Scroll speed (pixels per frame) for a pointer at view `y` during a
@@ -570,12 +603,74 @@ impl EditorView {
         }
     }
 
+    /// Moves the drop line shown toward `target` (it slides rather than
+    /// jumps between places).
+    fn ease_drop_line(&mut self, target: Option<Drop>) {
+        let now = self.clock.now_ms();
+        self.blocks.line = target.map(|target| match self.blocks.line {
+            Some(line) => {
+                let elapsed = now.saturating_sub(line.at_ms) as f32;
+                let step = 1.0 - (-elapsed / LINE_EASE_MS).exp();
+                let ease = |from: f32, to: f32| {
+                    let next = from + (to - from) * step;
+                    if (to - next).abs() < 0.5 { to } else { next }
+                };
+                Line {
+                    y: ease(line.y, target.y),
+                    left: ease(line.left, target.left),
+                    at_ms: now,
+                }
+            }
+            None => Line {
+                y: target.y,
+                left: target.left,
+                at_ms: now,
+            },
+        });
+    }
+
+    /// The drop line is still sliding to its place.
+    fn drop_line_moving(&self) -> bool {
+        match (self.blocks.line, self.blocks.drag.and_then(|d| d.drop)) {
+            (Some(line), Some(drop)) => line.y != drop.y || line.left != drop.left,
+            _ => false,
+        }
+    }
+
+    /// A lifted copy of the dragged block under the pointer, on a card
+    /// with a shadow: what moves.
+    fn paint_block_ghost(
+        &mut self,
+        canvas: &Canvas,
+        drag: &BlockDrag,
+        theme: &rs_editor_theme::Theme,
+    ) {
+        let layout = self.layout();
+        let source = drag.unit.rect;
+        let dy = (drag.pointer.1 - drag.start.1) + (self.scroll_y - drag.start_scroll);
+        let right = self.content_width();
+        let area = skia_safe::Rect::from_ltrb(
+            source.x - 6.0,
+            source.y - 4.0,
+            right + 6.0,
+            source.bottom() + 4.0,
+        );
+        canvas.save();
+        canvas.translate((self.padding.left, self.padding.top - self.scroll_y + dy));
+        rs_editor_ui::paint_panel(canvas, area, theme, 1.0);
+        canvas.clip_rect(area.with_inset((1.0, 1.0)), None, true);
+        rs_editor_layout::render::paint_document(canvas, &layout, theme, source);
+        canvas.restore();
+    }
+
     /// Paints the grip and, during a drag, the dimmed block and the line
     /// where it will land (view coordinates).
     pub(crate) fn paint_block_handle(&mut self, canvas: &Canvas) {
         let theme = self.theme().clone();
         let palette = &theme.palette;
-        if let Some(drag) = self.blocks.drag.filter(|d| d.moved) {
+        let drag = self.blocks.drag.filter(|d| d.moved);
+        self.ease_drop_line(drag.and_then(|d| d.drop));
+        if let Some(drag) = drag {
             let right = self.width - self.padding.right;
             let rect = self.to_view(drag.unit.rect);
             let mut veil = Paint::default();
@@ -591,8 +686,10 @@ impl EditorView {
                 ),
                 &veil,
             );
-            if let Some(drop) = drag.drop {
-                let at = self.to_view(Rect::new(drop.left, drop.y, 0.0, 0.0));
+            // The ghost under the pointer, then the line over it.
+            self.paint_block_ghost(canvas, &drag, &theme);
+            if let Some(line) = self.blocks.line {
+                let at = self.to_view(Rect::new(line.left, line.y, 0.0, 0.0));
                 let (left, y) = (at.x, at.y);
                 let mut line = Paint::default();
                 line.set_anti_alias(true);
@@ -677,5 +774,15 @@ impl BlockHandle {
 
     pub(crate) fn block(&self) -> Option<usize> {
         self.block.map(|b| b.pos)
+    }
+}
+
+#[cfg(test)]
+impl EditorView {
+    /// The drop line as shown and where it is going (document y).
+    pub(crate) fn drop_line(&self) -> Option<(f32, f32)> {
+        let line = self.blocks.line?;
+        let drop = self.blocks.drag?.drop?;
+        Some((line.y, drop.y))
     }
 }
