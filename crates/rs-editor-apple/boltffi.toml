@@ -13,8 +13,7 @@ output = "../../platforms/apple/generated/RsEditorCore"
 deployment_target = "17.0"
 include_macos = true
 ios_architectures = ["arm64"]
-# No simulator runtime is installed yet; add "arm64" here to test in one.
-simulator_architectures = []
+simulator_architectures = ["arm64"]
 macos_architectures = ["arm64"]
 
 [targets.apple.swift]

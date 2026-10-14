@@ -12,7 +12,7 @@
 | P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Hampir selesai.** Milestone 1–2 selesai, milestone 3 tinggal uji screen reader sungguhan dan Firefox |
 | P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit, library Kotlin dan Compose | **Selesai.** Navigasi TalkBack dan Samsung Keyboard jadi tugas lanjutan |
 | P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | **Selesai.** Bubble menu, menu blok `/`, popover tautan, drag handle (blok dan item list), gambar, aksesibilitas menu. Uji screen reader sungguhan jadi tugas lanjutan |
-| P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | **Berjalan.** macOS selesai dan diuji; iOS selesai ditulis, menunggu simulator atau iPhone |
+| P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | **Berjalan.** macOS selesai dan diuji; iOS berjalan di simulator, menunggu uji di iPhone |
 | P7 | Windows dan Linux: winit, IME, AccessKit | Belum dimulai |
 | P8 | Tabel, mention, hardening, API 1.0 | Belum dimulai |
 
@@ -355,12 +355,19 @@ Paket di [platforms/apple](../platforms/apple/README.md). Inti Rust-nya `crates/
   - Demo macOS (computer use): render Metal, mengetik, Enter, Backspace, Shift+Panah, seleksi dengan mouse dan bubble menu, Undo dari menu Edit, scroll, aksara Arab, Devanagari, emoji, dan Jepang. Pohon AX berisi `AXTextArea`, checkbox, dan gambar dengan alt; AXPress mencentang tugas. CPU saat diam sekitar 1%.
 - **Belum:** uji IME Jepang/Cina sungguhan dan VoiceOver dengan suara, drag & drop file ke editor, dan menu Format/Font.
 
-### Milestone 2: iOS · Kode selesai, belum diuji di perangkat
+### Milestone 2: iOS · Berjalan di simulator
 
 - `UIView` dengan `UITextInput`: offset di blok IME, marked text, `selectedTextRange`, geometri lewat `ime_cursor_info`/`ime_offset_at`, dan `inputDelegate` diberi tahu saat blok atau seleksi berubah bukan dari keyboard. Kolom tautan memakai keyboard URL dengan tombol Go.
-- Sentuhan diteruskan ke gesture Rust (profil `ios`): caret, seleksi kata, handle, scroll, dan fling, sama dengan Android.
+- Sentuhan diteruskan ke gesture Rust (profil `ios`): caret, seleksi kata, handle, scroll, dan fling, sama dengan Android. Tekan lama menggeser caret dengan loupe, seperti di iOS.
 - Menu seleksi dari inti tampil sebagai `UIEditMenuInteraction`, magnifier sebagai `UITextLoupeSession`, getaran sebagai `UIImpactFeedbackGenerator`/`UISelectionFeedbackGenerator`. Keyboard fisik (iPad) lewat `pressesBegan`, area yang tertutup keyboard lewat `setObscuredBottom`, dan VoiceOver lewat `accesskit_ios`.
-- Rust dan Swift lolos kompilasi/typecheck untuk `aarch64-apple-ios`. Belum dijalankan karena runtime simulator iOS (~8 GB) belum terpasang dan Xcode 26 meminta komponen platform iOS untuk build perangkat.
+- XCFramework kini juga berisi slice `ios-arm64-simulator`.
+- **Uji di simulator iPhone 17 Pro (iOS 26.3):**
+  - Render Metal, termasuk gambar.
+  - Ketuk menaruh caret dan memunculkan keyboard; saran keyboard membaca teks blok.
+  - Mengetik, dan autocorrect mengganti kata lewat `replace(_:withText:)`.
+  - Tekan lama menggeser caret, toolbar mengikuti blok caret, dan ketuk caret memunculkan edit menu native.
+- **Catatan simulator:** peluncuran pertama runtime baru membangun cache dyld (beberapa GB) dan mengompilasi shader Metal lewat MTLCompilerService, sehingga layar hitam beberapa puluh detik dan tiap frame tertinggal. Ini tidak terjadi di perangkat.
+- **Belum:** uji di iPhone sungguhan (kecepatan, haptik, loupe), seleksi kata dengan ketuk ganda yang cukup cepat, dan VoiceOver iOS.
 
 ## Backlog
 

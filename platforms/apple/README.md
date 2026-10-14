@@ -10,7 +10,7 @@ Rs Editor sebagai view native: `NSView` di macOS dan `UIView` di iOS. Inti Rust-
 
 ## Build
 
-Prasyarat: Xcode 26, `boltffi` CLI 0.29.3, xcodegen, dan target Rust `aarch64-apple-ios` (ditambah `aarch64-apple-ios-sim` untuk simulator; aktifkan juga `simulator_architectures` di `crates/rs-editor-apple/boltffi.toml`).
+Prasyarat: Xcode 26 dengan runtime simulator iOS, `boltffi` CLI 0.29.3, xcodegen, serta target Rust `aarch64-apple-ios` dan `aarch64-apple-ios-sim`. Peluncuran pertama di runtime simulator yang baru membangun cache dyld; sisakan beberapa GB ruang disk.
 
 ```bash
 platforms/apple/package.sh
