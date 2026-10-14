@@ -8,6 +8,7 @@ func menuLabel(_ item: String) -> String {
     case "cut": return indonesian ? "Potong" : "Cut"
     case "copy": return indonesian ? "Salin" : "Copy"
     case "paste": return indonesian ? "Tempel" : "Paste"
+    case "select": return indonesian ? "Pilih" : "Select"
     default: return indonesian ? "Pilih Semua" : "Select All"
     }
 }

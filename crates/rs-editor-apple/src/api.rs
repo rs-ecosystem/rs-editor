@@ -418,6 +418,12 @@ impl NativeEditor {
         self.api.replace_text(start, end, &text, composing)
     }
 
+    /// Commits the marked text as `text` (`insertText` while composing):
+    /// with the composition, one undo step.
+    pub fn commit_text(&mut self, text: String) {
+        self.api.commit_text(&text);
+    }
+
     /// Sets the marked text in place of the current one (or the selection).
     pub fn set_marked_text(&mut self, text: String) {
         self.api.set_composing_text(&text);

@@ -1545,6 +1545,92 @@ mod touch {
     }
 
     #[test]
+    fn on_ios_the_caret_menu_offers_the_word_at_the_caret() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        view.set_interaction_profile(InteractionProfile::ios());
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        // Long after (iOS has no caret handle to fade out).
+        clock.advance(10_000);
+        frame(&mut view);
+        view.take_effects();
+        // A tap on the caret: Paste, Select, Select All.
+        tap(&mut view, at);
+        let shown = menus(&view.take_effects());
+        assert_eq!(
+            shown.last().cloned().flatten(),
+            Some(vec![MenuItem::Paste, MenuItem::Select, MenuItem::SelectAll])
+        );
+        assert!(view.menu_action(MenuItem::Select, None, None).is_none());
+        assert_eq!(selection(&view), (6, 11), "the word 'dunia'");
+        assert!(
+            menus(&view.take_effects()).last().unwrap().is_some(),
+            "its own menu"
+        );
+
+        // Android keeps its caret menu.
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        clock.advance(600);
+        view.take_effects();
+        tap(&mut view, at);
+        let shown = menus(&view.take_effects());
+        assert_eq!(
+            shown.last().cloned().flatten(),
+            Some(vec![MenuItem::Paste, MenuItem::SelectAll])
+        );
+    }
+
+    #[test]
+    fn on_ios_a_word_selected_from_the_caret_menu_is_highlighted() {
+        let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
+        view.set_interaction_profile(InteractionProfile::ios());
+        let at = point_of(&mut view, 8);
+        tap(&mut view, at);
+        clock.advance(10_000);
+        frame(&mut view);
+        tap(&mut view, at);
+        view.menu_action(MenuItem::Select, None, None);
+        assert_eq!(selection(&view), (6, 11));
+        let pixels = |view: &mut EditorView| {
+            let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+            view.paint(surface.canvas());
+            let info = skia_safe::ImageInfo::new_n32_premul((640, 400), None);
+            let mut data = vec![0u8; 640 * 400 * 4];
+            assert!(surface.image_snapshot().read_pixels(
+                &info,
+                &mut data,
+                640 * 4,
+                (0, 0),
+                skia_safe::image::CachingHint::Allow
+            ));
+            data
+        };
+        let selected = pixels(&mut view);
+        view.select_text(11, 11, Affinity::Downstream);
+        let caret = pixels(&mut view);
+        // Inside the box of "dunia": the highlight changes most pixels.
+        let (x0, y) = point_of(&mut view, 7);
+        let (x1, _) = point_of(&mut view, 10);
+        let mut changed = 0;
+        let mut total = 0;
+        for py in (y - 6.0) as usize..(y + 6.0) as usize {
+            for px in x0 as usize..x1 as usize {
+                let i = (py * 640 + px) * 4;
+                total += 1;
+                if selected[i..i + 4] != caret[i..i + 4] {
+                    changed += 1;
+                }
+            }
+        }
+        assert!(
+            changed * 2 > total,
+            "highlighted: {changed} of {total} pixels changed"
+        );
+    }
+
+    #[test]
     fn apple_handles_put_knobs_above_and_below_the_selection() {
         let (mut view, clock) = setup(doc(vec![p("halo dunia indah")]));
         view.set_interaction_profile(InteractionProfile::ios());

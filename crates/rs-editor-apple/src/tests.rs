@@ -44,3 +44,24 @@ fn the_swift_class_wraps_the_shared_api_in_points() {
         "right of the text: its end"
     );
 }
+
+#[test]
+fn a_committed_composition_is_one_undo_step() {
+    let mut editor = NativeEditor::new(
+        800.0,
+        600.0,
+        2.0,
+        false,
+        "<p>halo</p>".into(),
+        false,
+        0,
+        false,
+    );
+    assert!(editor.run("setTextSelection".into(), r#"{"from": 5, "to": 5}"#.into()));
+    editor.set_marked_text("にほ".into());
+    assert!(editor.replace_text(4, 6, "にほん".into(), true));
+    editor.commit_text("日本".into());
+    assert_eq!(editor.get_text(), "halo日本");
+    assert!(editor.run("undo".into(), "null".into()));
+    assert_eq!(editor.get_text(), "halo", "the whole word goes");
+}

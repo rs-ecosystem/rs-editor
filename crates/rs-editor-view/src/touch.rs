@@ -109,6 +109,8 @@ pub enum MenuItem {
     Cut,
     Copy,
     Paste,
+    /// The word at the caret (iOS's caret menu).
+    Select,
     SelectAll,
 }
 
@@ -370,6 +372,10 @@ impl EditorView {
         self.touch.last_tap = Some((now, x, y, count));
         let before = self.editor.selection().clone();
         let had_caret_handle = self.touch.active && before.empty();
+        // iOS has no caret handle: a tap on the caret of the focused editor
+        // shows the menu whenever.
+        let apple = self.profile.long_press == LongPressAction::MoveCaret;
+        let had_caret = had_caret_handle || (apple && self.focused && before.empty());
         let menu_was_shown = self.touch.menu_shown;
         let event = PointerEvent {
             x,
@@ -395,7 +401,7 @@ impl EditorView {
             return;
         }
         // Tapping the caret again toggles the Paste menu.
-        let same_caret = had_caret_handle && after.empty() && after.head() == before.head();
+        let same_caret = had_caret && after.empty() && after.head() == before.head();
         self.touch.active = matches!(after, Selection::Text(_));
         self.touch.caret_handle_until = now + self.profile.caret_handle_ms;
         if same_caret && !menu_was_shown {
@@ -743,6 +749,14 @@ impl EditorView {
             if editable {
                 items.push(MenuItem::Paste);
             }
+            // iOS offers the word at the caret too.
+            if self.profile.long_press == LongPressAction::MoveCaret
+                && self
+                    .word_range(selection.head())
+                    .is_some_and(|(from, to)| from < to)
+            {
+                items.push(MenuItem::Select);
+            }
             self.caret_rect()?
         } else {
             if editable {
@@ -844,6 +858,15 @@ impl EditorView {
                     self.paste_text(text);
                 }
                 self.touch.active = false;
+                None
+            }
+            MenuItem::Select => {
+                let head = self.editor.selection().head();
+                if let Some((from, to)) = self.word_range(head).filter(|(from, to)| from < to) {
+                    self.select_quiet(from, to);
+                    self.touch.active = true;
+                    self.show_menu();
+                }
                 None
             }
             MenuItem::SelectAll => {

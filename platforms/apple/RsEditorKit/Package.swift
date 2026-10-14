@@ -30,5 +30,6 @@ let package = Package(
                 .linkedLibrary("c++"),
             ]
         ),
+        .testTarget(name: "RsEditorKitTests", dependencies: ["RsEditorKit"]),
     ]
 )

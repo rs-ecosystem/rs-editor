@@ -369,6 +369,21 @@ Paket di [platforms/apple](../platforms/apple/README.md). Inti Rust-nya `crates/
 - **Catatan simulator:** peluncuran pertama runtime baru membangun cache dyld (beberapa GB) dan mengompilasi shader Metal lewat MTLCompilerService, sehingga layar hitam beberapa puluh detik dan tiap frame tertinggal. Ini tidak terjadi di perangkat.
 - **Belum:** uji di iPhone sungguhan (kecepatan, haptik, loupe), seleksi kata dengan ketuk ganda yang cukup cepat, dan VoiceOver iOS.
 
+### Milestone 3: kekurangan iOS dan macOS · Selesai
+
+- **Menu caret gaya iOS:** mengetuk caret memunculkan Tempel, Pilih, Pilih Semua. "Pilih" memilih kata di caret (item `select` baru di inti; label di web dan Swift). Di iOS, ketuk caret memunculkan menu kapan pun, karena iOS tidak punya caret handle yang memudar.
+- **Seleksi dari menu tidak lagi runtuh:** perubahan yang bukan dari keyboard (sentuhan, menu, perintah) kini diumumkan ke `inputDelegate` sebelum dan sesudahnya. Sebelumnya keyboard hanya diberi tahu setelahnya, lalu "menerima autokoreksi" dengan meruntuhkan seleksi baru (`_UIKeyboardStateManager collapseSelection`).
+- **iPad:** pintasan Command (Tebal, Miring, Garis bawah, Tautan, Urungkan, Ulangi) tampil di daftar pintasan. Pointer berbentuk I-beam di atas teks, hover menampilkan grip, klik trackpad atau mouse memilih seperti mouse (bukan jari), dan scroll dua jari trackpad.
+- **Gambar dari luar:** drop gambar atau teks dari aplikasi lain (iPad, macOS), tempel gambar dari pasteboard, dan `insertImage(data:)`. Gambar disimpan lewat hook `storeImage` (misalnya diunggah) atau di file sementara. Demo memakai PhotosPicker (iOS) dan panel Open (macOS) untuk baris Gambar di menu `/`.
+- **macOS:** menu Format di demo (Tebal, Judul, daftar, Kutipan, Tautan, dengan pintasan).
+- **Undo IME:** commit komposisi dari `insertText` memakai `commit_text`, jadi satu undo menghapus kata yang baru dikomposisi (misalnya "日本"), seperti di Mac native.
+- **Uji:**
+  - 6 XCTest `RsEditorKitTests` (macOS): komposisi Jepang dengan undo, reconversion, posisi jendela kandidat IME, binding emacs, teks yang dibaca VoiceOver lewat `accessibilityString(for:)`, dan drop gambar ke `storeImage`.
+  - Tes view: menu caret iOS dan sorotan kata yang dipilih (dibandingkan per piksel).
+  - Simulator iPhone: menu caret, "Select" memilih kata dengan handle iOS, dan ketuk ganda memilih kata.
+  - Demo macOS: menu Format.
+- **Catatan:** VoiceOver di Mac membaca area teks multi-baris lewat atribut berparameter, bukan `AXValue`. Ini perilaku AccessKit.
+
 ## Backlog
 
 Sisa audit P5 ([audit-p5.md](audit-p5.md)), ditunda atas keputusan pengguna:

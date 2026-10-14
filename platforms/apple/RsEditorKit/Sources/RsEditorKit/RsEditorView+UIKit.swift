@@ -2,13 +2,16 @@
 import QuartzCore
 import RsEditorCore
 import UIKit
+import UniformTypeIdentifiers
 
 /// The editor as a `UIView`: drawn by the Rust core with Skia on Metal,
 /// typed into through `UITextInput` (keyboards, autocorrection, dictation,
 /// input methods). Touch gestures, selection handles and menus are the
 /// core's, as on Android; the view shows the system edit menu, loupe and
 /// haptics for them.
-public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDelegate {
+public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDelegate, UIPointerInteractionDelegate,
+    UIDropInteractionDelegate
+{
     let engine: EditorEngine
     let images: ImageLoader
     private var displayLink: CADisplayLink?
@@ -27,6 +30,11 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
     private var loupe: UITextLoupeSession?
     /// UITextInput calls in progress: UIKit knows about their changes.
     private var keyboardEditing = 0
+    /// External changes in progress, already announced to the keyboard.
+    private var announcing = 0
+    /// The pointer shape the core asked for (iPad trackpads and mice).
+    private var cursor = "text"
+    private var pointerInteraction: UIPointerInteraction?
 
     public override class var layerClass: AnyClass { CAMetalLayer.self }
 
@@ -46,6 +54,16 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
         let menu = UIEditMenuInteraction(delegate: self)
         addInteraction(menu)
         editMenu = menu
+        // iPad: the pointer's shape, hovering (the grip), trackpad scrolling, drops.
+        let pointer = UIPointerInteraction(delegate: self)
+        addInteraction(pointer)
+        pointerInteraction = pointer
+        addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(hover(_:))))
+        let scroll = UIPanGestureRecognizer(target: self, action: #selector(scroll(_:)))
+        scroll.allowedScrollTypesMask = .all
+        scroll.allowedTouchTypes = []
+        addGestureRecognizer(scroll)
+        addInteraction(UIDropInteraction(delegate: self))
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: RsEditorView, _) in
             view.updateAppearance()
         }
@@ -120,7 +138,7 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
         let now = engine.editor.revision()
         guard now != seenRevision else { return }
         seenRevision = now
-        if keyboardEditing == 0 {
+        if keyboardEditing == 0 && announcing == 0 {
             let start = engine.imeState().start
             if (start == -2) != (seenStart == -2) {
                 // Into or out of the link field: its keyboard (URL, Go).
@@ -137,6 +155,33 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
             seenStart = start
         }
         onChange?()
+    }
+
+    /// A change the keyboard did not make (a touch, a menu, a command), announced to it
+    /// before and after as UIKit expects: told only afterwards, the keyboard settles its
+    /// autocorrection by collapsing the new selection.
+    func external(_ change: () -> Void) {
+        guard keyboardEditing == 0, announcing == 0 else {
+            change()
+            return
+        }
+        let before = engine.imeState()
+        announcing += 1
+        inputDelegate?.selectionWillChange(self)
+        change()
+        let after = engine.imeState()
+        if (after.start == -2) != (before.start == -2) {
+            // Into or out of the link field: its keyboard (URL, Go).
+            reloadInputViews()
+        }
+        if after.start != before.start || after.text != before.text {
+            // Another block, or its text changed: the keyboard reads it afresh.
+            inputDelegate?.textWillChange(self)
+            inputDelegate?.textDidChange(self)
+        }
+        inputDelegate?.selectionDidChange(self)
+        seenStart = after.start
+        announcing -= 1
     }
 
     private func keyboardDriven(_ change: () -> Void) {
@@ -187,37 +232,80 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
         return resigned
     }
 
-    // MARK: - Touch
+    // MARK: - Touch, pointer and trackpad
 
     private var finger: UITouch?
 
-    private func touch(_ action: Int32, _ touch: UITouch) {
+    private func touch(_ action: Int32, _ touch: UITouch, _ event: UIEvent?) {
+        external { deliver(action, touch, event) }
+    }
+
+    private func deliver(_ action: Int32, _ touch: UITouch, _ event: UIEvent?) {
         let at = touch.location(in: self)
-        engine.editor.touch(action: action, x: Float(at.x), y: Float(at.y))
+        if touch.type == .indirectPointer {
+            // A trackpad or mouse click: selects like a mouse, not a finger.
+            if action == 0 { focusEditor() }
+            let flags = Self.modifiers(event?.modifierFlags ?? [])
+            _ = engine.editor.pointer(
+                kind: action == 3 ? 2 : action, x: Float(at.x), y: Float(at.y),
+                clicks: UInt32(max(touch.tapCount, 1)), modifiers: flags.rawValue)
+        } else {
+            engine.editor.touch(action: action, x: Float(at.x), y: Float(at.y))
+        }
         afterInput()
+    }
+
+    @objc private func hover(_ recognizer: UIHoverGestureRecognizer) {
+        let at = recognizer.location(in: self)
+        switch recognizer.state {
+        case .began, .changed:
+            _ = engine.editor.pointer(kind: 1, x: Float(at.x), y: Float(at.y), clicks: 1, modifiers: 0)
+        default:
+            _ = engine.editor.pointer(kind: 3, x: 0, y: 0, clicks: 1, modifiers: 0)
+        }
+        afterInput()
+    }
+
+    @objc private func scroll(_ recognizer: UIPanGestureRecognizer) {
+        guard recognizer.state == .changed else { return }
+        let at = recognizer.location(in: self)
+        let dy = -recognizer.translation(in: self).y
+        recognizer.setTranslation(.zero, in: self)
+        guard dy != 0 else { return }
+        engine.editor.wheel(x: Float(at.x), y: Float(at.y), dy: Float(dy), smooth: false)
+        afterInput()
+    }
+
+    public func pointerInteraction(_ interaction: UIPointerInteraction, styleFor region: UIPointerRegion) -> UIPointerStyle? {
+        switch cursor {
+        case "text":
+            return UIPointerStyle(shape: .verticalBeam(length: 20), constrainedAxes: [])
+        default:
+            return nil
+        }
     }
 
     public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard finger == nil, let first = touches.first else { return }
         finger = first
-        touch(0, first)
+        touch(0, first, event)
     }
 
     public override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let finger, touches.contains(finger) else { return }
-        touch(1, finger)
+        touch(1, finger, event)
     }
 
     public override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let finger, touches.contains(finger) else { return }
         self.finger = nil
-        touch(2, finger)
+        touch(2, finger, event)
     }
 
     public override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let finger, touches.contains(finger) else { return }
         self.finger = nil
-        touch(3, finger)
+        touch(3, finger, event)
     }
 
     // MARK: - Hardware keyboards
@@ -239,6 +327,40 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
         } else {
             super.pressesBegan(presses, with: event)
         }
+    }
+
+    /// Shortcuts listed when Command is held on an iPad keyboard.
+    public override var keyCommands: [UIKeyCommand]? {
+        let indonesian = Locale.preferredLanguages.first?.hasPrefix("id") == true
+        let shortcuts: [(String, UIKeyModifierFlags, String, String)] = [
+            ("b", .command, "Tebal", "Bold"),
+            ("i", .command, "Miring", "Italic"),
+            ("u", .command, "Garis bawah", "Underline"),
+            ("k", .command, "Tautan", "Link"),
+            ("z", .command, "Urungkan", "Undo"),
+            ("z", [.command, .shift], "Ulangi", "Redo"),
+        ]
+        return shortcuts.map { input, flags, id, en in
+            let command = UIKeyCommand(input: input, modifierFlags: flags, action: #selector(shortcut(_:)))
+            command.discoverabilityTitle = indonesian ? id : en
+            command.wantsPriorityOverSystemBehavior = true
+            return command
+        }
+    }
+
+    @objc private func shortcut(_ command: UIKeyCommand) {
+        external { runShortcut(command) }
+    }
+
+    private func runShortcut(_ command: UIKeyCommand) {
+        guard let input = command.input else { return }
+        let flags = Self.modifiers(command.modifierFlags)
+        if input == "z" {
+            _ = engine.editor.run(name: flags.contains(.shift) ? "redo" : "undo", argsJson: "null")
+        } else {
+            _ = engine.editor.keyDown(key: input, modifiers: flags.rawValue)
+        }
+        afterInput()
     }
 
     static func keyName(_ key: UIKey) -> String? {
@@ -278,7 +400,8 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
         switch action {
         case #selector(copy(_:)): return !empty
         case #selector(cut(_:)): return !empty && engine.editor.isEditable()
-        case #selector(paste(_:)): return engine.editor.isEditable() && UIPasteboard.general.hasStrings
+        case #selector(paste(_:)):
+            return engine.editor.isEditable() && (UIPasteboard.general.hasStrings || UIPasteboard.general.hasImages)
         case #selector(selectAll(_:)): return true
         default: return super.canPerformAction(action, withSender: sender)
         }
@@ -301,12 +424,22 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
     }
 
     private func menuAction(_ item: String) {
+        external { runMenuAction(item) }
+    }
+
+    private func runMenuAction(_ item: String) {
         var text: String?
         var html: String?
         if item == "paste" {
             let board = UIPasteboard.general
             html = board.value(forPasteboardType: "public.html") as? String
             text = board.string
+            // Only a picture (a screenshot copied, say): it goes in as an image.
+            if html == nil, text == nil, let image = board.image?.pngData() {
+                engine.editor.menuDismissed()
+                insertImageData(image)
+                return
+            }
         }
         let copied = engine.editor.menuAction(item: item, text: text, html: html)
         if !copied.isEmpty { write(copied) }
@@ -325,6 +458,52 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
         var item: [String: Any] = ["public.utf8-plain-text": text]
         if !html.isEmpty { item["public.html"] = html }
         UIPasteboard.general.items = [item]
+    }
+
+    // MARK: - Drops (iPad, and drags from other apps on iPhone)
+
+    public func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
+        engine.editor.isEditable()
+            && session.hasItemsConforming(toTypeIdentifiers: [UTType.image.identifier, UTType.plainText.identifier])
+    }
+
+    public func dropInteraction(_ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession) -> UIDropProposal {
+        // The caret follows the drop point.
+        let at = session.location(in: self)
+        placeCaret(at: at)
+        return UIDropProposal(operation: .copy)
+    }
+
+    public func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+        placeCaret(at: session.location(in: self))
+        for item in session.items {
+            let provider = item.itemProvider
+            if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                    guard let data else { return }
+                    DispatchQueue.main.async { self.insertImageData(data) }
+                }
+            } else if provider.canLoadObject(ofClass: String.self) {
+                _ = provider.loadObject(ofClass: String.self) { text, _ in
+                    guard let text else { return }
+                    DispatchQueue.main.async {
+                        _ = self.engine.editor.paste(text: text)
+                        self.afterInput()
+                    }
+                }
+            }
+        }
+    }
+
+    /// Puts the caret at `point`, as a click there would.
+    func placeCaret(at point: CGPoint) {
+        external { movePointer(to: point) }
+    }
+
+    private func movePointer(to point: CGPoint) {
+        _ = engine.editor.pointer(kind: 0, x: Float(point.x), y: Float(point.y), clicks: 1, modifiers: 0)
+        _ = engine.editor.pointer(kind: 2, x: Float(point.x), y: Float(point.y), clicks: 1, modifiers: 0)
+        afterInput()
     }
 
     // MARK: - Edit menu
@@ -385,6 +564,12 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
                 images.load(effect["sources"] as? [String] ?? [])
             case "pickImage":
                 onPickImage?()
+            case "cursor":
+                let shape = effect["cursor"] as? String ?? "text"
+                if shape != cursor {
+                    cursor = shape
+                    pointerInteraction?.invalidate()
+                }
             default:
                 break
             }
@@ -429,9 +614,9 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
         keyboardDriven {
             if text == "\n" {
                 _ = engine.editor.keyDown(key: "Enter", modifiers: 0)
-            } else if let marked = engine.imeState().composition {
-                _ = engine.editor.replaceText(
-                    start: Int32(marked.location), end: Int32(NSMaxRange(marked)), text: text, composing: false)
+            } else if engine.imeState().composition != nil {
+                // The keyboard commits: one undo step with the composition.
+                engine.editor.commitText(text: text)
             } else {
                 _ = engine.editor.insertText(text: text)
             }

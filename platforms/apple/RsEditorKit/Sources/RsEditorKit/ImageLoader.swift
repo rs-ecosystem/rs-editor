@@ -13,6 +13,9 @@ final class ImageLoader {
     /// The app's own loading (uploads in progress, authenticated servers):
     /// return the image's bytes, or nil to load the address as usual.
     var load: ((String) async -> Data?)?
+    /// The app's storage for images dropped or pasted in (an upload): returns the
+    /// stored image's address.
+    var store: ((Data) async -> String?)?
     private let maxPixels = 2048
     private weak var engine: EditorEngine?
 

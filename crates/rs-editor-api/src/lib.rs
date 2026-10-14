@@ -99,6 +99,7 @@ fn menu_item_name(item: MenuItem) -> &'static str {
         MenuItem::Cut => "cut",
         MenuItem::Copy => "copy",
         MenuItem::Paste => "paste",
+        MenuItem::Select => "select",
         MenuItem::SelectAll => "selectAll",
     }
 }
@@ -603,6 +604,7 @@ impl EditorApi {
             "cut" => MenuItem::Cut,
             "copy" => MenuItem::Copy,
             "paste" => MenuItem::Paste,
+            "select" => MenuItem::Select,
             _ => MenuItem::SelectAll,
         };
         self.view

@@ -1185,7 +1185,7 @@ impl EditorView {
                 }
                 None
             }
-            crate::MenuItem::SelectAll => {
+            crate::MenuItem::Select | crate::MenuItem::SelectAll => {
                 if let Some(editing) = &mut self.link.editing {
                     editing.field.select_all();
                 }

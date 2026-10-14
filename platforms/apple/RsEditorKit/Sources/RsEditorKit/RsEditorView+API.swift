@@ -1,5 +1,7 @@
 import Foundation
+import ImageIO
 import RsEditorCore
+import UniformTypeIdentifiers
 
 /// The editor's content and commands, the same on iOS and macOS (and as in
 /// the web and Android libraries): Tiptap's names and JSON.
@@ -94,10 +96,51 @@ extension RsEditorView {
         set { images.load = newValue }
     }
 
+    /// Stores an image dropped or pasted into the editor (uploads it, say) and returns its
+    /// address. Without it the image is kept in a temporary file.
+    public var storeImage: ((Data) async -> String?)? {
+        get { images.store }
+        set { images.store = newValue }
+    }
+
+    /// Inserts an image from its bytes (a photo picked, say) at the caret; `storeImage`
+    /// stores it.
+    public func insertImage(data: Data) {
+        insertImageData(data)
+    }
+
+    /// Inserts dropped or pasted image bytes at the caret, stored by `storeImage`.
+    func insertImageData(_ data: Data) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let src: String?
+            if let store = self.images.store {
+                src = await store(data)
+            } else {
+                src = Self.temporaryImage(data)
+            }
+            if let src {
+                self.chain([("setImage", ["src": src])])
+            }
+        }
+    }
+
+    /// Keeps image bytes in a temporary file; returns its `file:` address.
+    static func temporaryImage(_ data: Data) -> String? {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("rs-editor", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let type = CGImageSourceCreateWithData(data as CFData, nil).flatMap(CGImageSourceGetType)
+        let suffix = type.flatMap { UTType($0 as String)?.preferredFilenameExtension } ?? "png"
+        let file = folder.appendingPathComponent(UUID().uuidString).appendingPathExtension(suffix)
+        guard (try? data.write(to: file)) != nil else { return nil }
+        return file.absoluteString
+    }
+
     /// Runs one command by name with JSON-able arguments; false when it did not apply.
     @discardableResult
     public func run(_ name: String, _ args: Any? = nil) -> Bool {
-        let applied = engine.editor.run(name: name, argsJson: Self.json(args))
+        var applied = false
+        external { applied = engine.editor.run(name: name, argsJson: Self.json(args)) }
         afterInput()
         return applied
     }
@@ -120,7 +163,8 @@ extension RsEditorView {
             if let args = step.1 { entry["args"] = args }
             return entry
         }
-        let applied = engine.editor.runChain(stepsJson: Self.json(list))
+        var applied = false
+        external { applied = engine.editor.runChain(stepsJson: Self.json(list)) }
         afterInput()
         return applied
     }

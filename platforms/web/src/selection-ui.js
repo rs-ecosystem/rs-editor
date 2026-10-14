@@ -3,8 +3,8 @@
 // in the shadcn/ui style of the editor (design/tokens.json).
 
 const LABELS = {
-  id: { cut: "Potong", copy: "Salin", paste: "Tempel", selectAll: "Pilih semua" },
-  en: { cut: "Cut", copy: "Copy", paste: "Paste", selectAll: "Select all" },
+  id: { cut: "Potong", copy: "Salin", paste: "Tempel", select: "Pilih", selectAll: "Pilih semua" },
+  en: { cut: "Cut", copy: "Copy", paste: "Paste", select: "Select", selectAll: "Select all" },
 };
 
 const THEMES = {

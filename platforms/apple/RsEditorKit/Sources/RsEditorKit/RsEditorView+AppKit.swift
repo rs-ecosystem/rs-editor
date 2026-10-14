@@ -2,6 +2,7 @@
 import AppKit
 import QuartzCore
 import RsEditorCore
+import UniformTypeIdentifiers
 
 /// The editor as an `NSView`: drawn by the Rust core with Skia on Metal,
 /// typed into through `NSTextInputClient` (so input methods, dictation and
@@ -33,6 +34,8 @@ public final class RsEditorView: NSView, NSTextInputClient, NSMenuItemValidation
         layerContentsRedrawPolicy = .never
         engine.onEffects = { [weak self] effects in self?.perform(effects) }
         engine.wake = { [weak self] in self?.displayLink?.isPaused = false }
+        // Files, images and text dragged in from other apps.
+        registerForDraggedTypes([.fileURL, .png, .tiff, .html, .string])
         // VoiceOver, through AccessKit (before the view is first shown).
         engine.editor.attachAccessibility(view: UInt64(UInt(bitPattern: Unmanaged.passUnretained(self).toOpaque())))
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
@@ -117,6 +120,11 @@ public final class RsEditorView: NSView, NSTextInputClient, NSMenuItemValidation
         // Idle (no animation, no caret blinking): the link sleeps until
         // the next input or change.
         link.isPaused = !engine.tick(now: CACurrentMediaTime())
+    }
+
+    /// A change not made by text input (a command): AppKit needs no notice.
+    func external(_ change: () -> Void) {
+        change()
     }
 
     /// After input: a frame, the effects, and `onChange`.
@@ -320,14 +328,57 @@ public final class RsEditorView: NSView, NSTextInputClient, NSMenuItemValidation
     }
 
     @objc public func paste(_ sender: Any?) {
-        let board = NSPasteboard.general
+        paste(from: NSPasteboard.general)
+    }
+
+    /// Pastes HTML, else text, else an image (a screenshot copied, say).
+    private func paste(from board: NSPasteboard) {
         if let html = board.string(forType: .html), engine.editor.pasteHtml(html: html) {
             afterInput()
             return
         }
         if let text = board.string(forType: .string) {
             _ = engine.editor.paste(text: text)
+        } else if let image = board.data(forType: .png) ?? board.data(forType: .tiff) {
+            insertImageData(image)
         }
+        afterInput()
+    }
+
+    // MARK: - Dragging in
+
+    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingUpdated(sender)
+    }
+
+    public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard engine.editor.isEditable() else { return [] }
+        // The caret follows the drop point.
+        placeCaret(at: convert(sender.draggingLocation, from: nil))
+        return .copy
+    }
+
+    public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard engine.editor.isEditable() else { return false }
+        window?.makeFirstResponder(self)
+        placeCaret(at: convert(sender.draggingLocation, from: nil))
+        let board = sender.draggingPasteboard
+        let files = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let pictures = files.filter { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) == true }
+        if !pictures.isEmpty {
+            for url in pictures {
+                if let data = try? Data(contentsOf: url) { insertImageData(data) }
+            }
+            return true
+        }
+        paste(from: board)
+        return true
+    }
+
+    /// Puts the caret at `point`, as a click there would.
+    func placeCaret(at point: CGPoint) {
+        _ = engine.editor.pointer(kind: 0, x: Float(point.x), y: Float(point.y), clicks: 1, modifiers: 0)
+        _ = engine.editor.pointer(kind: 2, x: Float(point.x), y: Float(point.y), clicks: 1, modifiers: 0)
         afterInput()
     }
 
@@ -385,9 +436,9 @@ public final class RsEditorView: NSView, NSTextInputClient, NSMenuItemValidation
             _ = engine.editor.replaceText(
                 start: Int32(replacementRange.location), end: Int32(NSMaxRange(replacementRange)),
                 text: text, composing: false)
-        } else if let marked = state.composition {
-            _ = engine.editor.replaceText(
-                start: Int32(marked.location), end: Int32(NSMaxRange(marked)), text: text, composing: false)
+        } else if state.composition != nil {
+            // The input method commits: one undo step with the composition.
+            engine.editor.commitText(text: text)
         } else {
             _ = engine.editor.insertText(text: text)
         }
