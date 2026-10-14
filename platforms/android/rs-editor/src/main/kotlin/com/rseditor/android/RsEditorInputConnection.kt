@@ -1,5 +1,6 @@
 package com.rseditor.android
 
+import android.os.Bundle
 import android.text.TextUtils
 import android.util.Log
 import android.view.KeyEvent
@@ -7,6 +8,7 @@ import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.CorrectionInfo
 import android.view.inputmethod.ExtractedText
 import android.view.inputmethod.ExtractedTextRequest
+import android.view.inputmethod.InputContentInfo
 import android.view.inputmethod.TextAttribute
 
 /**
@@ -163,6 +165,12 @@ internal class RsEditorInputConnection(private val view: RsEditorView) :
         native.keyDown("Enter", false, false, false)
         view.afterInput()
         return true
+    }
+
+    /** A GIF or sticker from the keyboard (Gboard): inserted as an image. */
+    override fun commitContent(info: InputContentInfo, flags: Int, opts: Bundle?): Boolean {
+        log("commitContent ${info.description}")
+        return view.insertKeyboardImage(info, flags)
     }
 
     override fun performContextMenuAction(id: Int): Boolean {

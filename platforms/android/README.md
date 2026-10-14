@@ -42,6 +42,7 @@ editor.slashMenu = false                                     // matikan menu blo
 editor.dragHandle = false                                    // matikan grip untuk memindahkan blok
 editor.placeholder = "Mulai menulis"                          // default: petunjuk menu "/"
 editor.onPickImage = { pickImage.launch(…) }                 // lalu editor.insertImage(uri.toString())
+editor.onKeyboardImage = { uri, mime -> upload(uri) }        // GIF/stiker Gboard; default: salinan di cache
 editor.characters; editor.words                              // RsEditorView(context, content, characterLimit = 280)
 editor.addOnChangeListener { refreshToolbar() }
 editor.release()      // saat view dibuang

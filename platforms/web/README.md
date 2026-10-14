@@ -63,13 +63,24 @@ Format yang didukung adalah TTF, OTF, dan WOFF (bukan WOFF2). Kalau daftar `font
 
 ## Gambar
 
-Gambar dimuat dan didekode oleh browser, jadi semua format yang didukung browser bisa dipakai. Gambar dari origin lain butuh header CORS; tanpa header itu gambar tampil sebagai gagal. Ukurannya mengikuti atribut `width`/`height`, atau ukuran asli gambar bila atribut itu tidak ada, dan tidak pernah melebihi lebar kolom.
+Gambar dimuat dan didekode oleh browser, jadi semua format yang didukung browser bisa dipakai. Gambar dari origin lain butuh header CORS; tanpa header itu gambar tampil sebagai gagal. Gambar yang gagal dimuat dicoba lagi saat diketuk atau diklik. Ukurannya mengikuti atribut `width`/`height`, atau ukuran asli gambar bila atribut itu tidak ada, dan tidak pernah melebihi lebar kolom.
 
 Untuk memasukkan gambar, beri opsi `uploadImage`. Fungsi ini menerima `File` dan mengembalikan alamat gambar, misalnya setelah diunggah ke server. Fungsi ini dipakai oleh baris Gambar di menu `/` (lewat pemilih file browser), juga saat gambar ditempel atau dijatuhkan ke editor. Tanpa `uploadImage`, menu `/` meminta alamat gambar.
 
 ```js
 await createEditor({ element, uploadImage: async (file) => (await upload(file)).url });
 editor.chain().focus().setImage({ src: "/foto.jpg", alt: "Foto" }).run();
+```
+
+Untuk gambar dari server tanpa header CORS, beri opsi `loadImage`. Fungsi ini menerima alamat gambar dan mengembalikan `Blob` atau alamat lain (misalnya proxy di server Anda). Kembalikan `undefined` untuk memuat alamat aslinya, atau `null` kalau gambar tidak bisa dimuat.
+
+```js
+await createEditor({
+  element,
+  loadImage: async (src) => new URL(src, location.href).origin === location.origin
+    ? undefined
+    : `/proxy?url=${encodeURIComponent(src)}`,
+});
 ```
 
 ## Hitungan karakter dan placeholder

@@ -4014,3 +4014,74 @@ mod image_retry {
         );
     }
 }
+
+mod field_magnifier {
+    use super::*;
+
+    fn paint(view: &mut EditorView) {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((640, 400)).unwrap();
+        view.paint(surface.canvas());
+    }
+
+    fn magnifiers(effects: &[Effect]) -> Vec<bool> {
+        effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Magnifier(at) => Some(at.is_some()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn holding_the_field_moves_its_caret_under_the_magnifier() {
+        let (mut view, clock) = view_with(doc(vec![p("halo")]), KeyPlatform::Other);
+        view.set_focused(true);
+        view.select_text(1, 5, Affinity::Downstream);
+        assert!(view.edit_link());
+        view.insert_text("rs-editor.dev");
+        // A finger in use (the popover sits lower for it).
+        view.touch(TouchPhase::Down, 0.0, 0.0);
+        view.touch(TouchPhase::Cancel, 0.0, 0.0);
+        paint(&mut view);
+        let (fx, fy) = view.link.field_center();
+        view.take_effects();
+
+        view.touch(TouchPhase::Down, fx, fy);
+        assert!(
+            view.next_frame_in().is_some(),
+            "a frame when the hold is long enough"
+        );
+        for _ in 0..40 {
+            clock.advance(16);
+            paint(&mut view);
+        }
+        let effects = view.take_effects();
+        assert_eq!(
+            magnifiers(&effects),
+            [true],
+            "the magnifier comes on the hold"
+        );
+        assert!(effects.contains(&Effect::Haptic(HapticKind::LongPress)));
+        let (_, _, held) = view.link_field().unwrap();
+
+        // Dragging to the left edge takes the caret to the start.
+        view.touch(TouchPhase::Move, fx - 400.0, fy);
+        let (_, anchor, head) = view.link_field().unwrap();
+        assert_eq!((anchor, head), (0, 0));
+        assert!(held > 0);
+        view.touch(TouchPhase::Up, fx - 400.0, fy);
+        let effects = view.take_effects();
+        assert_eq!(
+            magnifiers(&effects).last(),
+            Some(&false),
+            "and goes on release"
+        );
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::SelectionMenu(Some(_))))
+        );
+        assert!(view.link_editing());
+    }
+}

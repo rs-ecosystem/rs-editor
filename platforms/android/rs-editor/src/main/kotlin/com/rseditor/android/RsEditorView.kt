@@ -3,6 +3,7 @@ package com.rseditor.android
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Matrix
+import android.net.Uri
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Build
@@ -20,6 +21,7 @@ import android.view.inputmethod.CursorAnchorInfo
 import android.view.inputmethod.EditorBoundsInfo
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputContentInfo
 import android.view.inputmethod.InputMethodManager
 import org.json.JSONArray
 import org.json.JSONException
@@ -520,6 +522,7 @@ class RsEditorView private constructor(
                 EditorInfo.IME_FLAG_NO_FULLSCREEN or
                 EditorInfo.IME_ACTION_NONE
         }
+        if (state.start != LINK_FIELD) out.contentMimeTypes = KEYBOARD_IMAGES
         out.initialSelStart = state.selectionStart
         out.initialSelEnd = state.selectionEnd
         if (Build.VERSION.SDK_INT >= 30) out.setInitialSurroundingText(state.text)
@@ -528,6 +531,57 @@ class RsEditorView private constructor(
     }
 
     internal fun selectionUi(): SelectionUi = selection
+
+    /**
+     * Called for a GIF or sticker from the keyboard (Gboard): `uri` can be read until the
+     * callback returns, so copy or upload it, then call [insertImage]. Without it the editor
+     * copies it to the app's cache and inserts that file.
+     */
+    var onKeyboardImage: ((uri: Uri, mimeType: String) -> Unit)? = null
+
+    internal fun insertKeyboardImage(info: InputContentInfo, flags: Int): Boolean {
+        if (released || !native.isEditable()) return false
+        val description = info.description
+        val mime = KEYBOARD_IMAGES.firstOrNull { description.hasMimeType(it) } ?: return false
+        if (flags and InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION != 0) {
+            try {
+                info.requestPermission()
+            } catch (_: Exception) {
+                return false
+            }
+        }
+        val host = onKeyboardImage
+        if (host != null) {
+            try {
+                host(info.contentUri, mime)
+            } finally {
+                info.releasePermission()
+            }
+            return true
+        }
+        // The keyboard's grant ends with the input connection: keep a copy.
+        val resolver = context.contentResolver
+        val folder = java.io.File(context.cacheDir, "rs-editor-keyboard").apply { mkdirs() }
+        val file = java.io.File(folder, "${System.currentTimeMillis()}.${mime.substringAfter('/')}")
+        Thread {
+            val copied = try {
+                resolver.openInputStream(info.contentUri)?.use { input ->
+                    file.outputStream().use { input.copyTo(it) }
+                } != null
+            } catch (_: Exception) {
+                false
+            } finally {
+                info.releasePermission()
+            }
+            post {
+                if (copied && !released) {
+                    insertImage(Uri.fromFile(file).toString(), description.label?.toString())
+                    afterInput()
+                }
+            }
+        }.start()
+        return true
+    }
 
     internal fun loadImage(src: String) = images.load(src)
 
@@ -676,6 +730,8 @@ class RsEditorView private constructor(
     }
 
     private companion object {
+        /** What the keyboard may send as rich content (GIFs, stickers). */
+        val KEYBOARD_IMAGES = arrayOf("image/gif", "image/png", "image/webp", "image/jpeg")
         const val TAG = "RsEditorView"
         /** `ImeState.start` while the link address field takes input. */
         const val LINK_FIELD = -2

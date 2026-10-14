@@ -67,10 +67,10 @@ export async function createEditor(options) {
 }
 
 class Editor {
-  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, bubbleMenu = true, slashMenu = true, dragHandle = true, placeholder, characterLimit, uploadImage, locale = navigator.language, fonts = [], accessibility = true, wasmUrl = DEFAULT_WASM, input } = {}) {
+  constructor({ element, content = "", contentType, dark = false, editable = true, pasteMarkdown = false, bubbleMenu = true, slashMenu = true, dragHandle = true, placeholder, characterLimit, uploadImage, loadImage, locale = navigator.language, fonts = [], accessibility = true, wasmUrl = DEFAULT_WASM, input } = {}) {
     if (!element) throw new Error("Rs Editor: `element` is required");
     this.element = element;
-    this._options = { content, contentType, dark, editable, pasteMarkdown, bubbleMenu, slashMenu, dragHandle, placeholder, characterLimit, uploadImage, locale, accessibility, wasmUrl, input };
+    this._options = { content, contentType, dark, editable, pasteMarkdown, bubbleMenu, slashMenu, dragHandle, placeholder, characterLimit, uploadImage, loadImage, locale, accessibility, wasmUrl, input };
     // Fonts to load when text needs them: { family, url, ranges }.
     this._fonts = fonts.map((font) => ({ ...font, state: "idle" }));
     this._listeners = new Map();
@@ -509,11 +509,43 @@ class Editor {
     while (this._imagesLoading < IMAGE_LOADS && this._imageQueue.length) {
       const src = this._imageQueue.shift();
       this._imagesLoading++;
-      this._decodeImage(src, src).finally(() => {
+      this._fetchImage(src).finally(() => {
         this._imagesLoading--;
         this._pumpImages();
       });
     }
+  }
+
+  /**
+   * Loads the image of image nodes showing `src`: through the app's
+   * `loadImage` when it has one (a proxy for images from servers without
+   * CORS headers), else straight from `src`.
+   */
+  async _fetchImage(src) {
+    const load = this._options.loadImage;
+    if (!load) return this._decodeImage(src, src);
+    let source;
+    try {
+      source = await load(src);
+    } catch {
+      source = null;
+    }
+    if (source === undefined) return this._decodeImage(src, src);
+    if (source instanceof Blob) {
+      const url = URL.createObjectURL(source);
+      try {
+        return await this._decodeImage(src, url);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+    if (typeof source === "string") return this._decodeImage(src, source);
+    // Null (or anything else): it could not be loaded.
+    if (!this._destroyed) {
+      this._withString(src, (ptr, len) => this._M._rse_image_failed(this._app, ptr, len));
+      this._afterInput();
+    }
+    return false;
   }
 
   /**

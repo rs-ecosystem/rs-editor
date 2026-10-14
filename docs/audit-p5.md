@@ -122,6 +122,13 @@
 - **Bubble menu untuk seleksi beberapa baris** berada di atas baris pertama seleksi. Kalau baris pertama sudah ter-scroll keluar, menu pindah ke bawah baris terakhir.
 - **Padding kiri bawaan web dan API menjadi 28 px**, sama dengan Android, supaya grip tidak menimpa teks.
 
+### Batch 8
+
+- **Kolom tautan punya magnifier:** tahan jari di kolom, lalu geser untuk memindah caret di bawah magnifier. Saat dilepas, menu kolom muncul.
+- **Web: opsi `loadImage`.** Aplikasi bisa memuat gambar lewat proxy atau `Blob` sendiri, untuk gambar dari server tanpa header CORS.
+- **Android: GIF dan stiker dari Gboard (`commitContent`)** disisipkan sebagai gambar (frame pertama). Defaultnya disalin ke cache aplikasi; `onKeyboardImage` bisa dipakai untuk mengunggahnya.
+- **Drag gambar dengan mouse di web** sudah dicek langsung di Chrome.
+
 ### Laporan pengguna sebelumnya
 
 - **Menu `/`:** bisa di-scroll, sorotan menempel pada opsi yang ditekan, dan tidak kembali ke opsi pertama (`42452a9`, `1e80343`).
@@ -135,12 +142,6 @@
 
 ## Belum (urut prioritas)
 
-### Sedang
-
-1. **Magnifier di kolom tautan** belum ada.
-2. **Gambar dari situs lain tanpa header CORS** tampil gagal di web, karena browser tidak mengizinkan pikselnya dibaca.
-
-### Rendah
-
+- **SVG di Android.** BitmapFactory tidak bisa membacanya. Pilihannya: modul SVG Skia (fitur `svg` skia-safe, tapi binary prebuilt-nya harus diunduh ulang), atau pustaka SVG di sisi Kotlin.
+- **GIF beranimasi** tampil diam (frame pertama) di semua platform.
 - **Grip bisa menimpa teks** kalau host memakai padding kiri di bawah 26 px.
-- **Android belum mendukung SVG** dan stiker/GIF Gboard (`commitContent`).

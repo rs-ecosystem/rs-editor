@@ -60,6 +60,15 @@ export interface EditorOptions {
    * Without it, the `/` menu asks for an image address instead.
    */
   uploadImage?: (file: File) => Promise<string>;
+  /**
+   * Loads the picture of an image node (`src` is its address). The editor
+   * reads image pixels, which browsers allow only for images from this
+   * site or from servers sending CORS headers; for others, fetch through
+   * your server and resolve to a `Blob` or a same-origin (or CORS) URL.
+   * Resolve to `undefined` to load `src` as usual, or to `null` when it
+   * cannot be loaded (it shows as broken).
+   */
+  loadImage?: (src: string) => Promise<Blob | string | null | undefined>;
   /** Language of the editor's own menus, as a BCP 47 tag. Default `navigator.language`; English when there is no translation. */
   locale?: string;
   /**

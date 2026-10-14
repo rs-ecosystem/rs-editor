@@ -97,6 +97,9 @@ pub(crate) struct LinkPopover {
     touch_at: u64,
     /// The last tap on the field (a second one soon after selects all).
     last_tap: u64,
+    /// A finger held down on the field moves its caret, under the
+    /// magnifier.
+    caret_drag: bool,
     /// Until when the copy button shows a check (it just copied).
     copied_until: u64,
     /// The buttons were built showing that check.
@@ -127,10 +130,47 @@ impl EditorView {
         self.clock.now_ms() < self.link.copied_until
     }
 
-    /// Milliseconds until the copy button turns back from its check.
+    /// Milliseconds until the copy button turns back from its check, or a
+    /// finger on the field has been held long enough to move its caret.
     pub(crate) fn link_deadline(&self) -> Option<u64> {
-        self.link_copied()
-            .then(|| self.link.copied_until - self.clock.now_ms())
+        let now = self.clock.now_ms();
+        let copied = self.link_copied().then(|| self.link.copied_until - now);
+        let held =
+            (self.link.touch.is_some() && !self.link.caret_drag && self.link.editing.is_some())
+                .then(|| (self.link.touch_at + self.profile.long_press_ms).saturating_sub(now));
+        copied.into_iter().chain(held).min()
+    }
+
+    /// A finger held still on the field long enough takes its caret
+    /// along, as in platform fields.
+    pub(crate) fn tick_link_touch(&mut self) {
+        let Some(start) = self.link.touch else {
+            return;
+        };
+        let held =
+            self.clock.now_ms().saturating_sub(self.link.touch_at) >= self.profile.long_press_ms;
+        if self.link.caret_drag || !held || self.link_part_at(start.0, start.1) != Some(Part::Field)
+        {
+            return;
+        }
+        self.link.caret_drag = true;
+        self.push_effect(Effect::Haptic(crate::HapticKind::LongPress));
+        self.hide_menu();
+        self.field_caret_follow(start.0);
+    }
+
+    /// Moves the field's caret under the finger at view `x`, with the
+    /// magnifier over it.
+    fn field_caret_follow(&mut self, x: f32) {
+        if let Some(offset) = self.field_offset_at(x)
+            && let Some(editing) = &mut self.link.editing
+        {
+            editing.field.move_to(offset, false);
+        }
+        self.after_field_change();
+        if let Some(caret) = self.field_caret_rect() {
+            self.set_magnifier(Some((caret.x + caret.width / 2.0, caret.center_y())));
+        }
     }
 
     /// Whether the address field is open (it then takes text input).
@@ -1183,7 +1223,21 @@ impl EditorView {
                 self.link.outside = self.link.editing.is_some().then_some((x, y));
                 false
             }
-            TouchPhase::Move => self.link.touch.is_some(),
+            TouchPhase::Move => {
+                if self.link.caret_drag {
+                    self.field_caret_follow(x);
+                }
+                self.link.touch.is_some()
+            }
+            TouchPhase::Up if self.link.caret_drag => {
+                // Let go: the magnifier goes, the field's menu comes.
+                self.link.caret_drag = false;
+                self.link.touch = None;
+                self.set_magnifier(None);
+                self.show_field_menu();
+                self.push_effect(Effect::ShowKeyboard);
+                true
+            }
             TouchPhase::Up => {
                 let Some(start) = self.link.touch.take() else {
                     if let Some(down) = self.link.outside.take()
@@ -1228,7 +1282,12 @@ impl EditorView {
                 }
                 true
             }
-            TouchPhase::Cancel => self.link.touch.take().is_some(),
+            TouchPhase::Cancel => {
+                if std::mem::take(&mut self.link.caret_drag) {
+                    self.set_magnifier(None);
+                }
+                self.link.touch.take().is_some()
+            }
         }
     }
 }

@@ -408,6 +408,7 @@ impl EditorView {
     /// Advances timed touch behavior: long press, edge auto-scroll, the menu
     /// returning after a scroll, and the caret handle fading out.
     pub(crate) fn tick_touch(&mut self) {
+        self.tick_link_touch();
         let now = self.clock.now_ms();
         match self.touch.gesture {
             Some(Gesture::Pending { start, down_ms })
@@ -802,7 +803,7 @@ impl EditorView {
         }
     }
 
-    fn set_magnifier(&mut self, at: Option<(f32, f32)>) {
+    pub(crate) fn set_magnifier(&mut self, at: Option<(f32, f32)>) {
         if at.is_none() && !self.touch.magnifier {
             return;
         }
