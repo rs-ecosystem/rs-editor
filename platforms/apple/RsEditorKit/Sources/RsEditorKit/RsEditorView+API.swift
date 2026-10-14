@@ -108,9 +108,14 @@ extension RsEditorView {
     }
 
     /// Runs commands as one transaction (one undo step): `chain([("toggleBold", nil)])`.
+    /// A `focus` step (as in Tiptap's `chain().focus()`) gives the editor the keyboard focus.
     @discardableResult
     public func chain(_ steps: [(String, Any?)]) -> Bool {
-        let list = steps.map { step -> [String: Any] in
+        // `focus` is the view's, not a command of the core.
+        if steps.contains(where: { $0.0 == "focus" }) {
+            focusEditor()
+        }
+        let list = steps.filter { $0.0 != "focus" }.map { step -> [String: Any] in
             var entry: [String: Any] = ["name": step.0]
             if let args = step.1 { entry["args"] = args }
             return entry

@@ -132,6 +132,13 @@ public final class RsEditorView: NSView, NSTextInputClient, NSMenuItemValidation
 
     // MARK: - Focus
 
+    /// Takes the keyboard focus (`chain([("focus", nil), …])`).
+    public func focusEditor() {
+        if window?.firstResponder !== self {
+            window?.makeFirstResponder(self)
+        }
+    }
+
     public override func becomeFirstResponder() -> Bool {
         engine.editor.setFocused(focused: true)
         afterInput()

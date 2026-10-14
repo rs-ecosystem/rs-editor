@@ -160,6 +160,13 @@ public final class RsEditorView: UIView, UITextInput, UIEditMenuInteractionDeleg
 
     // MARK: - Focus
 
+    /// Takes the keyboard focus (`chain([("focus", nil), …])`), showing the keyboard.
+    public func focusEditor() {
+        if !isFirstResponder {
+            _ = becomeFirstResponder()
+        }
+    }
+
     public override var canBecomeFirstResponder: Bool { true }
 
     public override func becomeFirstResponder() -> Bool {
