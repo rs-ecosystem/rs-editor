@@ -2303,6 +2303,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rs-editor-apple"
+version = "0.1.0"
+dependencies = [
+ "accesskit",
+ "accesskit_ios",
+ "accesskit_macos",
+ "boltffi",
+ "objc2 0.5.3",
+ "rs-editor-api",
+ "rs-editor-commands",
+ "rs-editor-view",
+ "serde_json",
+ "skia-safe",
+]
+
+[[package]]
 name = "rs-editor-commands"
 version = "0.1.0"
 dependencies = [

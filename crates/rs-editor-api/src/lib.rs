@@ -717,6 +717,15 @@ impl EditorApi {
         state.to_string()
     }
 
+    /// The IME block offset at `(x, y)`, or -1 when the point is over
+    /// another block.
+    pub fn ime_offset_at(&mut self, x: f32, y: f32) -> i32 {
+        let unit = self.unit();
+        self.view
+            .ime_offset_at(x / unit, y / unit)
+            .map_or(-1, |offset| offset as i32)
+    }
+
     /// Geometry for IME popups: the caret line (`[x, top, baseline,
     /// bottom]`) and the bounds of each UTF-16 unit in `from..to` of the
     /// IME block (`[left, top, right, bottom]`, `null` where not laid out).

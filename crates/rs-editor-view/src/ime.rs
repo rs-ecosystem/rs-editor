@@ -295,6 +295,24 @@ impl EditorView {
         })
     }
 
+    /// The offset in the IME block nearest to view `(x, y)`, or `None` when
+    /// the point is over another block (`NSTextInputClient`'s
+    /// `characterIndex(for:)`, `UITextInput`'s `closestPosition(to:)`).
+    pub fn ime_offset_at(&mut self, x: f32, y: f32) -> Option<usize> {
+        if self.link_editing() {
+            return None;
+        }
+        let context = self.ime_context()?;
+        match self.hit_at(x, y)? {
+            rs_editor_layout::Hit::Text { pos, .. }
+                if pos >= context.start && pos <= context.start + context.len() =>
+            {
+                Some(pos - context.start)
+            }
+            _ => None,
+        }
+    }
+
     /// Bounds of each UTF-16 unit in `from..to` of the IME block (view
     /// coordinates); both halves of a surrogate pair, and every unit of a
     /// grapheme, get the grapheme's box. `None` for units not laid out.

@@ -1,0 +1,48 @@
+[package]
+name = "rs-editor-apple"
+description = "Shell Apple Rs Editor: Skia Metal di NSView/UIView, NSTextInputClient dan UITextInput; binding Swift lewat BoltFFI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+# `boltffi pack apple` puts the staticlib in an XCFramework.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Must match the installed boltffi_cli exactly (same as rs-editor-android).
+boltffi = "=0.29.3"
+rs-editor-api.workspace = true
+rs-editor-commands.workspace = true
+rs-editor-view.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+# The Metal surface only exists on Apple platforms; the API builds
+# everywhere, so bindings are generated and tested on any host. The
+# features match a prebuilt Skia binary (ganesh-jpegd-jpege-metal-pdf-textlayout).
+[target.'cfg(target_vendor = "apple")'.dependencies]
+skia-safe = { version = "=0.153.3", features = ["ganesh", "metal", "textlayout"] }
+
+# VoiceOver through AccessKit (the tree TalkBack gets on Android).
+[target.'cfg(target_os = "macos")'.dependencies]
+accesskit = "0.25"
+accesskit_macos = "0.27"
+objc2 = "0.5"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+accesskit = "0.25"
+accesskit_ios = "0.2"
+objc2 = "0.5"
+
+[lints.rust]
+# Metal objects arrive from Swift as raw pointers.
+unsafe_code = "allow"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"

@@ -196,6 +196,18 @@ impl EditorView {
             } else {
                 selection.from()
             };
+            if let Selection::All(_) = selection {
+                // The document's edges are outside any text: the nearest
+                // text inside.
+                let doc = self.editor.doc().clone();
+                let Ok(at) = doc.resolve(pos) else {
+                    return false;
+                };
+                return self.set_selection(
+                    Selection::near(&at, if forward { -1 } else { 1 }),
+                    Affinity::Downstream,
+                );
+            }
             return self.select_to(pos, Affinity::Downstream, false);
         }
         let head = selection.head();

@@ -12,7 +12,7 @@
 | P3 | Web: Skia/WASM, EditContext dan textarea, clipboard HTML/Markdown, DOM ARIA | **Hampir selesai.** Milestone 1–2 selesai, milestone 3 tinggal uji screen reader sungguhan dan Firefox |
 | P4 | Android: SurfaceView/GL, InputConnection, seleksi sentuh native (handle, magnifier, menu, haptik), AccessKit, library Kotlin dan Compose | **Selesai.** Navigasi TalkBack dan Samsung Keyboard jadi tugas lanjutan |
 | P5 | UI di dalam canvas (bubble menu, slash menu, popover link, drag handle) dan paritas Tiptap | **Selesai.** Bubble menu, menu blok `/`, popover tautan, drag handle (blok dan item list), gambar, aksesibilitas menu. Uji screen reader sungguhan jadi tugas lanjutan |
-| P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | Belum dimulai |
+| P6 | iOS dan macOS: UITextInput, NSTextInputClient, Metal | **Berjalan.** macOS selesai dan diuji; iOS selesai ditulis, menunggu simulator atau iPhone |
 | P7 | Windows dan Linux: winit, IME, AccessKit | Belum dimulai |
 | P8 | Tabel, mention, hardening, API 1.0 | Belum dimulai |
 
@@ -333,6 +333,42 @@ UI editor digambar Skia di canvas yang sama, sehingga tampilannya identik di sem
 - **Belum:**
   - Uji dengan screen reader sungguhan (VoiceOver, NVDA, TalkBack).
   - Uji drag item list di perangkat Android: build berhenti karena disk hampir penuh.
+
+## P6 — iOS dan macOS · Berjalan
+
+Paket di [platforms/apple](../platforms/apple/README.md). Inti Rust-nya `crates/rs-editor-apple`: kelas BoltFFI `NativeEditor` (dalam point) yang membungkus `EditorApi`, ditambah permukaan Skia Metal dan adapter AccessKit.
+
+### Milestone 1: macOS · Selesai
+
+- **Render:** Skia Ganesh Metal ke `CAMetalLayer` milik view. Swift menyerahkan `MTLDevice`, `MTLCommandQueue`, dan tekstur drawable tiap frame. Skia submit di queue yang sama, lalu Swift mem-present drawable. `CADisplayLink` dijeda saat tidak ada frame terjadwal. Binary Skia prebuilt `ganesh-jpegd-jpege-metal-pdf-textlayout` tersedia untuk macOS, iOS, dan iOS simulator.
+- **Paket:** `boltffi pack apple` menghasilkan `RsEditorCore.xcframework` dan binding Swift (`platforms/apple/package.sh`). Paket Swift `RsEditorKit` berisi `RsEditorView`, API konten dan perintah ala Tiptap (`json`, `html`, `markdown`, `run`, `chain`, `can`, `isActive`, `attributes(of:)`, `editLink`, `insertImage`), serta `RsEditorState` dan `RsEditor` untuk SwiftUI.
+- **Input macOS:**
+  - `NSTextInputClient`: marked text IME, `insertText` dengan replacement range, `firstRect`, dan `characterIndex(for:)` (`ime_offset_at`, baru di view dan API).
+  - Tombol khusus dan Command/Control dikirim langsung ke keymap; selebihnya lewat `interpretKeyEvents`, dengan `doCommand(by:)` dipetakan ke tombol (binding emacs seperti Control-A).
+  - Mouse, drag, klik ganda dan tiga kali, hover grip, kursor, dan scroll trackpad dengan inersia sistem (wheel biasa dianimasikan).
+  - Menu Edit (Undo, Redo, Potong, Salin, Tempel, Pilih Semua) dan menu klik kanan. Pasteboard membawa HTML dan teks.
+- **VoiceOver:** `accesskit_macos` memasang dirinya pada view dan menerima pohon yang sama dengan TalkBack. Aksi VoiceOver (misalnya mencentang tugas) memanggil `rsEditorAccessibilityChanged` di view.
+- **Gambar:** URLSession dan ImageIO (orientasi EXIF, maks. 2048 px). Hook `loadImage` untuk server yang butuh login.
+- **Perbaikan inti:** panah kanan/kiri dari select-all kini mendarat di akhir/awal teks. Sebelumnya caret mendarat di luar paragraf, sehingga ketikan berikutnya membuat paragraf baru.
+- **Uji:**
+  - Tes `rs-editor-apple`: kelas Swift, Command-B, marked text, dan `ime_offset_at`.
+  - Demo macOS (computer use): render Metal, mengetik, Enter, Backspace, Shift+Panah, seleksi dengan mouse dan bubble menu, Undo dari menu Edit, scroll, aksara Arab, Devanagari, emoji, dan Jepang. Pohon AX berisi `AXTextArea`, checkbox, dan gambar dengan alt; AXPress mencentang tugas. CPU saat diam sekitar 1%.
+- **Belum:** uji IME Jepang/Cina sungguhan dan VoiceOver dengan suara, drag & drop file ke editor, dan menu Format/Font.
+
+### Milestone 2: iOS · Kode selesai, belum diuji di perangkat
+
+- `UIView` dengan `UITextInput`: offset di blok IME, marked text, `selectedTextRange`, geometri lewat `ime_cursor_info`/`ime_offset_at`, dan `inputDelegate` diberi tahu saat blok atau seleksi berubah bukan dari keyboard. Kolom tautan memakai keyboard URL dengan tombol Go.
+- Sentuhan diteruskan ke gesture Rust (profil `ios`): caret, seleksi kata, handle, scroll, dan fling, sama dengan Android.
+- Menu seleksi dari inti tampil sebagai `UIEditMenuInteraction`, magnifier sebagai `UITextLoupeSession`, getaran sebagai `UIImpactFeedbackGenerator`/`UISelectionFeedbackGenerator`. Keyboard fisik (iPad) lewat `pressesBegan`, area yang tertutup keyboard lewat `setObscuredBottom`, dan VoiceOver lewat `accesskit_ios`.
+- Rust dan Swift lolos kompilasi/typecheck untuk `aarch64-apple-ios`. Belum dijalankan karena runtime simulator iOS (~8 GB) belum terpasang dan Xcode 26 meminta komponen platform iOS untuk build perangkat.
+
+## Backlog
+
+Sisa audit P5 ([audit-p5.md](audit-p5.md)), ditunda atas keputusan pengguna:
+
+- **SVG di Android.** BitmapFactory tidak bisa membacanya. Pilihannya modul SVG Skia (binary prebuilt harus diunduh ulang) atau pustaka SVG di Kotlin.
+- **GIF beranimasi** tampil diam (frame pertama) di semua platform.
+- **Grip bisa menimpa teks** kalau host memakai padding kiri di bawah 26 px.
 
 ## Berikutnya
 
