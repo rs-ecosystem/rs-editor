@@ -1,0 +1,7 @@
+# boltffi pack apple (platforms/apple/package.sh)
+/generated/
+# xcodegen and xcodebuild
+/Demo/*.xcodeproj/
+/Demo/build/
+.build/
+.swiftpm/

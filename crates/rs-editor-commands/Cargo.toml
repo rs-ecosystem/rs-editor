@@ -1,0 +1,19 @@
+[package]
+name = "rs-editor-commands"
+description = "Command editing dasar, list, dan keymap Rs Editor (port prosemirror-commands/schema-list/keymap)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rs-editor-model.workspace = true
+rs-editor-transform.workspace = true
+rs-editor-state.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rs-editor-model = { workspace = true, features = ["test-util"] }
+rs-editor-state = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

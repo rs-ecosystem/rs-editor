@@ -1,0 +1,24 @@
+[package]
+name = "rs-editor-desktop"
+description = "Shell desktop Rs Editor (winit): dev harness sekarang, shell Windows/Linux nanti"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+rs-editor-commands.workspace = true
+rs-editor-extensions.workspace = true
+rs-editor-theme.workspace = true
+rs-editor-view.workspace = true
+serde_json.workspace = true
+skia-safe = { version = "=0.153.3", features = ["textlayout"] }
+winit = "0.30"
+softbuffer = "0.4"
+arboard = { version = "3", default-features = false }
+bytemuck = "1"
+accesskit = "0.25"
+accesskit_winit = "0.34"
+
+[lints]
+workspace = true

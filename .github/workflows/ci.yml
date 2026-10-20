@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main, openrich-v2]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Skia system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features
+
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Skia system dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+      - run: cargo test --workspace --all-features
+      # Golden pixel mismatches leave the actual frame and a diff behind.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: golden-failures-${{ matrix.os }}
+          path: target/golden-failures/
+          if-no-files-found: ignore
+
+  # Longer randomized runs over transforms and whole editing sessions.
+  property:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release -p rs-editor-transform -p rs-editor-extensions -p rs-editor-markup proptests
+        env:
+          PROPTEST_CASES: "20000"

@@ -1,0 +1,25 @@
+[package]
+name = "rs-editor-extensions"
+description = "Sistem extension bergaya Tiptap, editor headless, dan StarterKit Rs Editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rs-editor-model.workspace = true
+rs-editor-transform.workspace = true
+rs-editor-state.workspace = true
+rs-editor-history.workspace = true
+rs-editor-commands.workspace = true
+regex = { version = "1", default-features = false, features = ["std", "unicode-perl", "unicode-case"] }
+serde_json.workspace = true
+thiserror.workspace = true
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+rs-editor-model = { workspace = true, features = ["test-util"] }
+rs-editor-state = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

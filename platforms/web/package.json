@@ -1,0 +1,20 @@
+{
+  "name": "@rs-editor/web",
+  "version": "0.1.0",
+  "description": "Rs Editor di web: rich text editor Rust + Skia (WebAssembly, WebGL2) dengan API ala Tiptap",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "files": ["src", "dist"],
+  "scripts": {
+    "build": "../../crates/rs-editor-web/build.sh",
+    "check": "node --check src/index.js && node --check src/selection-ui.js"
+  },
+  "private": true
+}

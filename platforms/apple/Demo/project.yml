@@ -1,0 +1,47 @@
+# The Rs Editor demo for macOS and iOS. Generate the project with
+# `xcodegen` here after ../package.sh (see ../README.md).
+name: RsEditorDemo
+packages:
+  RsEditorKit:
+    path: ../RsEditorKit
+options:
+  bundleIdPrefix: com.rseditor
+attributes:
+  BuildIndependentTargetsInParallel: true
+targetTemplates:
+  demo:
+    type: application
+    sources:
+    - path: RsEditorDemo
+    - path: ../../android/sample/src/main/assets/sample.json
+      buildPhase: resources
+    dependencies:
+    - package: RsEditorKit
+    scheme:
+      management:
+        shared: true
+    settings:
+      PRODUCT_NAME: Rs Editor
+      MARKETING_VERSION: 0.1.0
+      CURRENT_PROJECT_VERSION: 1
+      GENERATE_INFOPLIST_FILE: YES
+      INFOPLIST_KEY_CFBundleDisplayName: Rs Editor
+      # Skia's archives carry no bitcode and warn about newer SDKs.
+      OTHER_LDFLAGS: [-w]
+      ENABLE_USER_SCRIPT_SANDBOXING: NO
+      CODE_SIGN_IDENTITY: "-"
+targets:
+  RsEditorDemo-macOS:
+    templates: [demo]
+    platform: macOS
+    deploymentTarget: "14.0"
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.rseditor.demo
+  RsEditorDemo-iOS:
+    templates: [demo]
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.rseditor.demo
+      INFOPLIST_KEY_UILaunchScreen_Generation: YES
+      INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight

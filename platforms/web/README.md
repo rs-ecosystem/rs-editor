@@ -1,0 +1,111 @@
+# @rs-editor/web
+
+Rs Editor di halaman web. Seluruh editor (layout, render Skia di WebGL2, editing, seleksi dan gesture sentuh) berjalan di WebAssembly dari crate Rust yang sama dengan Android dan desktop. Paket ini hanya meneruskan event browser, menyambungkan input teks (EditContext, atau textarea tersembunyi di Safari dan Firefox), dan menampilkan yang diminta Rust: menu seleksi, magnifier, getar, dan keyboard layar.
+
+## Build
+
+Prasyarat: emsdk 6 (`~/emsdk`) dan target Rust `wasm32-unknown-emscripten`.
+
+```bash
+crates/rs-editor-web/build.sh
+```
+
+Hasilnya `dist/rs-editor-web.js` dan `dist/rs_editor_web.wasm`, yang di-ignore oleh git. Demo ada di `demo/index.html`. Demo ini memuat subset CJK dari CDN secara default; gunakan `?fonts=none` untuk tanpa font tambahan, atau `?fonts=cdn` untuk ikut memuat font emoji. Sajikan folder ini lewat HTTP, misalnya dengan `python3 -m http.server 4174 --directory platforms/web`, lalu buka `/demo/`.
+
+## API
+
+API-nya mengikuti Tiptap:
+
+```js
+import { createEditor } from "@rs-editor/web";
+
+const editor = await createEditor({ element, content /* JSON Tiptap atau HTML */ });
+
+editor.chain().focus().toggleBold().toggleHeading({ level: 2 }).run(); // satu langkah undo
+editor.can().toggleBulletList().run();     // apakah bisa? tidak mengubah apa pun
+editor.commands.undo();
+editor.isActive("heading", { level: 2 });
+editor.getAttributes("link").href;
+editor.getJSON(); editor.getHTML(); editor.getText(); editor.getMarkdown();
+editor.setContent("<p>halo</p>");
+editor.setContent("# Judul", { contentType: "markdown" });
+editor.on("update", ({ editor }) => save(editor.getJSON()));
+editor.on("selectionUpdate", refreshToolbar);
+editor.destroy();
+```
+
+Semua perintah dari extension Rust bisa dipakai sebagai metode chain, dengan argumen yang sama seperti di Tiptap. Tipe TypeScript-nya ada di `src/index.d.ts`.
+
+## Menu di dalam editor
+
+Menu-menu ini digambar di canvas dengan gaya shadcn/ui, sama di semua platform. Teksnya mengikuti `locale` (default `navigator.language`; saat ini Indonesia dan Inggris).
+
+- **Bubble menu.** Saat teks dipilih dengan mouse atau trackpad, muncul tombol tebal, miring, garis bawah, coret, kode, sorotan, dan tautan. Matikan dengan `bubbleMenu: false` kalau aplikasi punya menu sendiri. Di HP, seleksi tetap memakai menu Potong/Salin/Tempel.
+- **Menu blok.** Mengetik `/` di awal baris atau setelah spasi membuka daftar blok (teks, judul 1–3, list poin, list bernomor, daftar tugas, kutipan, blok kode, pemisah). Teks setelah `/` menyaring daftarnya, termasuk lewat kata kunci seperti `h1`, `todo`, atau `kutipan`. Panah memilih, Enter atau Tab menerapkan, Esc menutup. Blok yang tidak bisa dipakai di posisi itu tidak ditampilkan. Matikan dengan `slashMenu: false`.
+- **Drag handle.** Grip ⠿ di kiri blok yang sedang di-hover (atau blok yang berisi caret, di HP). Klik untuk memilih blok, tarik untuk memindahkannya. Matikan dengan `dragHandle: false`.
+- **Tautan.** Dengan caret di dalam tautan, muncul popover berisi alamatnya dan tombol buka, salin, ubah, dan hapus. Cmd/Ctrl-K, tombol tautan di bubble menu, atau `editor.editLink()` membuka kolom alamat. Alamat tanpa skema dilengkapi (`rs-editor.dev` → `https://…`, alamat email → `mailto:`), dan alamat yang ditolak (misalnya `javascript:`) membuat kolomnya merah. Kolom ini menerima keyboard, IME, dan tempel seperti kolom teks biasa; di HP keyboard-nya berganti ke mode URL.
+
+## Emoji dan font
+
+Emoji tampil tanpa mengunduh apa pun. Browser menggambar setiap emoji dengan font emoji sistem (Apple di Safari, Segoe di Windows, Noto di Android) ke canvas 2D, lalu editor menempelkannya sebagai gambar di tempat emoji itu, dengan ukuran sekitar 1,2 em. Tampilannya sama dengan emoji di aplikasi lain pada perangkat yang sama, sehingga bisa berbeda antar platform. Caret, seleksi, dan hapus tetap memperlakukan satu emoji (termasuk ZWJ, bendera, dan warna kulit) sebagai satu karakter.
+
+Font bawaan mencakup aksara Latin, Arab, dan Devanagari. Untuk CJK, aplikasi memberi daftar `fonts`. Sebuah font hanya dimuat ketika teks berisi karakter dalam rentang Unicode-nya. Preset `notoFonts.japanese`, `korean`, dan `simplifiedChinese` mengambil Noto dari paket fontsource di jsDelivr dalam **subset per rentang Unicode** (8–60 KB per file). Hanya subset yang memuat karakter di dokumen yang diunduh, dan biasanya totalnya ratusan KB, bukan 5–8 MB untuk font utuh. Ini cara yang sama dengan Flutter Web, yang juga merender teks dengan Skia di wasm. Untuk Han, pilih salah satu font Jepang atau Cina saja, karena keduanya menggambar Han dengan gaya bahasanya masing-masing.
+
+```js
+import { createEditor, notoFonts } from "@rs-editor/web";
+
+await createEditor({ element, fonts: [notoFonts.japanese, notoFonts.korean] });
+// atau muat sendiri:
+editor.addFont(await (await fetch("/fonts/MyFont.woff")).arrayBuffer(), "My Font");
+```
+
+Format yang didukung adalah TTF, OTF, dan WOFF (bukan WOFF2). Kalau daftar `fonts` memuat font emoji (misalnya `notoFonts.emoji`, 7 MB), emoji digambar dengan font itu, bukan oleh browser. Untuk produksi, font sebaiknya di-host sendiri.
+
+## Gambar
+
+Gambar dimuat dan didekode oleh browser, jadi semua format yang didukung browser bisa dipakai. Gambar dari origin lain butuh header CORS; tanpa header itu gambar tampil sebagai gagal. Gambar yang gagal dimuat dicoba lagi saat diketuk atau diklik. Ukurannya mengikuti atribut `width`/`height`, atau ukuran asli gambar bila atribut itu tidak ada, dan tidak pernah melebihi lebar kolom.
+
+Untuk memasukkan gambar, beri opsi `uploadImage`. Fungsi ini menerima `File` dan mengembalikan alamat gambar, misalnya setelah diunggah ke server. Fungsi ini dipakai oleh baris Gambar di menu `/` (lewat pemilih file browser), juga saat gambar ditempel atau dijatuhkan ke editor. Tanpa `uploadImage`, menu `/` meminta alamat gambar.
+
+```js
+await createEditor({ element, uploadImage: async (file) => (await upload(file)).url });
+editor.chain().focus().setImage({ src: "/foto.jpg", alt: "Foto" }).run();
+```
+
+Untuk gambar dari server tanpa header CORS, beri opsi `loadImage`. Fungsi ini menerima alamat gambar dan mengembalikan `Blob` atau alamat lain (misalnya proxy di server Anda). Kembalikan `undefined` untuk memuat alamat aslinya, atau `null` kalau gambar tidak bisa dimuat.
+
+```js
+await createEditor({
+  element,
+  loadImage: async (src) => new URL(src, location.href).origin === location.origin
+    ? undefined
+    : `/proxy?url=${encodeURIComponent(src)}`,
+});
+```
+
+## Hitungan karakter dan placeholder
+
+`editor.storage.characterCount.characters()` dan `.words()` sama dengan Tiptap. Opsi `characterLimit` membatasi jumlah karakter. Baris kosong menampilkan petunjuk menu `/` dalam bahasa UI; ganti dengan opsi `placeholder` atau `setPlaceholder()`.
+
+## Markdown
+
+`getMarkdown()` menghasilkan Markdown gaya GitHub. Mark yang tidak punya sintaks Markdown (garis bawah, sorotan, sub/superskrip) ditulis sebagai tag HTML. `setContent(md, { contentType: "markdown" })` dan opsi `contentType: "markdown"` membaca Markdown. Opsi `pasteMarkdown: true` membuat teks polos yang ditempel dibaca sebagai Markdown.
+
+## Sentuh
+
+- Di HP, gesture jari dikenali di Rust, sama seperti di Android:
+  - ketuk menaruh caret, ketuk dua kali memilih kata;
+  - tekan lama memilih kata, lalu handle bisa ditarik untuk memperluas seleksi;
+  - geser untuk scroll dan fling.
+- Menu Potong/Salin/Tempel adalah elemen DOM bergaya shadcn/ui.
+- Magnifier adalah salinan frame canvas yang diperbesar.
+- Getar memakai `navigator.vibrate` (browser Android).
+- Keyboard layar muncul saat teks diketuk.
+- Jika keyboard menutupi halaman tanpa mengubah ukurannya (Safari iOS), editor membaca `visualViewport` dan menggeser caret supaya tidak tertutup keyboard.
+- Dengan mouse, klik kanan membuka menu yang sama di posisi kursor.
+
+## Aksesibilitas
+
+Canvas tidak punya teks yang bisa dibaca screen reader. Karena itu paket ini membuat DOM tak terlihat yang ditumpuk di atas canvas, dari pohon aksesibilitas yang sama dengan yang dipakai screen reader native (lewat AccessKit) di Android dan desktop. Isinya judul, list, checkbox yang bisa diaktifkan, dan teks per baris di posisi aslinya. Navigasi caret dan seleksi dengan keyboard diumumkan lewat region `aria-live`. Matikan dengan `accessibility: false` kalau aplikasi menyediakan aksesibilitasnya sendiri.
+
+Getar di Android: Chrome tidak meneruskan `navigator.vibrate` saat HP dalam mode senyap, dan Safari iOS tidak mendukung getar sama sekali.

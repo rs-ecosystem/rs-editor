@@ -1,0 +1,25 @@
+[package]
+name = "rs-editor-web"
+description = "Shell web Rs Editor: Skia di WebAssembly (Emscripten) dengan WebGL2"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The shell only exists on wasm32-unknown-emscripten; elsewhere the binary
+# is an empty stub so the workspace still builds everywhere.
+[target.'cfg(target_os = "emscripten")'.dependencies]
+rs-editor-api.workspace = true
+rs-editor-commands.workspace = true
+rs-editor-view.workspace = true
+skia-safe = { version = "=0.153.3", features = ["gl", "textlayout"] }
+
+[lints.rust]
+# The C ABI exported to JavaScript needs `#[no_mangle]` and raw pointers.
+unsafe_code = "allow"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"

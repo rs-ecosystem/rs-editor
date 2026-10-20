@@ -1,0 +1,14 @@
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+targets = [
+    # Web (Skia lewat Emscripten/WebGL)
+    "wasm32-unknown-emscripten",
+    # Android
+    "aarch64-linux-android",
+    "x86_64-linux-android",
+    # Apple
+    "aarch64-apple-darwin",
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+]

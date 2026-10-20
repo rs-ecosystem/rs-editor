@@ -1,0 +1,24 @@
+# Swift bindings for the Apple library (platforms/apple).
+# Built by platforms/apple/package.sh (`boltffi pack apple`).
+[package]
+name = "rs-editor-apple"
+crate = "rs_editor_apple"
+version = "0.1.0"
+
+[targets.android]
+enabled = false
+
+[targets.apple]
+output = "../../platforms/apple/generated/RsEditorCore"
+deployment_target = "17.0"
+include_macos = true
+ios_architectures = ["arm64"]
+simulator_architectures = ["arm64"]
+macos_architectures = ["arm64"]
+
+[targets.apple.swift]
+module_name = "RsEditorCore"
+
+[targets.apple.spm]
+package_name = "RsEditorCore"
+layout = "ffi-only"

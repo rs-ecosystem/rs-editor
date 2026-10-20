@@ -1,0 +1,20 @@
+[package]
+name = "rs-editor-model"
+description = "Schema dan pohon dokumen immutable untuk Rs Editor (port model ProseMirror, posisi UTF-16)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+# Builder dokumen bertanda (`<a>`, `<b>`) dan schema uji, dipakai juga oleh crate lain.
+test-util = []
+
+[dependencies]
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

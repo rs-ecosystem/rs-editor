@@ -1,0 +1,24 @@
+[package]
+name = "rs-editor-layout"
+description = "Layout dokumen Rs Editor dengan Skia (SkParagraph): geometri, hit-test, caret dan navigasi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rs-editor-model.workspace = true
+rs-editor-text.workspace = true
+rs-editor-theme.workspace = true
+# Default features (binary-cache, embed-icudtl, pdf, jpeg) + textlayout match
+# the prebuilt `jpegd-jpege-pdf-textlayout` archives for every target, so no
+# platform compiles Skia from source. GPU backends are added per target.
+skia-safe = { version = "=0.153.3", features = ["textlayout"] }
+serde_json.workspace = true
+thiserror.workspace = true
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+rs-editor-model = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "rs-editor-transform"
+description = "Step, pemetaan posisi, dan transformasi dokumen Rs Editor (port prosemirror-transform)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rs-editor-model.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+rs-editor-model = { workspace = true, features = ["test-util"] }
+proptest.workspace = true
+
+[lints]
+workspace = true

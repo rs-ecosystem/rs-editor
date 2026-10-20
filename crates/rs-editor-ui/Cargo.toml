@@ -1,0 +1,15 @@
+[package]
+name = "rs-editor-ui"
+description = "UI di dalam canvas Rs Editor (gaya shadcn/ui): panel, toolbar, menu, kolom teks, ikon Lucide, animasi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rs-editor-layout.workspace = true
+rs-editor-text.workspace = true
+rs-editor-theme.workspace = true
+skia-safe = { version = "=0.153.3", features = ["textlayout"] }
+
+[lints]
+workspace = true

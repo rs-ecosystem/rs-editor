@@ -1,0 +1,23 @@
+# Implementasi v1 (server HTTP + DOM mirror). Dibekukan sebagai rujukan
+# sampai crate v2 menggantikannya; lihat docs/adr/0007-openrich-v2-architecture.md.
+[workspace]
+resolver = "2"
+members = [
+    "openrich-document",
+    "openrich-editor",
+    "openrich-layout",
+    "openrich-render",
+    "openrich-render-skia",
+    "openrich-demo",
+    "openrich-transaction",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+unicode-segmentation = "1"

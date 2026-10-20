@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rs-editor-web",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4174", "--bind", "0.0.0.0", "--directory", "platforms/web"],
+      "port": 4174
+    }
+  ]
+}

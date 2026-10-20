@@ -1,0 +1,1259 @@
+//! The drag handle: a grip in the left margin beside the block under the
+//! mouse (or, on touch screens, the block with the caret), as in Notion
+//! and Tiptap's DragHandle. Clicking it selects the block; dragging it
+//! moves the block, with a line showing where it will land and the view
+//! scrolling near its edges.
+//!
+//! A block is a list item when the pointer (or caret) is in a list, else
+//! a top-level block. List items land between items of lists that take
+//! them, at any depth (moving the pointer right picks the deeper of two
+//! lists ending together), or between top-level blocks as a list of their
+//! own.
+
+use accesskit::{Action, NodeId, Role};
+use rs_editor_layout::{DocumentLayout, Rect};
+use rs_editor_model::Fragment;
+use rs_editor_state::{NodeSelection, Selection};
+use rs_editor_ui::{Appear, Icon};
+use skia_safe::{Canvas, Contains, Paint, RRect};
+
+use crate::a11y::{OverlayNodes, overlay_ids, overlay_node};
+use crate::{CursorIcon, EditorView, Effect, HapticKind, TouchPhase};
+
+/// The grip for a mouse: width, height, icon size.
+const MOUSE_GRIP: (f32, f32, f32) = (20.0, 24.0, 16.0);
+/// The grip for a finger: larger, and reaching further (see `on_grip`).
+const TOUCH_GRIP: (f32, f32, f32) = (24.0, 36.0, 18.0);
+/// How far the pointer moves before a press on the grip becomes a drag.
+const DRAG_SLOP: f32 = 4.0;
+/// Extra reach of the grip for a finger.
+const TOUCH_SLACK: f32 = 10.0;
+/// Pointers this close to the top or bottom edge scroll the view.
+const EDGE: f32 = 40.0;
+
+/// What a grip moves: a top-level block or a list item.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Unit {
+    /// Position before the node and its size.
+    pos: usize,
+    size: usize,
+    /// Its box, in document coordinates.
+    rect: Rect,
+    item: bool,
+}
+
+impl Unit {
+    fn end(&self) -> usize {
+        self.pos + self.size
+    }
+}
+
+/// Where a dragged block would land.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Drop {
+    /// A position between siblings.
+    pos: usize,
+    /// The line showing it (document coordinates).
+    y: f32,
+    left: f32,
+    /// Between top-level blocks: a list item lands in a list of its own.
+    top_level: bool,
+    /// At the end of a list item without a sublist: the block becomes the
+    /// first item of a new one.
+    nest: bool,
+}
+
+/// A block being dragged by its grip.
+#[derive(Debug, Clone, Copy)]
+struct BlockDrag {
+    unit: Unit,
+    start: (f32, f32),
+    /// How far below the block's top the pointer took hold of it: the
+    /// ghost keeps that relation to the pointer, whatever layout and
+    /// scrolling do meanwhile.
+    grab: f32,
+    /// When the view last scrolled for the drag at an edge.
+    last_tick: u64,
+    /// The scroll offset the drop place was found at.
+    drop_scroll: f32,
+    pointer: (f32, f32),
+    moved: bool,
+    /// The finger already felt the block come loose (a long press lifted
+    /// it).
+    felt: bool,
+    drop: Option<Drop>,
+}
+
+/// The drop line as shown: it slides to each new place.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Line {
+    y: f32,
+    left: f32,
+    at_ms: u64,
+}
+
+/// Custom accessibility actions of the grip.
+const GRIP_MOVE_UP: i32 = 1;
+const GRIP_MOVE_DOWN: i32 = 2;
+/// The tallest the ghost of a dragged block gets.
+const GHOST_HEIGHT: f32 = 160.0;
+/// How quickly the drop line catches up (milliseconds to cover ~63%).
+const LINE_EASE_MS: f32 = 60.0;
+/// A new drop place must be this much nearer than the current one to
+/// take over, so the line does not flicker between two near places.
+const HYSTERESIS: f32 = 6.0;
+
+#[derive(Debug, Default)]
+pub(crate) struct BlockHandle {
+    pub enabled: bool,
+    appear: Appear,
+    /// The block the grip belongs to.
+    block: Option<Unit>,
+    /// The grip, in view coordinates.
+    grip: skia_safe::Rect,
+    /// The mouse over the view, for the block under it.
+    pointer: Option<(f32, f32)>,
+    /// The mouse is over the grip.
+    hovered: bool,
+    drag: Option<BlockDrag>,
+    line: Option<Line>,
+    /// A block a screen reader moved with the grip's actions: the grip
+    /// stays on it (not on what slid under the mouse) until the pointer
+    /// moves or the document changes otherwise.
+    pub(crate) pinned: Option<usize>,
+}
+
+impl BlockHandle {
+    pub(crate) fn new() -> Self {
+        Self {
+            enabled: true,
+            ..Self::default()
+        }
+    }
+}
+
+impl EditorView {
+    /// Shows a grip beside blocks to select and move them (on by default).
+    pub fn set_drag_handle(&mut self, enabled: bool) {
+        self.blocks.enabled = enabled;
+        if !enabled {
+            self.blocks.appear.jump(false);
+            self.blocks.drag = None;
+        }
+        self.request_redraw();
+    }
+
+    /// Whether the drag handle is (becoming) visible.
+    pub fn drag_handle_shown(&self) -> bool {
+        self.blocks.appear.target()
+    }
+
+    /// Where the grip is while it shows (view coordinates), for platforms
+    /// that must keep their own edge gestures (Android's Back) off it.
+    pub fn drag_handle_rect(&self) -> Option<Rect> {
+        let grip = self.blocks.grip;
+        self.blocks.appear.target().then(|| {
+            Rect::new(
+                grip.left - TOUCH_SLACK,
+                grip.top - TOUCH_SLACK,
+                grip.width() + TOUCH_SLACK * 2.0,
+                grip.height() + TOUCH_SLACK * 2.0,
+            )
+        })
+    }
+
+    /// Whether a block is being dragged.
+    pub fn is_dragging_block(&self) -> bool {
+        self.blocks.drag.is_some_and(|d| d.moved)
+    }
+
+    /// No mouse is over the view (a finger is in use).
+    pub(crate) fn forget_pointer(&mut self) {
+        self.blocks.pointer = None;
+        self.blocks.hovered = false;
+    }
+
+    /// The mouse left the view.
+    pub fn pointer_leave(&mut self) {
+        if self.blocks.pointer.take().is_some() {
+            self.blocks.hovered = false;
+            self.request_redraw();
+        }
+    }
+
+    /// The block the grip should show for, if any.
+    fn handle_block(&mut self) -> Option<Unit> {
+        let layout = self.layout();
+        if let Some(drag) = self.blocks.drag {
+            return Some(drag.unit);
+        }
+        if !self.blocks.enabled
+            || !self.editor.is_editable()
+            || self.drag.is_some()
+            || self.link_editing()
+            || self.slash_menu_shown()
+        {
+            return None;
+        }
+        if let Some(pos) = self.blocks.pinned {
+            let unit = innermost_item(&layout, |b| b.pos == pos).or_else(|| {
+                top_unit(&layout, layout.top_at_pos(pos + 1)?).filter(|u| u.pos == pos)
+            });
+            if unit.is_some() {
+                return unit;
+            }
+        }
+        // With a finger, the caret's block (also while a keyboard composes
+        // words, which would otherwise make it blink in and out).
+        if self.touch.finger_used {
+            if !self.focused || self.touch_gesture_active() {
+                return None;
+            }
+            // A selected block (one just moved, a tapped image) is the
+            // block itself, not the one after it where its head is.
+            let selection = self.editor.selection();
+            if let Selection::Node(_) = selection {
+                let from = selection.from();
+                let unit = innermost_item(&layout, |b| b.pos == from).or_else(|| {
+                    let index = layout.top_at_pos(from)?;
+                    (index.saturating_sub(1)..=index + 1)
+                        .filter_map(|i| top_unit(&layout, i))
+                        .find(|u| u.pos == from)
+                });
+                if unit.is_some() {
+                    return unit;
+                }
+            }
+            let head = match selection {
+                Selection::Node(_) => selection.from() + 1,
+                _ => selection.head(),
+            };
+            let item = innermost_item(&layout, |b| {
+                b.pos < head && head < b.pos + b.node.node_size()
+            });
+            return item.or_else(|| top_unit(&layout, layout.top_at_pos(head)?));
+        }
+        if self.composition.is_some() {
+            return None;
+        }
+        let (x, y) = self.blocks.pointer?;
+        if x < 0.0 || x > self.width || y < 0.0 || y > self.visible_height() {
+            return None;
+        }
+        let (_, doc_y) = self.to_document(x, y);
+        // The gap below an item is that item's, so the grip does not jump
+        // to the whole list between items.
+        let gap = self.theme().spacing.list_item_gap;
+        let item = innermost_item(&layout, |b| {
+            b.rect.y <= doc_y && doc_y < b.rect.bottom() + gap
+        });
+        if item.is_some() {
+            return item;
+        }
+        let block = top_unit(&layout, layout.top_at_y(doc_y)?)?;
+        // Below the last block is not beside it.
+        (doc_y <= block.rect.bottom() + self.theme().spacing.block_gap).then_some(block)
+    }
+
+    /// Where the grip goes for `block`: left of it (of a list item's
+    /// marker), centered on its first line (view coordinates).
+    fn grip_rect(&mut self, block: &Unit) -> skia_safe::Rect {
+        let layout = self.layout();
+        let first_line = layout
+            .texts
+            .iter()
+            .find(|t| t.pos > block.pos && t.pos < block.end())
+            .and_then(|t| {
+                let line = t.layout.lines().first()?;
+                Some(t.rect.y + line.top + line.height / 2.0)
+            });
+        let (grip_width, grip_height, _) = self.grip_size();
+        let center = first_line.unwrap_or(block.rect.y + block.rect.height.min(grip_height) / 2.0);
+        let at = self.to_view(Rect::new(block.rect.x, center, 0.0, 0.0));
+        let x = (at.x - grip_width - 2.0).max(0.0);
+        skia_safe::Rect::from_xywh(x, at.y - grip_height / 2.0, grip_width, grip_height)
+    }
+
+    /// The grip's width, height and icon size: larger for a finger.
+    fn grip_size(&self) -> (f32, f32, f32) {
+        if self.touch.finger_used {
+            TOUCH_GRIP
+        } else {
+            MOUSE_GRIP
+        }
+    }
+
+    /// Brings the grip in line with the pointer, the caret and a drag.
+    pub(crate) fn update_block_handle(&mut self) {
+        if let Some(mut drag) = self.blocks.drag {
+            // Blocks measured since (scrolling a long document) move it.
+            drag.unit = self.fresh_unit(&drag.unit);
+            self.blocks.drag = Some(drag);
+            // A wheel scrolled under a still pointer: a new place.
+            if drag.moved && drag.drop_scroll != self.scroll_y {
+                self.move_block_drag(drag.pointer.0, drag.pointer.1);
+            }
+        }
+        let block = self.handle_block();
+        let wanted = block.is_some_and(|b| {
+            let grip = self.grip_rect(&b);
+            self.blocks.grip = grip;
+            grip.bottom() > 0.0 && grip.top < self.visible_height()
+        });
+        self.blocks.block = block;
+        if !wanted {
+            self.blocks.hovered = false;
+        }
+        if wanted != self.blocks.appear.target() {
+            self.blocks.appear.set(wanted, self.clock.now_ms());
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn block_handle_animating(&self) -> bool {
+        self.blocks.appear.animating(self.clock.now_ms())
+            || self
+                .blocks
+                .drag
+                .is_some_and(|d| d.moved && self.edge_speed(d.pointer.1) != 0.0)
+            || self.drop_line_moving()
+    }
+
+    /// Whether `(x, y)` is on the grip, reaching `slack` further up, down
+    /// and left (barely right: the text starts there, and taps on it place
+    /// the caret).
+    fn on_grip(&self, x: f32, y: f32, slack: f32) -> bool {
+        let grip = self.blocks.grip;
+        let area = skia_safe::Rect::from_ltrb(
+            grip.left - slack,
+            grip.top - slack,
+            grip.right + slack.min(2.0),
+            grip.bottom + slack,
+        );
+        self.blocks.appear.target() && area.contains(skia_safe::Point::new(x, y))
+    }
+
+    /// Starts a press on the grip: the block is selected, and moving makes
+    /// it a drag.
+    fn start_block_drag(&mut self, x: f32, y: f32) -> bool {
+        let Some(unit) = self.blocks.block else {
+            return false;
+        };
+        let doc = self.editor.doc().clone();
+        self.finish_composition();
+        self.set_focused(true);
+        if let Ok(selection) = NodeSelection::create(&doc, unit.pos) {
+            let mut tr = self.editor.state().tr();
+            tr.set_selection(selection);
+            self.dispatch(tr);
+        }
+        let grab = y - self.to_view(unit.rect).y;
+        self.blocks.drag = Some(BlockDrag {
+            unit,
+            start: (x, y),
+            grab,
+            last_tick: self.clock.now_ms(),
+            drop_scroll: self.scroll_y,
+            pointer: (x, y),
+            moved: false,
+            felt: false,
+            drop: None,
+        });
+        self.request_redraw();
+        true
+    }
+
+    /// A long press on a leaf block (an image, a rule) lifts it for a
+    /// drag, as the grip would: the finger is already on it. True when it
+    /// was lifted.
+    pub(crate) fn lift_leaf_block(&mut self, pos: usize, x: f32, y: f32) -> bool {
+        if !self.blocks.enabled || !self.editor.is_editable() || self.blocks.drag.is_some() {
+            return false;
+        }
+        let layout = self.layout();
+        // Top-level ones (list items start with a paragraph).
+        let unit = layout.top_at_pos(pos).and_then(|index| {
+            (index.saturating_sub(1)..=index + 1)
+                .filter_map(|i| top_unit(&layout, i))
+                .find(|u| u.pos == pos)
+        });
+        let Some(unit) = unit else {
+            return false;
+        };
+        self.blocks.block = Some(unit);
+        if !self.start_block_drag(x, y) {
+            return false;
+        }
+        // Lifted at once: the ghost shows under the finger.
+        if let Some(drag) = &mut self.blocks.drag {
+            drag.felt = true;
+            drag.moved = true;
+        }
+        self.hide_menu();
+        self.push_effect(Effect::Haptic(HapticKind::LongPress));
+        true
+    }
+
+    /// The pointer moved during a press on the grip.
+    fn move_block_drag(&mut self, x: f32, y: f32) {
+        let Some(mut drag) = self.blocks.drag else {
+            return;
+        };
+        drag.pointer = (x, y);
+        let started = !drag.moved && (x - drag.start.0).hypot(y - drag.start.1) > DRAG_SLOP;
+        drag.moved |= started;
+        if started && self.touch.finger_used && !drag.felt {
+            // The block comes loose under the finger.
+            self.push_effect(Effect::Haptic(HapticKind::LongPress));
+        }
+        if drag.moved {
+            // Depth follows how far the pointer moved sideways from where
+            // it took hold, not where on the grip it happened to press.
+            let reach = self.to_view(drag.unit.rect).x + (x - drag.start.0);
+            drag.drop = self.drop_target(&drag.unit, reach, y, drag.drop);
+            drag.drop_scroll = self.scroll_y;
+        }
+        self.blocks.drag = Some(drag);
+        self.request_redraw();
+    }
+
+    /// The place nearest to the pointer at view `(x, y)` where `unit` can
+    /// land, unless that would leave it where it is.
+    fn drop_target(&mut self, unit: &Unit, x: f32, y: f32, current: Option<Drop>) -> Option<Drop> {
+        let (doc_x, doc_y) = self.to_document(x, y);
+        let layout = self.layout();
+        let doc = self.editor.doc().clone();
+        let spacing = self.theme().spacing;
+        let mut candidates: Vec<Drop> = Vec::new();
+        // Between top-level blocks.
+        let tops: Vec<_> = layout.tops.iter().collect();
+        for (index, block) in tops.iter().enumerate() {
+            // Midway between the blocks (headings keep more space).
+            let y = match index.checked_sub(1).and_then(|i| tops.get(i)) {
+                Some(previous) => (previous.bottom() + block.y) / 2.0,
+                None => block.y,
+            };
+            candidates.push(Drop {
+                pos: block.pos,
+                y,
+                left: 0.0,
+                top_level: true,
+                nest: false,
+            });
+        }
+        if let Some(last) = tops.last() {
+            candidates.push(Drop {
+                pos: last.end(),
+                y: last.bottom() + spacing.block_gap / 2.0,
+                left: 0.0,
+                top_level: true,
+                nest: false,
+            });
+        }
+        // Between the items of lists: an item of any list (it takes the
+        // kind of the list it lands in), or a paragraph (it becomes one).
+        let into_lists = unit.item
+            || doc
+                .node_at(unit.pos)
+                .is_some_and(|n| n.type_name() == "paragraph");
+        if into_lists {
+            for item in layout
+                .blocks
+                .iter()
+                .filter(|b| matches!(b.node.type_name(), "listItem" | "taskItem"))
+            {
+                let gap = spacing.list_item_gap / 2.0;
+                candidates.push(Drop {
+                    pos: item.pos,
+                    y: item.rect.y - gap,
+                    left: item.rect.x,
+                    top_level: false,
+                    nest: false,
+                });
+                let end = item.pos + item.node.node_size();
+                let last = doc.resolve(end).is_ok_and(|at| at.end(at.depth()) == end);
+                if last {
+                    candidates.push(Drop {
+                        pos: end,
+                        y: item.rect.bottom() + gap,
+                        left: item.rect.x,
+                        top_level: false,
+                        nest: false,
+                    });
+                }
+                // Further right below an item without a sublist: one is
+                // made for it.
+                if item.node.child_count() == 1 {
+                    candidates.push(Drop {
+                        pos: end - 1,
+                        y: item.rect.bottom() + gap,
+                        left: item.rect.x + spacing.list_indent,
+                        top_level: false,
+                        nest: true,
+                    });
+                }
+            }
+        }
+        // Between the blocks of a quote, for blocks (items stay in lists).
+        if !unit.item {
+            let gap = spacing.block_gap / 2.0;
+            for block in &layout.blocks {
+                let Ok(at) = doc.resolve(block.pos) else {
+                    continue;
+                };
+                if at.depth() == 0 || at.parent().type_name() != "blockquote" {
+                    continue;
+                }
+                candidates.push(Drop {
+                    pos: block.pos,
+                    y: block.rect.y - gap,
+                    left: block.rect.x,
+                    top_level: false,
+                    nest: false,
+                });
+                let end = block.pos + block.node.node_size();
+                if at.end(at.depth()) == end {
+                    candidates.push(Drop {
+                        pos: end,
+                        y: block.rect.bottom() + gap,
+                        left: block.rect.x,
+                        top_level: false,
+                        nest: false,
+                    });
+                }
+            }
+        }
+        // Over the block itself it stays: back where it started, a drag
+        // can be given up.
+        if doc_y >= unit.rect.y && doc_y <= unit.rect.bottom() {
+            return None;
+        }
+        // Never inside itself; its own edges are where it already is (a
+        // list's only item: the list's edges).
+        let (from, to) = self.removed_range(unit);
+        candidates.retain(|c| c.pos <= from || c.pos >= to);
+        let nearest = candidates
+            .iter()
+            .map(|c| (c.y - doc_y).abs())
+            .fold(f32::INFINITY, f32::min);
+        // Of places about as near, the deepest the pointer reaches; where
+        // a list and the top level meet (a list's first or last item), the
+        // list keeps its item.
+        let close = candidates
+            .iter()
+            .filter(|c| (c.y - doc_y).abs() <= nearest + 6.0);
+        let reached = close
+            .clone()
+            .filter(|c| c.left <= doc_x + 8.0)
+            .max_by(|a, b| {
+                a.left
+                    .total_cmp(&b.left)
+                    .then(b.top_level.cmp(&a.top_level))
+            });
+        let best = reached
+            .or_else(|| {
+                close.min_by(|a, b| {
+                    a.left
+                        .total_cmp(&b.left)
+                        .then(a.top_level.cmp(&b.top_level))
+                })
+            })
+            .copied()?;
+        // The place shown stays until another is clearly nearer (a place
+        // at the same height, a different depth, takes over at once).
+        let kept = current.and_then(|current| {
+            candidates
+                .iter()
+                .find(|c| c.pos == current.pos && c.top_level == current.top_level)
+                .filter(|c| {
+                    (c.y - best.y).abs() > 1.0
+                        && (c.y - doc_y).abs() <= (best.y - doc_y).abs() + HYSTERESIS
+                })
+                .copied()
+        });
+        let place = kept.unwrap_or(best);
+        // Nearest to where it is: no move (and no line).
+        let stays = [from, to, unit.pos, unit.end()].contains(&place.pos);
+        (!stays).then_some(place)
+    }
+
+    /// What moving `unit` removes: the item, or its list when it is the
+    /// list's only item.
+    fn removed_range(&self, unit: &Unit) -> (usize, usize) {
+        let doc = self.editor.doc();
+        match doc.resolve(unit.pos) {
+            Ok(at) if unit.item && at.parent().child_count() == 1 => {
+                let list = at.before(at.depth());
+                (list, list + at.parent().node_size())
+            }
+            _ => (unit.pos, unit.end()),
+        }
+    }
+
+    /// `unit` as currently laid out (its box moves when blocks above it
+    /// are measured).
+    fn fresh_unit(&mut self, unit: &Unit) -> Unit {
+        let layout = self.layout();
+        let rect = if unit.item {
+            layout
+                .blocks
+                .iter()
+                .find(|b| b.pos == unit.pos)
+                .map(|b| b.rect)
+        } else {
+            layout
+                .top_at_pos(unit.pos)
+                .and_then(|i| layout.tops.get(i))
+                .filter(|b| b.pos == unit.pos)
+                .map(|b| Rect::new(0.0, b.y, layout.width, b.height))
+        };
+        Unit {
+            rect: rect.unwrap_or(unit.rect),
+            ..*unit
+        }
+    }
+
+    /// Scroll speed (pixels per 16 ms) for a pointer at view `y` during a
+    /// drag: faster the closer it is to an edge.
+    fn edge_speed(&self, y: f32) -> f32 {
+        let visible = self.visible_height();
+        if y < EDGE {
+            -((EDGE - y) / EDGE).min(1.5) * 12.0
+        } else if y > visible - EDGE {
+            ((y - (visible - EDGE)) / EDGE).min(1.5) * 12.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Scrolls while a drag holds the pointer near an edge, by time (the
+    /// same speed at 60 and 120 frames a second). Called once a frame.
+    pub(crate) fn tick_block_drag(&mut self) {
+        let Some(mut drag) = self.blocks.drag.filter(|d| d.moved) else {
+            return;
+        };
+        let now = self.clock.now_ms();
+        let elapsed = now.saturating_sub(drag.last_tick).min(50) as f32;
+        drag.last_tick = now;
+        self.blocks.drag = Some(drag);
+        let speed = self.edge_speed(drag.pointer.1) * elapsed / 16.0;
+        if speed != 0.0 {
+            let before = self.scroll_y;
+            self.scroll_to_inner(self.scroll_y + speed);
+            if self.scroll_y != before {
+                self.move_block_drag(drag.pointer.0, drag.pointer.1);
+            }
+        }
+    }
+
+    /// The press on the grip ended: a drag drops the block, a click keeps
+    /// it selected.
+    fn end_block_drag(&mut self) {
+        let Some(drag) = self.blocks.drag.take() else {
+            return;
+        };
+        if let (true, Some(drop)) = (drag.moved, drag.drop) {
+            self.move_block(&drag.unit, &drop);
+        }
+        self.request_redraw();
+    }
+
+    /// Moves `unit` to `drop` as one undo step and selects it there. A
+    /// list item dropped between top-level blocks goes in a list like the
+    /// one it left; a list left empty goes away.
+    fn move_block(&mut self, unit: &Unit, drop: &Drop) -> bool {
+        let doc = self.editor.doc().clone();
+        let Some(node) = doc.node_at(unit.pos) else {
+            return false;
+        };
+        let Ok(at) = doc.resolve(unit.pos) else {
+            return false;
+        };
+        let parent = at.parent().clone();
+        // The removed range: the item, or its list when it was the only one.
+        let (from, to) = if unit.item && parent.child_count() == 1 {
+            let list = at.before(at.depth());
+            (list, list + parent.node_size())
+        } else {
+            (unit.pos, unit.end())
+        };
+        let wrapped = unit.item && drop.top_level;
+        let content = if wrapped {
+            match parent.node_type().create(
+                Some(parent.attrs()),
+                Fragment::from_node(node),
+                Default::default(),
+            ) {
+                Ok(list) => list,
+                Err(_) => return false,
+            }
+        } else if drop.nest {
+            // A new sublist at the end of the item, of its list's kind.
+            let Ok(at) = doc.resolve(drop.pos) else {
+                return false;
+            };
+            let list = at.node(at.depth().saturating_sub(1)).clone();
+            let made = self.as_item_of(&list, &node).and_then(|item| {
+                list.node_type()
+                    .create(None, Fragment::from_node(item), Default::default())
+                    .ok()
+            });
+            match made {
+                Some(sublist) => sublist,
+                None => return false,
+            }
+        } else if !drop.top_level {
+            // Into a list as an item of its kind; into a quote as it is.
+            let Ok(at) = doc.resolve(drop.pos) else {
+                return false;
+            };
+            let parent = at.parent().clone();
+            if parent.type_name() == "blockquote" {
+                node
+            } else {
+                match self.as_item_of(&parent, &node) {
+                    Some(item) => item,
+                    None => return false,
+                }
+            }
+        } else {
+            node
+        };
+        let mut tr = self.editor.state().tr();
+        let target = if drop.pos > from {
+            drop.pos - (to - from)
+        } else {
+            drop.pos
+        };
+        if tr.delete(from, to).is_err() || tr.insert(target, Fragment::from_node(content)).is_err()
+        {
+            return false;
+        }
+        // The moved block, inside a list made for it.
+        let mut target = if wrapped || drop.nest {
+            target + 1
+        } else {
+            target
+        };
+        // An item taken out beside a list of its kind joins it (a numbered
+        // list goes on counting): the later join first, so the earlier
+        // position holds.
+        if wrapped {
+            let list = target - 1;
+            let size = tr.doc.node_at(list).map_or(0, |n| n.node_size());
+            let kind = parent.type_name();
+            let after = list + size;
+            let next = tr.doc.resolve(after).ok().and_then(|at| at.node_after());
+            if next.is_some_and(|n| n.type_name() == kind)
+                && rs_editor_transform::can_join(&tr.doc, after)
+            {
+                let _ = tr.join(after, 1);
+            }
+            let previous = tr.doc.resolve(list).ok().and_then(|at| at.node_before());
+            if previous.is_some_and(|n| n.type_name() == kind)
+                && rs_editor_transform::can_join(&tr.doc, list)
+                && tr.join(list, 1).is_ok()
+            {
+                target -= 2;
+            }
+        }
+        // The caret goes to its end (typing goes on there), an image stays
+        // selected.
+        let moved = tr.doc.node_at(target);
+        let selection = match moved {
+            Some(node) if node.is_leaf() => NodeSelection::create(&tr.doc, target).ok(),
+            Some(node) => tr
+                .doc
+                .resolve(target + node.node_size())
+                .ok()
+                .map(|end| Selection::near(&end, -1)),
+            None => None,
+        };
+        let Some(selection) = selection else {
+            return false;
+        };
+        tr.set_selection(selection);
+        if !self.dispatch(tr) {
+            return false;
+        }
+        self.reveal_block(target);
+        true
+    }
+
+    /// `node` as an item of `list`: an item of the other kind converts (a
+    /// task item becomes a list item and back), a paragraph is wrapped.
+    fn as_item_of(
+        &self,
+        list: &rs_editor_model::Node,
+        node: &rs_editor_model::Node,
+    ) -> Option<rs_editor_model::Node> {
+        let kind = match list.type_name() {
+            "taskList" => "taskItem",
+            _ => "listItem",
+        };
+        if node.type_name() == kind {
+            return Some(node.clone());
+        }
+        let item = self.editor.schema().node_type(kind).ok()?;
+        match node.type_name() {
+            "listItem" | "taskItem" => item
+                .create(None, node.content().clone(), Default::default())
+                .ok(),
+            "paragraph" => item
+                .create(None, Fragment::from_node(node.clone()), Default::default())
+                .ok(),
+            _ => None,
+        }
+    }
+
+    /// Scrolls (smoothly) so the block at `pos` shows whole above whatever
+    /// covers the bottom (a soft keyboard), or its top when it is taller
+    /// than the view: a block dropped at the top or the bottom stays in
+    /// sight, as the caret does when a keyboard opens over it.
+    fn reveal_block(&mut self, pos: usize) {
+        let layout = self.layout();
+        let rect = layout
+            .blocks
+            .iter()
+            .find(|b| b.pos == pos)
+            .map(|b| b.rect)
+            .or_else(|| {
+                let top = layout.tops.get(layout.top_at_pos(pos)?)?;
+                Some(Rect::new(0.0, top.y, layout.width, top.height))
+            });
+        let Some(rect) = rect else {
+            return;
+        };
+        let rect = self.to_view(rect);
+        let margin = 24.0;
+        let visible = self.visible_height();
+        let shift = if rect.y < margin || rect.height > visible - margin * 2.0 {
+            rect.y - margin
+        } else if rect.bottom() > visible - margin {
+            rect.bottom() - (visible - margin)
+        } else {
+            0.0
+        };
+        if shift.abs() > 0.5 {
+            self.scroll_smooth_by(shift);
+        }
+    }
+
+    /// Moves the block with the caret (a list item in a list) one place
+    /// up or down among its siblings, keeping the caret where it is in it
+    /// (Mod-Shift-Up/Down, as in Notion). False at the first or last place.
+    pub fn move_block_by(&mut self, up: bool) -> bool {
+        if !self.editor.is_editable() {
+            return false;
+        }
+        let head = self.editor.selection().head();
+        let layout = self.layout();
+        let unit = innermost_item(&layout, |b| {
+            b.pos < head && head < b.pos + b.node.node_size()
+        })
+        .or_else(|| top_unit(&layout, layout.top_at_pos(head)?));
+        match unit {
+            Some(unit) => self.move_unit_by(unit, up).is_some(),
+            None => false,
+        }
+    }
+
+    /// Moves `unit` one place up or down among its siblings.
+    /// Moves `unit` past its previous or next sibling; returns where it
+    /// went.
+    fn move_unit_by(&mut self, unit: Unit, up: bool) -> Option<usize> {
+        let selection = self.editor.selection().clone();
+        let doc = self.editor.doc().clone();
+        let at = doc.resolve(unit.pos).ok()?;
+        let parent = at.parent();
+        let index = at.index(at.depth());
+        let target = if up {
+            let previous = parent.child(index.checked_sub(1)?);
+            unit.pos - previous.node_size()
+        } else {
+            if index + 1 >= parent.child_count() {
+                return None;
+            }
+            unit.end() + parent.child(index + 1).node_size()
+        };
+        // Among its siblings: a list's items stay items, blocks stay as
+        // they are.
+        let drop = Drop {
+            pos: target,
+            y: 0.0,
+            left: 0.0,
+            top_level: !unit.item,
+            nest: false,
+        };
+        self.finish_composition();
+        if !self.move_block(&unit, &drop) {
+            return None;
+        }
+        // The caret (or selection) keeps its place inside the block.
+        let moved_to = if up { target } else { target - unit.size };
+        let shift = |pos: usize| moved_to + (pos - unit.pos);
+        if selection.from() >= unit.pos && selection.to() <= unit.end() {
+            let (anchor, head) = (shift(selection.anchor()), shift(selection.head()));
+            self.select_text(anchor, head, self.affinity);
+        }
+        Some(moved_to)
+    }
+
+    /// Typing over a selected block (a click on its grip) goes on at the
+    /// block's end instead of replacing the block; a selected image is
+    /// replaced, as anywhere.
+    pub(crate) fn collapse_block_selection(&mut self) {
+        let selection = self.editor.selection().clone();
+        let Selection::Node(node) = &selection else {
+            return;
+        };
+        if node.node().is_leaf() {
+            return;
+        }
+        let doc = self.editor.doc().clone();
+        if let Ok(end) = doc.resolve(selection.to()) {
+            let mut tr = self.editor.state().tr();
+            tr.set_selection(Selection::near(&end, -1));
+            self.dispatch(tr);
+        }
+    }
+
+    /// The grip as a button for screen readers: activating it selects the
+    /// block.
+    pub(crate) fn grip_a11y(&self, out: &mut OverlayNodes) {
+        if !self.blocks.appear.target() || self.blocks.drag.is_some() {
+            return;
+        }
+        let id = NodeId(overlay_ids::GRIP);
+        let mut node = overlay_node(Role::Button, self.blocks.grip, self.strings.move_block);
+        node.add_action(Action::Click);
+        // Screen readers move blocks with these instead of dragging.
+        node.add_action(Action::CustomAction);
+        node.set_custom_actions(vec![
+            accesskit::CustomAction {
+                id: GRIP_MOVE_UP,
+                description: self.strings.move_up.to_owned(),
+            },
+            accesskit::CustomAction {
+                id: GRIP_MOVE_DOWN,
+                description: self.strings.move_down.to_owned(),
+            },
+        ]);
+        out.nodes.push((id, node));
+        out.roots.push(id);
+    }
+
+    /// A screen reader's custom action on the grip: moving its block.
+    pub(crate) fn grip_custom_action(&mut self, id: i32) -> bool {
+        let Some(unit) = self.blocks.block else {
+            return false;
+        };
+        let moved = match id {
+            GRIP_MOVE_UP => self.move_unit_by(unit, true),
+            GRIP_MOVE_DOWN => self.move_unit_by(unit, false),
+            _ => None,
+        };
+        let Some(pos) = moved else {
+            return false;
+        };
+        // The grip, and the screen reader's focus on it, go along.
+        self.blocks.pinned = Some(pos);
+        self.update_block_handle();
+        true
+    }
+
+    /// A screen reader activated the grip: the block is selected.
+    pub(crate) fn grip_click(&mut self) -> bool {
+        let grip = self.blocks.grip;
+        if !self.blocks.appear.target() || !self.start_block_drag(grip.center_x(), grip.center_y())
+        {
+            return false;
+        }
+        self.end_block_drag();
+        true
+    }
+
+    /// Escape during a drag puts the block back.
+    pub(crate) fn cancel_block_drag(&mut self) -> bool {
+        if self.blocks.drag.take().is_some_and(|d| d.moved) {
+            self.request_redraw();
+            return true;
+        }
+        false
+    }
+
+    /// A press on the grip; true when it took the press.
+    pub(crate) fn block_pointer_down(&mut self, x: f32, y: f32) -> bool {
+        self.blocks.pointer = Some((x, y));
+        self.blocks.pinned = None;
+        self.on_grip(x, y, 0.0) && self.start_block_drag(x, y)
+    }
+
+    /// Hovering (which block shows the grip) and dragging; `Some` when the
+    /// move belongs to the grip.
+    pub(crate) fn block_pointer_move(&mut self, x: f32, y: f32) -> Option<bool> {
+        if self.blocks.drag.is_some() {
+            self.move_block_drag(x, y);
+            self.push_effect(Effect::Cursor(CursorIcon::Grabbing));
+            return Some(true);
+        }
+        let before = (self.blocks.block, self.blocks.hovered);
+        if self.blocks.pointer != Some((x, y)) {
+            self.blocks.pinned = None;
+        }
+        self.blocks.pointer = Some((x, y));
+        self.update_block_handle();
+        self.blocks.hovered = self.on_grip(x, y, 0.0);
+        if before != (self.blocks.block, self.blocks.hovered) {
+            self.request_redraw();
+        }
+        if !self.blocks.hovered {
+            // The text under the pointer decides the cursor.
+            return None;
+        }
+        self.push_effect(Effect::Cursor(CursorIcon::Grab));
+        Some(true)
+    }
+
+    pub(crate) fn block_pointer_up(&mut self) -> bool {
+        if self.blocks.drag.is_none() {
+            return false;
+        }
+        self.end_block_drag();
+        true
+    }
+
+    /// A finger on the grip; true when the grip took the touch.
+    pub(crate) fn block_touch(&mut self, phase: TouchPhase, x: f32, y: f32) -> bool {
+        match phase {
+            TouchPhase::Down => {
+                if !self.on_grip(x, y, TOUCH_SLACK) || !self.start_block_drag(x, y) {
+                    return false;
+                }
+                self.hide_menu();
+                true
+            }
+            TouchPhase::Move => {
+                if self.blocks.drag.is_none() {
+                    return false;
+                }
+                self.move_block_drag(x, y);
+                true
+            }
+            TouchPhase::Up => {
+                if self.blocks.drag.is_none() {
+                    return false;
+                }
+                self.end_block_drag();
+                true
+            }
+            TouchPhase::Cancel => {
+                let had = self.blocks.drag.take().is_some();
+                if had {
+                    self.request_redraw();
+                }
+                had
+            }
+        }
+    }
+
+    /// Moves the drop line shown toward `target` (it slides rather than
+    /// jumps between places).
+    fn ease_drop_line(&mut self, target: Option<Drop>) {
+        let now = self.clock.now_ms();
+        self.blocks.line = target.map(|target| match self.blocks.line {
+            Some(line) => {
+                let elapsed = now.saturating_sub(line.at_ms) as f32;
+                let step = 1.0 - (-elapsed / LINE_EASE_MS).exp();
+                let ease = |from: f32, to: f32| {
+                    let next = from + (to - from) * step;
+                    if (to - next).abs() < 0.5 { to } else { next }
+                };
+                Line {
+                    y: ease(line.y, target.y),
+                    left: ease(line.left, target.left),
+                    at_ms: now,
+                }
+            }
+            None => Line {
+                y: target.y,
+                left: target.left,
+                at_ms: now,
+            },
+        });
+    }
+
+    /// The drop line is still sliding to its place.
+    fn drop_line_moving(&self) -> bool {
+        match (self.blocks.line, self.blocks.drag.and_then(|d| d.drop)) {
+            (Some(line), Some(drop)) => line.y != drop.y || line.left != drop.left,
+            _ => false,
+        }
+    }
+
+    /// How far the ghost (and the grip with it) sits below the block it
+    /// lifts: the pointer's travel, across scrolling.
+    fn ghost_offset(&self, drag: &BlockDrag) -> f32 {
+        drag.pointer.1 - drag.grab - self.to_view(drag.unit.rect).y
+    }
+
+    /// A lifted copy of the dragged block under the pointer, on a card
+    /// with a shadow: what moves.
+    fn paint_block_ghost(
+        &mut self,
+        canvas: &Canvas,
+        drag: &BlockDrag,
+        theme: &rs_editor_theme::Theme,
+    ) {
+        let layout = self.layout();
+        let source = drag.unit.rect;
+        let dy = self.ghost_offset(drag);
+        let right = self.content_width();
+        // A tall block (a long code block, an image) shows its top only, so
+        // the ghost never hides where it is going.
+        let area = skia_safe::Rect::from_ltrb(
+            source.x - 6.0,
+            source.y - 4.0,
+            right + 6.0,
+            (source.bottom() + 4.0).min(source.y + GHOST_HEIGHT),
+        );
+        canvas.save();
+        canvas.translate((self.padding.left, self.padding.top - self.scroll_y + dy));
+        rs_editor_ui::paint_panel(canvas, area, theme, 1.0);
+        canvas.clip_rect(area.with_inset((1.0, 1.0)), None, true);
+        rs_editor_layout::render::paint_document(canvas, &layout, theme, source);
+        canvas.restore();
+    }
+
+    /// Paints the grip and, during a drag, the dimmed block and the line
+    /// where it will land (view coordinates).
+    pub(crate) fn paint_block_handle(&mut self, canvas: &Canvas) {
+        let theme = self.theme().clone();
+        let palette = &theme.palette;
+        let drag = self.blocks.drag.filter(|d| d.moved);
+        self.ease_drop_line(drag.and_then(|d| d.drop));
+        if let Some(drag) = drag {
+            let right = self.width - self.padding.right;
+            let rect = self.to_view(drag.unit.rect);
+            let mut veil = Paint::default();
+            veil.set_color(skia_safe::Color::new(
+                palette.background.with_alpha(0.6).argb(),
+            ));
+            canvas.draw_rect(
+                skia_safe::Rect::from_ltrb(
+                    rect.x - 4.0,
+                    rect.y - 2.0,
+                    right + 4.0,
+                    rect.bottom() + 2.0,
+                ),
+                &veil,
+            );
+            // The ghost under the pointer, then the line over it.
+            self.paint_block_ghost(canvas, &drag, &theme);
+            if let Some(line) = self.blocks.line {
+                let at = self.to_view(Rect::new(line.left, line.y, 0.0, 0.0));
+                let (left, y) = (at.x, at.y);
+                let mut line = Paint::default();
+                line.set_anti_alias(true);
+                line.set_color(skia_safe::Color::new(palette.primary.argb()));
+                canvas.draw_rrect(
+                    RRect::new_rect_xy(
+                        skia_safe::Rect::from_ltrb(left, y - 1.0, right, y + 1.0),
+                        1.0,
+                        1.0,
+                    ),
+                    &line,
+                );
+                canvas.draw_circle((left, y), 3.0, &line);
+            }
+        }
+        let progress = self.blocks.appear.value(self.clock.now_ms());
+        if progress <= 0.0 {
+            return;
+        }
+        // During a drag the grip rides along with the ghost of its block.
+        let grip = match self.blocks.drag.filter(|d| d.moved) {
+            Some(drag) => self
+                .blocks
+                .grip
+                .with_offset((0.0, self.ghost_offset(&drag))),
+            None => self.blocks.grip,
+        };
+        let active = self.blocks.hovered || self.blocks.drag.is_some();
+        // Only the six dots until it is hovered, pressed or dragged.
+        let (_, _, icon_size) = self.grip_size();
+        if active {
+            let mut fill = Paint::default();
+            fill.set_anti_alias(true);
+            fill.set_color(skia_safe::Color::new(
+                palette.accent.with_alpha(progress).argb(),
+            ));
+            canvas.draw_rrect(
+                RRect::new_rect_xy(grip, theme.radius.sm, theme.radius.sm),
+                &fill,
+            );
+        }
+        let color = if active {
+            palette.accent_foreground
+        } else {
+            palette.muted_foreground
+        };
+        Icon::GripVertical.draw(
+            canvas,
+            grip.center_x() - icon_size / 2.0,
+            grip.center_y() - icon_size / 2.0,
+            icon_size,
+            skia_safe::Color::new(color.with_alpha(progress).argb()),
+        );
+    }
+}
+
+/// The deepest list item whose box `pick` accepts.
+fn innermost_item(
+    layout: &DocumentLayout,
+    pick: impl Fn(&rs_editor_layout::BlockBox) -> bool,
+) -> Option<Unit> {
+    layout
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.node.type_name(), "listItem" | "taskItem") && pick(b))
+        .max_by_key(|b| b.depth)
+        .map(|b| Unit {
+            pos: b.pos,
+            size: b.node.node_size(),
+            rect: b.rect,
+            item: true,
+        })
+}
+
+/// The top-level block at index `index` of the layout's tops.
+fn top_unit(layout: &DocumentLayout, index: usize) -> Option<Unit> {
+    let block = layout.tops.get(index)?;
+    Some(Unit {
+        pos: block.pos,
+        size: block.size,
+        rect: Rect::new(0.0, block.y, layout.width, block.height),
+        item: false,
+    })
+}
+
+#[cfg(test)]
+impl BlockHandle {
+    pub(crate) fn grip_center(&self) -> (f32, f32) {
+        (self.grip.center_x(), self.grip.center_y())
+    }
+
+    pub(crate) fn block(&self) -> Option<usize> {
+        self.block.map(|b| b.pos)
+    }
+}
+
+#[cfg(test)]
+impl EditorView {
+    /// The drop line as shown and where it is going (document y).
+    pub(crate) fn drop_line(&self) -> Option<(f32, f32)> {
+        let line = self.blocks.line?;
+        let drop = self.blocks.drag?.drop?;
+        Some((line.y, drop.y))
+    }
+}
